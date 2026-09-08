@@ -9,7 +9,7 @@ let package = Package(
         .executableTarget(name: "CoreChecks", path: ".", exclude: [
             "Yeobaek/App", "Yeobaek/Canvas", "Yeobaek/Views", "Yeobaek/Services",
             "Yeobaek/Assets.xcassets", "Yeobaek/Info.plist", "Yeobaek/PrivacyInfo.xcprivacy",
-            "Yeobaek.xcodeproj", "scripts", "README.md", "QA.md"
+            "Yeobaek.xcodeproj", "scripts", "docs", "README.md", "QA.md"
         ], sources: ["Yeobaek/Core", "Tests/CoreChecks"])
     ]
 )
