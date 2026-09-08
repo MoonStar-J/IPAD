@@ -27,6 +27,8 @@ def group(path):
     children = []
     for child in sorted(path.iterdir()):
         relative = str(child.relative_to(ROOT))
+        if child.suffix == ".lproj":
+            continue
         if child.is_dir() and child.suffix != ".xcassets":
             children.append(group(child))
             continue
@@ -38,10 +40,21 @@ def group(path):
         if child.suffix in [".swift", ".xcassets", ".xcprivacy"]:
             build = add("build:" + relative, f"isa = PBXBuildFile; fileRef = {ref};")
             (sources if child.suffix == ".swift" else resources).append(build)
+    localized_names = sorted({p.name for p in path.glob("*.lproj/*.strings")})
+    for name in localized_names:
+        translations = []
+        for translation in sorted(path.glob("*.lproj/" + name)):
+            relative = str(translation.relative_to(path))
+            translations.append(add("localized:" + str(translation.relative_to(ROOT)),
+                f'isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = {quote(translation.parent.stem)}; path = {quote(relative)}; sourceTree = "<group>";'))
+        variant = add("variant:" + name,
+            f'isa = PBXVariantGroup; children = {array(translations)}; name = {quote(name)}; sourceTree = "<group>";')
+        children.append(variant)
+        resources.append(add("build:localized:" + name, f"isa = PBXBuildFile; fileRef = {variant};"))
     return add("group:" + str(path.relative_to(ROOT)), f"isa = PBXGroup; children = {array(children)}; path = {quote(path.name)}; sourceTree = \"<group>\";")
 
-app_group = group(ROOT / "Yeobaek")
-product = add("product", 'isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Yeobaek.app; sourceTree = BUILT_PRODUCTS_DIR;')
+app_group = group(ROOT / "NoteMargin")
+product = add("product", 'isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = NoteMargin.app; sourceTree = BUILT_PRODUCTS_DIR;')
 products = add("products", f'isa = PBXGroup; children = ({product}); name = Products; sourceTree = "<group>";')
 main_group = add("main", f'isa = PBXGroup; children = ({app_group}, {products}); sourceTree = "<group>";')
 source_phase = add("sources", f"isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = {array(sources)}; runOnlyForDeploymentPostprocessing = 0;")
@@ -62,23 +75,24 @@ def configs(prefix, settings):
 
 project_configs = configs("project", {"CLANG_ENABLE_MODULES": "YES", "CLANG_ENABLE_OBJC_ARC": "YES", "SDKROOT": "iphoneos", "IPHONEOS_DEPLOYMENT_TARGET": "17.0", "SWIFT_VERSION": "5.0", "SWIFT_STRICT_CONCURRENCY": "targeted"})
 target_configs = configs("target", {
+    # An app's identifier is its upgrade identity, independent of its displayed name.
     "PRODUCT_NAME": "$(TARGET_NAME)", "PRODUCT_BUNDLE_IDENTIFIER": "com.yeobaek.notes",
-    "INFOPLIST_FILE": "Yeobaek/Info.plist", "GENERATE_INFOPLIST_FILE": "NO",
+    "INFOPLIST_FILE": "NoteMargin/Info.plist", "GENERATE_INFOPLIST_FILE": "NO",
     "CODE_SIGN_STYLE": "Automatic", "CURRENT_PROJECT_VERSION": "1", "MARKETING_VERSION": "1.0.0",
     "TARGETED_DEVICE_FAMILY": "2", "SUPPORTED_PLATFORMS": "iphoneos iphonesimulator",
     "SUPPORTS_MACCATALYST": "NO", "SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD": "NO",
     "ASSETCATALOG_COMPILER_APPICON_NAME": "AppIcon", "ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME": "AccentColor",
     "LD_RUNPATH_SEARCH_PATHS": "$(inherited) @executable_path/Frameworks", "SWIFT_EMIT_LOC_STRINGS": "YES"
 })
-target = add("target", f'isa = PBXNativeTarget; buildConfigurationList = {target_configs}; buildPhases = ({source_phase}, {framework_phase}, {resource_phase}); buildRules = (); dependencies = (); name = Yeobaek; productName = Yeobaek; productReference = {product}; productType = "com.apple.product-type.application";')
+target = add("target", f'isa = PBXNativeTarget; buildConfigurationList = {target_configs}; buildPhases = ({source_phase}, {framework_phase}, {resource_phase}); buildRules = (); dependencies = (); name = NoteMargin; productName = NoteMargin; productReference = {product}; productType = "com.apple.product-type.application";')
 project = add("project", f'isa = PBXProject; attributes = {{ BuildIndependentTargetsInParallel = YES; LastSwiftUpdateCheck = 1600; LastUpgradeCheck = 1600; TargetAttributes = {{ {target} = {{ CreatedOnToolsVersion = 16.0; }}; }}; }}; buildConfigurationList = {project_configs}; compatibilityVersion = "Xcode 14.0"; developmentRegion = ko; hasScannedForEncodings = 0; knownRegions = (ko, en, Base); mainGroup = {main_group}; productRefGroup = {products}; projectDirPath = ""; projectRoot = ""; targets = ({target});')
 
 output = '// !$*UTF8*$!\n{\n archiveVersion = 1;\n classes = {};\n objectVersion = 56;\n objects = {\n'
 output += "\n".join(f"  {key} = {{ {value} }};" for key, value in objects.items())
 output += f"\n }};\n rootObject = {project};\n}}\n"
-(ROOT / "Yeobaek.xcodeproj/project.pbxproj").write_text(output)
+(ROOT / "NoteMargin.xcodeproj/project.pbxproj").write_text(output)
 
-ref = f'<BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="{target}" BuildableName="Yeobaek.app" BlueprintName="Yeobaek" ReferencedContainer="container:Yeobaek.xcodeproj"/>'
+ref = f'<BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="{target}" BuildableName="NoteMargin.app" BlueprintName="NoteMargin" ReferencedContainer="container:NoteMargin.xcodeproj"/>'
 scheme = f'''<?xml version="1.0" encoding="UTF-8"?>
 <Scheme LastUpgradeVersion="1600" version="1.3">
  <BuildAction parallelizeBuildables="YES" buildImplicitDependencies="YES"><BuildActionEntries><BuildActionEntry buildForTesting="YES" buildForRunning="YES" buildForProfiling="YES" buildForArchiving="YES" buildForAnalyzing="YES">{ref}</BuildActionEntry></BuildActionEntries></BuildAction>
@@ -89,5 +103,5 @@ scheme = f'''<?xml version="1.0" encoding="UTF-8"?>
  <ArchiveAction buildConfiguration="Release" revealArchiveInOrganizer="YES"/>
 </Scheme>
 '''
-(ROOT / "Yeobaek.xcodeproj/xcshareddata/xcschemes/Yeobaek.xcscheme").write_text(scheme)
-print(f"Generated Yeobaek.xcodeproj: {len(sources)} Swift files, {len(resources)} resources")
+(ROOT / "NoteMargin.xcodeproj/xcshareddata/xcschemes/NoteMargin.xcscheme").write_text(scheme)
+print(f"Generated NoteMargin.xcodeproj: {len(sources)} Swift files, {len(resources)} resources")

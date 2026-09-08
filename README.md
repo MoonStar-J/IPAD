@@ -1,8 +1,12 @@
-# 여백 · Yeobaek
+# 노트 여백 · note margin
 
 iPad와 Apple Pencil을 위한 설치형 필기앱의 기본 기능 구현 프로젝트입니다. SwiftUI, PencilKit, PDFKit을 사용하며 외부 라이브러리나 서버 없이 동작합니다.
 
-**현재 상태:** 기본 기능 소스 작성, Core 검증 12개 통과, **Xcode 26.6에서 iPad 시뮬레이터용 Debug 빌드 성공**. 시뮬레이터 화면·입력 동작과 실제 iPad 설치는 아직 검증하지 않았습니다. 서명된 `.ipa`는 포함하지 않습니다.
+**노트 여백 · note margin**은 ‘노트의 여백에서 AI와 상호작용하며 학습한다’는 의미를 담고 있습니다. AI와 질문하고 생각을 확장하는 학습 경험은 향후 계획이며, **현재 버전에는 AI 기능을 구현하지 않았습니다.** 지금은 필기·노트 관리·PDF 메모에 집중합니다.
+
+기기 언어가 한국어이면 앱 이름은 **노트 여백**, 영어이면 **note margin**으로 표시됩니다.
+
+**현재 상태:** 기본 기능 소스 작성, Core 검증 14개 통과, **Xcode 26.6에서 iPad 시뮬레이터용 Debug 빌드 성공**. 시뮬레이터 화면·입력 동작과 실제 iPad 설치는 아직 검증하지 않았습니다. 서명된 `.ipa`는 포함하지 않습니다.
 
 ## 화면 미리보기
 
@@ -12,13 +16,13 @@ iPad와 Apple Pencil을 위한 설치형 필기앱의 기본 기능 구현 프�
 
 폴더와 즐겨찾기로 노트를 정리하고, 이름이나 입력한 텍스트를 검색합니다.
 
-![여백 보관함 디자인 미리보기: 폴더 사이드바, 검색창, 네 가지 색상의 노트 표지](docs/previews/library.png)
+![노트 여백 보관함 디자인 미리보기: 폴더 사이드바, 검색창, 네 가지 색상의 노트 표지](docs/previews/library.png)
 
 ### 필기 화면
 
 페이지를 확대해 필기하고 텍스트·사진을 삽입합니다. 상단에서 페이지 관리와 공유, 하단에서 페이지 이동과 저장 상태를 확인할 수 있습니다.
 
-![여백 필기 화면 디자인 미리보기: 줄 노트, 예시 학습 메모, 필기 도구 팔레트와 페이지 이동](docs/previews/editor.png)
+![노트 여백 필기 화면 디자인 미리보기: 줄 노트, 예시 학습 메모, 필기 도구 팔레트와 페이지 이동](docs/previews/editor.png)
 
 ## 구현한 기능
 
@@ -42,8 +46,8 @@ iPad와 Apple Pencil을 위한 설치형 필기앱의 기본 기능 구현 프�
 대상은 **iPadOS 17 이상**, 프로젝트 편집 도구는 **Xcode 16 이상**입니다. 연결할 iPadOS 버전을 지원하는 Xcode를 사용하세요.
 
 1. Mac에 Xcode를 설치하고 최초 실행 설정에서 iOS 플랫폼을 설치합니다.
-2. 이 폴더의 `Yeobaek.xcodeproj`를 엽니다. `Package.swift`는 Core 검증용입니다.
-3. `Yeobaek` 스킴과 사용할 iPad 시뮬레이터를 선택하고 `⌘R`로 빌드·실행합니다.
+2. 이 폴더의 `NoteMargin.xcodeproj`를 엽니다. `Package.swift`는 Core 검증용입니다.
+3. `NoteMargin` 스킴과 사용할 iPad 시뮬레이터를 선택하고 `⌘R`로 빌드·실행합니다.
 4. 실제 iPad에 설치하려면 Xcode 설정에서 Apple 계정에 로그인하고, 앱 타깃의 **Signing & Capabilities → Team**에서 본인 팀을 선택합니다. 기본 Bundle Identifier `com.yeobaek.notes`는 본인 계정의 고유한 값으로 변경하세요.
 5. iPad를 Mac에 연결해 신뢰 설정을 완료하고, 필요한 경우 iPad의 개발자 모드를 활성화합니다. 실행 대상으로 해당 iPad를 선택한 뒤 `⌘R`을 누릅니다.
 
@@ -54,10 +58,10 @@ iPad와 Apple Pencil을 위한 설치형 필기앱의 기본 기능 구현 프�
 Xcode가 설치된 환경의 서명 없는 빌드 검사:
 
 ```sh
-xcodebuild -project Yeobaek.xcodeproj -scheme Yeobaek \
+xcodebuild -project NoteMargin.xcodeproj -scheme NoteMargin \
   -configuration Debug -sdk iphonesimulator \
   -destination 'generic/platform=iOS Simulator' \
-  -derivedDataPath /tmp/YeobaekDerivedData CODE_SIGNING_ALLOWED=NO build
+  -derivedDataPath /tmp/NoteMarginDerivedData CODE_SIGNING_ALLOWED=NO build
 ```
 
 ## 사용 흐름
@@ -71,10 +75,12 @@ xcodebuild -project Yeobaek.xcodeproj -scheme Yeobaek \
 
 ## 저장 방식
 
-앱의 Documents 아래 `Yeobaek` 폴더에 저장합니다.
+앱의 Documents 아래 `NoteMargin` 폴더에 저장합니다.
+
+이름 변경 전 버전의 보관함은 첫 실행 시 새 폴더로 이동합니다. 기존 설치 앱과 저장 데이터의 연속성을 위해 내부 Bundle Identifier는 유지합니다.
 
 ```text
-Yeobaek/
+NoteMargin/
   library.json
   <노트 UUID>/
     <페이지 UUID>.drawing
@@ -86,14 +92,14 @@ Yeobaek/
 
 노트 복제는 원본과 별도 폴더로 파일을 복사합니다. 페이지 삭제 후 남은 첨부 파일은 노트를 영구 삭제할 때 정리합니다. 휴지통은 자동으로 비워지지 않습니다.
 
-파일 공유를 활성화해 파일 앱/Finder에서 Documents에 접근할 수 있습니다. 편집 가능한 자료를 보관하려면 앱을 닫은 상태에서 `Yeobaek` 폴더 전체를 복사하세요. PDF 내보내기는 배경 PDF와 입력 텍스트를 렌더링하고 필기 레이어는 이미지로 합칩니다. 내보낸 PDF를 다시 가져오면 기존 필기는 PDF 배경의 일부가 됩니다.
+파일 공유를 활성화해 파일 앱/Finder에서 Documents에 접근할 수 있습니다. 편집 가능한 자료를 보관하려면 앱을 닫은 상태에서 `NoteMargin` 폴더 전체를 복사하세요. PDF 내보내기는 배경 PDF와 입력 텍스트를 렌더링하고 필기 레이어는 이미지로 합칩니다. 내보낸 PDF를 다시 가져오면 기존 필기는 PDF 배경의 일부가 됩니다.
 
 ## 검증과 유지보수
 
 Core 검증은 XCTest가 없는 Command Line Tools 환경에서도 실행할 수 있습니다.
 
 ```sh
-swift run --scratch-path /tmp/yeobaek-swift-build CoreChecks
+swift run --scratch-path /tmp/note-margin-swift-build CoreChecks
 ```
 
 Swift 소스를 추가한 뒤 Xcode 프로젝트를 재생성하려면:

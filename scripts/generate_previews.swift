@@ -54,7 +54,7 @@ func frame(_ number: String, _ title: String, _ subtitle: String) {
     text(subtitle, 44, 69, 17, secondary)
     box(40, 122, 1360, 922, color(0xE1E4E9), radius: 25)
     box(40, 118, 1360, 920, .white, radius: 25)
-    text("YE O B A E K   ·   디자인 미리보기 / 실제 앱 실행 캡처 아님", 44, 1062, 14, secondary)
+    text("note margin   ·   디자인 미리보기 / 실제 앱 실행 캡처 아님", 44, 1062, 14, secondary)
 }
 
 try render("library") {
@@ -63,7 +63,7 @@ try render("library") {
     NSBezierPath(roundedRect: NSRect(x: 40, y: 118, width: 1360, height: 920), xRadius: 25, yRadius: 25).addClip()
     box(40, 118, 258, 920, color(0xF0F1F4))
     box(298, 118, 1102, 920, color(0xF7F7FA))
-    text("여백", 68, 148, 31, ink, weight: .bold)
+    text("노트 여백", 68, 148, 31, ink, weight: .bold)
     box(56, 212, 226, 48, color(0xDFE7F2), radius: 10)
     icon("square.grid.2x2", 72, 225); text("모든 노트", 107, 224, 19, accent, weight: .medium)
     text("4", 251, 227, 16, accent)

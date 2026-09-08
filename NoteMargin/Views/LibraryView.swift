@@ -61,7 +61,7 @@ struct LibraryView: View {
                         }
                         Section { sidebarRow("최근 삭제된 항목", icon: "trash", filter: .trash) }
                     }
-                    .navigationTitle("여백")
+                    .navigationTitle(AppIdentity.displayName)
                     .safeAreaInset(edge: .bottom) {
                         Label("이 iPad에 저장됨", systemImage: "internaldrive")
                             .font(.caption).foregroundStyle(.secondary).padding()

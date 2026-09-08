@@ -9,7 +9,7 @@ enum ExportService {
         let url = try exportURL(title: note.title, extension: "pdf")
         let defaultBounds = CGRect(x: 0, y: 0, width: 768, height: 1024)
         let format = UIGraphicsPDFRendererFormat()
-        format.documentInfo = [kCGPDFContextTitle as String: note.title, kCGPDFContextCreator as String: "여백"]
+        format.documentInfo = [kCGPDFContextTitle as String: note.title, kCGPDFContextCreator as String: AppIdentity.displayName]
         // Read every drawing before starting the export so a corrupt page cannot
         // silently disappear from the shared document.
         let drawings = try note.pages.map { try store.drawing(noteID: note.id, pageID: $0.id) }

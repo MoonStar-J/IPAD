@@ -19,7 +19,7 @@ final class NoteStore: ObservableObject {
         do {
             let documents = try FileManager.default.url(for: .documentDirectory, in: .userDomainMask,
                                                        appropriateFor: nil, create: true)
-            let repository = try LibraryRepository(root: documents.appendingPathComponent("Yeobaek", isDirectory: true))
+            let repository = try LibraryRepository.applicationLibrary(in: documents)
             library = try repository.load()
             self.repository = repository
             loadingError = nil

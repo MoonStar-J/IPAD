@@ -27,6 +27,17 @@ final class LibraryRepository {
         try files.createDirectory(at: root, withIntermediateDirectories: true)
     }
 
+    static func applicationLibrary(in documents: URL) throws -> LibraryRepository {
+        let files = FileManager.default
+        let root = documents.appendingPathComponent("NoteMargin", isDirectory: true)
+        // Preserve existing notebooks when upgrading from the original app name.
+        let legacy = documents.appendingPathComponent("Yeobaek", isDirectory: true)
+        if !files.fileExists(atPath: root.path), files.fileExists(atPath: legacy.path) {
+            try files.moveItem(at: legacy, to: root)
+        }
+        return try LibraryRepository(root: root)
+    }
+
     func load() throws -> Library {
         let url = root.appendingPathComponent("library.json")
         guard files.fileExists(atPath: url.path) else { return Library() }

@@ -1,7 +1,7 @@
 import SwiftUI
 
 @main
-struct YeobaekApp: App {
+struct NoteMarginApp: App {
     @StateObject private var store = NoteStore()
     @Environment(\.scenePhase) private var scenePhase
 

@@ -21,6 +21,33 @@ struct CoreCheck {
 }
 
 let checks: [CoreCheck] = [
+    CoreCheck(name: "Renaming the app preserves the complete existing library") { repository in
+        let documents = repository.root.appendingPathComponent("Documents")
+        let old = try LibraryRepository(root: documents.appendingPathComponent("Yeobaek"))
+        let note = Notebook(title: "보존할 학습 노트", isFavorite: true)
+        let saved = Library(notebooks: [note])
+        try old.save(saved)
+        try old.writeDrawing(Data([1, 2, 3]), noteID: note.id, pageID: note.pages[0].id)
+        try old.writeAsset(Data([7, 8]), noteID: note.id, name: "original.pdf")
+        let migrated = try LibraryRepository.applicationLibrary(in: documents)
+        try expect(migrated.root.lastPathComponent == "NoteMargin")
+        try expect(migrated.load() == saved)
+        try expect(migrated.readDrawing(noteID: note.id, pageID: note.pages[0].id) == Data([1, 2, 3]))
+        try expect(Data(contentsOf: migrated.assetURL(noteID: note.id, name: "original.pdf")) == Data([7, 8]))
+        try expect(!FileManager.default.fileExists(atPath: old.root.path))
+        try expect(LibraryRepository.applicationLibrary(in: documents).load() == saved)
+    },
+    CoreCheck(name: "Renaming never overwrites a new library with old data") { repository in
+        let documents = repository.root.appendingPathComponent("Documents")
+        let old = try LibraryRepository(root: documents.appendingPathComponent("Yeobaek"))
+        let new = try LibraryRepository(root: documents.appendingPathComponent("NoteMargin"))
+        let oldLibrary = Library(notebooks: [Notebook(title: "이전 노트")])
+        let newLibrary = Library(notebooks: [Notebook(title: "현재 노트")])
+        try old.save(oldLibrary)
+        try new.save(newLibrary)
+        try expect(LibraryRepository.applicationLibrary(in: documents).load() == newLibrary)
+        try expect(old.load() == oldLibrary)
+    },
     CoreCheck(name: "Fresh library is empty") { repository in
         try expect(repository.load() == Library())
     },
@@ -120,7 +147,7 @@ let checks: [CoreCheck] = [
 
 var failures = 0
 for check in checks {
-    let root = FileManager.default.temporaryDirectory.appendingPathComponent("YeobaekChecks-\(UUID())")
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("NoteMarginChecks-\(UUID())")
     do {
         let repository = try LibraryRepository(root: root)
         defer { try? FileManager.default.removeItem(at: root) }
