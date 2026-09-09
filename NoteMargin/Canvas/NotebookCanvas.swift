@@ -9,6 +9,7 @@ struct NotebookCanvas: UIViewRepresentable {
     let fingerDrawing: Bool
     let editingObjects: Bool
     let toolsVisible: Bool
+    var onTurnPage: (Int) -> Bool
     var onSelectElement: (UUID?) -> Void
     var onMoveElement: (UUID, Double, Double) -> Void
 
@@ -21,7 +22,7 @@ struct NotebookCanvas: UIViewRepresentable {
     func updateUIView(_ view: CanvasHostView, context: Context) {
         view.configure(note: note, page: page, store: store, fingerDrawing: fingerDrawing,
                        editingObjects: editingObjects, toolsVisible: toolsVisible,
-                       onSelect: onSelectElement, onMove: onMoveElement)
+                       onSelect: onSelectElement, onMove: onMoveElement, onTurnPage: onTurnPage)
     }
 
     static func dismantleUIView(_ view: CanvasHostView, coordinator: ()) {
@@ -36,6 +37,8 @@ final class CanvasHostView: UIView, UIScrollViewDelegate {
     private let paper = PaperView()
     private let selectionLayer = CAShapeLayer()
     private var objectPan: UIPanGestureRecognizer!
+    private var pageSwipes: [UISwipeGestureRecognizer] = []
+    private var onTurnPage: ((Int) -> Bool)?
     private var objectTap: UITapGestureRecognizer!
     private var currentPage: NotePage?
     private var currentNote: Notebook?
@@ -78,6 +81,16 @@ final class CanvasHostView: UIView, UIScrollViewDelegate {
         sheet.addGestureRecognizer(objectPan)
         sheet.addGestureRecognizer(objectTap)
         scroll.panGestureRecognizer.require(toFail: objectPan)
+        for direction: UISwipeGestureRecognizer.Direction in [.left, .right] {
+            let swipe = UISwipeGestureRecognizer(target: self, action: #selector(turnPage(_:)))
+            swipe.direction = direction
+            swipe.numberOfTouchesRequired = 3
+            swipe.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
+            addGestureRecognizer(swipe)
+            scroll.panGestureRecognizer.require(toFail: swipe)
+            session.canvas.drawingGestureRecognizer.require(toFail: swipe)
+            pageSwipes.append(swipe)
+        }
         isAccessibilityElement = false
         session.canvas.accessibilityLabel = "필기 용지"
         session.canvas.accessibilityHint = "Apple Pencil로 필기합니다. 손가락으로 화면을 확대하거나 이동할 수 있습니다."
@@ -87,17 +100,20 @@ final class CanvasHostView: UIView, UIScrollViewDelegate {
 
     func configure(note: Notebook, page: NotePage, store: NoteStore, fingerDrawing: Bool,
                    editingObjects: Bool, toolsVisible: Bool,
-                   onSelect: @escaping (UUID?) -> Void, onMove: @escaping (UUID, Double, Double) -> Void) {
+                   onSelect: @escaping (UUID?) -> Void, onMove: @escaping (UUID, Double, Double) -> Void, onTurnPage: @escaping (Int) -> Bool) {
         let pageChanged = currentPage?.id != page.id
         let contentChanged = currentPage != page || currentNote?.pdfAssetName != note.pdfAssetName
         currentNote = note
         currentPage = page
         self.onSelect = onSelect
         self.onMove = onMove
+        self.onTurnPage = onTurnPage
+        let canTurn = note.pages.count > 1 && !page.isContinuousPDF && !editingObjects && toolsVisible
+        pageSwipes.forEach { $0.isEnabled = canTurn }
+        session.canvas.pageTurningEnabled = canTurn
         if pageChanged {
             scroll.zoomScale = 1
             sheet.frame = CGRect(x: 0, y: 0, width: page.width, height: page.height)
-            paper.frame = sheet.bounds
             session.canvas.frame = sheet.bounds
             session.canvas.contentSize = sheet.bounds.size
             scroll.contentSize = sheet.bounds.size
@@ -138,11 +154,13 @@ final class CanvasHostView: UIView, UIScrollViewDelegate {
             if bounds.width > 0 && bounds.height > 0 { fitPage(animated: false); needsFit = false }
         }
         centerSheet()
+        updateVisiblePaper()
     }
 
     func fitPage(animated: Bool) {
         guard let page = currentPage, bounds.width > 0 else { return }
-        let fit = max(0.1, min((bounds.width - 48) / page.width, (bounds.height - 110) / page.height))
+        let fitWidth = (bounds.width - 48) / page.width
+        let fit = max(0.01, page.isContinuousPDF ? fitWidth : min(fitWidth, (bounds.height - 110) / page.height))
         scroll.minimumZoomScale = fit
         scroll.maximumZoomScale = max(4, fit * 6)
         let changes = {
@@ -160,9 +178,32 @@ final class CanvasHostView: UIView, UIScrollViewDelegate {
         scroll.contentInset = UIEdgeInsets(top: vertical, left: horizontal, bottom: vertical + 80, right: horizontal)
     }
 
+    @objc private func turnPage(_ gesture: UISwipeGestureRecognizer) {
+        guard gesture.state == .ended, onTurnPage?(gesture.direction == .left ? 1 : -1) == true else { return }
+        if !UIAccessibility.isReduceMotionEnabled {
+            let transition = CATransition()
+            transition.type = .fade
+            transition.duration = 0.18
+            sheet.layer.add(transition, forKey: "pageTurn")
+        }
+    }
+
+    // Keep the PDF backing bitmap bounded to the visible area even for a very long sheet.
+    private func updateVisiblePaper() {
+        guard currentPage != nil, scroll.bounds.width > 0 else { return }
+        let visible = sheet.convert(scroll.bounds, from: scroll).intersection(sheet.bounds)
+        guard !visible.isNull, !visible.isEmpty else { return }
+        paper.frame = visible
+        paper.pageOrigin = visible.origin
+        paper.setNeedsDisplay()
+    }
+
+    func scrollViewDidScroll(_ scrollView: UIScrollView) { updateVisiblePaper() }
+
     func viewForZooming(in scrollView: UIScrollView) -> UIView? { sheet }
     func scrollViewDidZoom(_ scrollView: UIScrollView) {
         centerSheet()
+        updateVisiblePaper()
         let value = Int((scrollView.zoomScale / max(scrollView.minimumZoomScale, 0.01) * 100).rounded())
         DispatchQueue.main.async { [weak session] in if session?.zoomPercent != value { session?.zoomPercent = value } }
     }

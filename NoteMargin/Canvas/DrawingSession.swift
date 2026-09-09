@@ -3,7 +3,7 @@ import PencilKit
 
 @MainActor
 final class DrawingSession: NSObject, ObservableObject, PKCanvasViewDelegate {
-    let canvas = PKCanvasView()
+    let canvas = PagingCanvasView()
     let toolPicker = PKToolPicker()
     @Published var canUndo = false
     @Published var canRedo = false
@@ -44,8 +44,7 @@ final class DrawingSession: NSObject, ObservableObject, PKCanvasViewDelegate {
         loading = true
         loadError = nil
         do {
-            if let note = store.note(noteID), let page = note.pages.first(where: { $0.id == pageID }), page.pdfPageIndex != nil,
-               PageRenderer.pdfPage(note: note, page: page, store: store) == nil {
+            if let note = store.note(noteID), let page = note.pages.first(where: { $0.id == pageID }), !PageRenderer.hasValidPDFBackground(page: page, note: note, store: store) {
                 throw CocoaError(.fileReadCorruptFile)
             }
             canvas.drawing = try store.drawing(noteID: noteID, pageID: pageID)
@@ -81,4 +80,12 @@ final class DrawingSession: NSObject, ObservableObject, PKCanvasViewDelegate {
     }
 
     func stop() { store?.flushDrawings(); setToolsVisible(false) }
+}
+
+final class PagingCanvasView: PKCanvasView {
+    var pageTurningEnabled = false
+    // The canvas owns three-finger paging; toolbar undo/redo remain available.
+    override var editingInteractionConfiguration: UIEditingInteractionConfiguration {
+        pageTurningEnabled ? .none : .default
+    }
 }

@@ -23,6 +23,7 @@ struct EditorView: View {
     @State private var exporting = false
     @State private var showingDeletePage = false
     @State private var importingPhoto = false
+    @State private var showingSwipeHint = true
 
     private var note: Notebook? { store.note(noteID) }
     private var page: NotePage? { note?.pages.first { $0.id == selectedPageID } ?? note?.pages.first }
@@ -44,6 +45,7 @@ struct EditorView: View {
                     NotebookCanvas(note: note, page: page, session: session, store: store,
                                    fingerDrawing: fingerDrawing, editingObjects: editingObjects,
                                    toolsVisible: sheet == nil && !choosingPhoto,
+                                   onTurnPage: { goToPage(pageIndex + $0) },
                                    onSelectElement: { selectedElementID = $0 },
                                    onMoveElement: { id, x, y in
                         store.updatePage(noteID: noteID, pageID: page.id) { page in
@@ -57,6 +59,14 @@ struct EditorView: View {
                                 .background(.regularMaterial)
                         }
                     }
+                    .overlay(alignment: .top) {
+                        if showingSwipeHint && note.pages.count > 1 && !page.isContinuousPDF && !editingObjects {
+                            Label("세 손가락으로  ← 다음 · 이전 →", systemImage: "hand.draw")
+                                .font(.caption).padding(.horizontal, 16).padding(.vertical, 10)
+                                .background(.regularMaterial, in: Capsule()).padding(.top, 12)
+                                .allowsHitTesting(false)
+                        }
+                    }
                     HStack(spacing: 18) {
                         Button { goToPage(pageIndex - 1) } label: { Image(systemName: "chevron.left") }
                             .disabled(pageIndex == 0).accessibilityLabel("이전 페이지")
@@ -65,6 +75,10 @@ struct EditorView: View {
                         }.accessibilityLabel("\(note.pages.count)페이지 중 \(pageIndex + 1)페이지, 페이지 관리")
                         Button { goToPage(pageIndex + 1) } label: { Image(systemName: "chevron.right") }
                             .disabled(pageIndex == note.pages.count - 1).accessibilityLabel("다음 페이지")
+                        if note.pages.count > 1 && !page.isContinuousPDF {
+                            Button { showingSwipeHint.toggle() } label: { Image(systemName: "hand.draw") }
+                                .accessibilityLabel("세 손가락 페이지 넘김 안내")
+                        }
                         Spacer()
                         Button { store.flushDrawings() } label: {
                             Label(store.hasUnsavedChanges ? "저장 중…" : "저장됨", systemImage: store.hasUnsavedChanges ? "arrow.triangle.2.circlepath" : "checkmark.circle")
@@ -77,6 +91,11 @@ struct EditorView: View {
                 .navigationTitle(note.title)
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar { editorToolbar(note: note, page: page) }
+                .task(id: note.id) {
+                    showingSwipeHint = true
+                    do { try await Task.sleep(for: .seconds(6)) } catch { return }
+                    showingSwipeHint = false
+                }
                 .onAppear { session.load(noteID: noteID, pageID: page.id, store: store) }
                 .onChange(of: page.id) { _, id in
                     selectedElementID = nil
@@ -165,7 +184,7 @@ struct EditorView: View {
             Menu {
                 Toggle("손가락으로도 필기", isOn: $fingerDrawing)
                 Button("화면에 용지 맞추기", systemImage: "arrow.down.right.and.arrow.up.left") { session.fitPage() }
-                if page.pdfPageIndex == nil {
+                if page.pdfRegions.isEmpty {
                     Picker("용지 변경", selection: Binding(get: { page.paper }, set: { paper in
                         store.updatePage(noteID: noteID, pageID: page.id) { $0.paper = paper }
                     })) { ForEach(PaperStyle.allCases) { Text($0.title).tag($0) } }
@@ -181,9 +200,11 @@ struct EditorView: View {
         }
     }
 
-    private func goToPage(_ index: Int) {
-        guard let note, note.pages.indices.contains(index) else { return }
+    @discardableResult
+    private func goToPage(_ index: Int) -> Bool {
+        guard let note, note.pages.indices.contains(index), store.flushDrawings() else { return false }
         selectedPageID = note.pages[index].id
+        return true
     }
 
     private func export(asPDF: Bool) {

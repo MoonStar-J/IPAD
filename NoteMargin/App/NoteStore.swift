@@ -2,6 +2,14 @@ import SwiftUI
 import PencilKit
 import PDFKit
 
+struct PreparedPDFImport: Identifiable {
+    let id = UUID()
+    let title: String
+    let data: Data
+    let pages: [NotePage]
+    let folderID: UUID?
+}
+
 @MainActor
 final class NoteStore: ObservableObject {
     @Published private(set) var library = Library()
@@ -175,28 +183,42 @@ final class NoteStore: ObservableObject {
 
     func assetURL(noteID: UUID, name: String) -> URL? { try? repository?.assetURL(noteID: noteID, name: name) }
 
-    func importPDF(_ url: URL, folderID: UUID?) -> UUID? {
+    func preparePDF(_ url: URL, folderID: UUID?) -> PreparedPDFImport? {
         let access = url.startAccessingSecurityScopedResource()
         defer { if access { url.stopAccessingSecurityScopedResource() } }
         do {
-            guard let repository else { return nil }
             let data = try Data(contentsOf: url)
             guard let document = PDFDocument(data: data), !document.isLocked, document.pageCount > 0 else {
                 errorMessage = "이 PDF를 열 수 없습니다. 암호가 해제된 PDF를 선택해 주세요."
                 return nil
             }
-            var note = Notebook(title: url.deletingPathExtension().lastPathComponent, cover: .sand, folderID: folderID)
-            note.pdfAssetName = "original.pdf"
-            note.pages = try (0..<document.pageCount).map { index in
+            let pages = try (0..<document.pageCount).map { index in
                 guard let pdfPage = document.page(at: index) else { throw CocoaError(.fileReadCorruptFile) }
                 let bounds = pdfPage.bounds(for: .mediaBox)
                 let rotated = abs(pdfPage.rotation) % 180 == 90
                 let width = rotated ? bounds.height : bounds.width
                 let height = rotated ? bounds.width : bounds.height
-                return NotePage(width: 768, height: 768 * height / max(width, 1), pdfPageIndex: index)
+                guard width.isFinite, height.isFinite, width > 0, height > 0 else { throw CocoaError(.fileReadCorruptFile) }
+                return NotePage(width: 768, height: 768 * height / width, pdfPageIndex: index, pdfFitToPage: true)
             }
-            try repository.writeAsset(data, noteID: note.id, name: "original.pdf")
-            return commit { $0.notebooks.append(note) } ? note.id : nil
+            // Own the bytes before releasing file-provider access while the user chooses a layout.
+            return PreparedPDFImport(title: url.deletingPathExtension().lastPathComponent,
+                                     data: data, pages: pages, folderID: folderID)
+        } catch { errorMessage = "PDF를 가져오지 못했습니다. \(error.localizedDescription)"; return nil }
+    }
+
+    func importPDF(_ prepared: PreparedPDFImport, layout: PDFImportLayout) -> UUID? {
+        guard let repository else { return nil }
+        var note = Notebook(title: prepared.title, cover: .sand, folderID: prepared.folderID)
+        note.pdfAssetName = "original.pdf"
+        do {
+            note.pages = try NotePage.importedPDFPages(prepared.pages, layout: layout)
+            try repository.writeAsset(prepared.data, noteID: note.id, name: "original.pdf")
+            guard commit({ $0.notebooks.append(note) }) else {
+                try? repository.deleteAssets(noteID: note.id)
+                return nil
+            }
+            return note.id
         } catch { errorMessage = "PDF를 가져오지 못했습니다. \(error.localizedDescription)"; return nil }
     }
 

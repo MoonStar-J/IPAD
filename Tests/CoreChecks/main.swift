@@ -21,6 +21,35 @@ struct CoreCheck {
 }
 
 let checks: [CoreCheck] = [
+    CoreCheck(name: "Continuous PDF preserves source order and mixed page heights") { repository in
+        let pages = [NotePage(height: 1024, pdfPageIndex: 0), NotePage(height: 576, pdfPageIndex: 1), NotePage(height: 1300, pdfPageIndex: 2)]
+        let joined = try NotePage.importedPDFPages(pages, layout: .continuous)
+        try expect(joined.count == 1 && joined[0].height == 2900)
+        try expect(joined[0].pdfRegions == [PDFSegment(pageIndex: 0, y: 0, height: 1024), PDFSegment(pageIndex: 1, y: 1024, height: 576), PDFSegment(pageIndex: 2, y: 1600, height: 1300)])
+        let note = Notebook(title: "연속 PDF", pages: joined, pdfAssetName: "original.pdf")
+        try repository.save(Library(notebooks: [note]))
+        try expect(repository.load().notebooks[0] == note)
+    },
+    CoreCheck(name: "Paged and single-page imports retain original page identities") { _ in
+        let pages = [NotePage(pdfPageIndex: 0), NotePage(height: 576, pdfPageIndex: 1)]
+        try expect(NotePage.importedPDFPages(pages, layout: .paged) == pages)
+        try expect(NotePage.importedPDFPages([pages[0]], layout: .continuous) == [pages[0]])
+        try expect(!pages[0].isContinuousPDF)
+    },
+    CoreCheck(name: "Old notebooks decode without continuous PDF fields") { _ in
+        let page = NotePage(pdfPageIndex: 2)
+        let data = try JSONEncoder().encode(page)
+        var fields = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+        fields.removeValue(forKey: "pdfSegments")
+        let decoded = try JSONDecoder().decode(NotePage.self, from: JSONSerialization.data(withJSONObject: fields))
+        try expect(decoded == page)
+        try expect(decoded.pdfRegions == [PDFSegment(pageIndex: 2, y: 0, height: 1024)])
+    },
+    CoreCheck(name: "Malformed PDF dimensions are rejected before import") { _ in
+        for pages in [[], [NotePage()], [NotePage(height: .infinity, pdfPageIndex: 0)], [NotePage(height: -1, pdfPageIndex: 0)]] as [[NotePage]] {
+            try expectThrows { _ = try NotePage.importedPDFPages(pages, layout: .continuous) }
+        }
+    },
     CoreCheck(name: "Renaming the app preserves the complete existing library") { repository in
         let documents = repository.root.appendingPathComponent("Documents")
         let old = try LibraryRepository(root: documents.appendingPathComponent("Yeobaek"))

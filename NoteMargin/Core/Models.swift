@@ -40,6 +40,18 @@ struct PageElement: Codable, Identifiable, Equatable {
     var fontSize: Double = 24
 }
 
+enum PDFImportLayout: String, CaseIterable, Identifiable {
+    case continuous, paged
+    var id: String { rawValue }
+    var title: String { self == .continuous ? "하나로 이어 붙이기" : "페이지별로 보기" }
+}
+
+struct PDFSegment: Codable, Equatable {
+    let pageIndex: Int
+    let y: Double
+    let height: Double
+}
+
 struct NotePage: Codable, Identifiable, Equatable {
     var id = UUID()
     var paper: PaperStyle = .plain
@@ -47,6 +59,27 @@ struct NotePage: Codable, Identifiable, Equatable {
     var height: Double = 1024
     var pdfPageIndex: Int?
     var elements: [PageElement] = []
+    // Optional for compatibility with notebooks saved before continuous import.
+    var pdfSegments: [PDFSegment]?
+    var pdfFitToPage: Bool?
+    var isContinuousPDF: Bool { pdfSegments != nil }
+    var pdfRegions: [PDFSegment] {
+        pdfSegments ?? pdfPageIndex.map { [PDFSegment(pageIndex: $0, y: 0, height: height)] } ?? []
+    }
+
+    static func importedPDFPages(_ pages: [NotePage], layout: PDFImportLayout) throws -> [NotePage] {
+        guard !pages.isEmpty, pages.allSatisfy({ $0.pdfPageIndex != nil && $0.width == 768 && $0.height.isFinite && $0.height > 0 }) else {
+            throw CocoaError(.fileReadCorruptFile)
+        }
+        guard layout == .continuous, pages.count > 1 else { return pages }
+        var y = 0.0
+        let segments = pages.map { page -> PDFSegment in
+            defer { y += page.height }
+            return PDFSegment(pageIndex: page.pdfPageIndex!, y: y, height: page.height)
+        }
+        guard y.isFinite else { throw CocoaError(.fileReadCorruptFile) }
+        return [NotePage(width: 768, height: y, pdfSegments: segments, pdfFitToPage: true)]
+    }
 }
 
 struct Notebook: Codable, Identifiable, Equatable {

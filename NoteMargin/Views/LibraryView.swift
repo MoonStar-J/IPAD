@@ -11,6 +11,9 @@ struct LibraryView: View {
     @State private var creatingNote = false
     @State private var importingPDF = false
     @State private var importing = false
+    @State private var pendingPDF: PreparedPDFImport?
+    @State private var importedNoteID: UUID?
+    @State private var deferredImport: PreparedPDFImport?
     @State private var route: NoteRoute?
     @State private var createdNoteID: UUID?
     @State private var editingNote: Notebook?
@@ -142,29 +145,27 @@ struct LibraryView: View {
             if let id = createdNoteID { route = NoteRoute(id: id); createdNoteID = nil }
         }) { NotebookForm(folderID: currentFolderID, onCreated: { createdNoteID = $0 }) }
         .sheet(item: $editingNote) { NotebookForm(existing: $0) }
-        .fullScreenCover(item: $route) { route in NavigationStack { EditorView(noteID: route.id) }.environmentObject(store) }
+        .sheet(item: $pendingPDF, onDismiss: {
+            if let id = importedNoteID { route = NoteRoute(id: id); importedNoteID = nil }
+        }) { prepared in
+            PDFImportChoiceView(title: prepared.title, pageCount: prepared.pages.count) { layout in
+                importedNoteID = store.importPDF(prepared, layout: layout)
+                pendingPDF = nil
+            }
+        }
+        .fullScreenCover(item: $route, onDismiss: {
+            if let prepared = deferredImport { deferredImport = nil; presentImport(prepared) }
+        }) { route in NavigationStack { EditorView(noteID: route.id) }.environmentObject(store) }
         .fileImporter(isPresented: $importingPDF, allowedContentTypes: [.pdf]) { result in
             switch result {
             case .success(let url):
-                importing = true
-                Task { @MainActor in
-                    await Task.yield()
-                    if let id = store.importPDF(url, folderID: currentFolderID) { route = NoteRoute(id: id) }
-                    importing = false
-                }
+                prepareImport(url, folderID: currentFolderID)
             case .failure(let error): store.errorMessage = error.localizedDescription
             }
         }
         .onOpenURL { url in
-            guard store.flushDrawings() else { return }
-            if let id = store.importPDF(url, folderID: nil) {
-                // Replacing an existing document closes its canvas before opening the imported one.
-                route = nil
-                Task { @MainActor in
-                    try? await Task.sleep(for: .milliseconds(400))
-                    route = NoteRoute(id: id)
-                }
-            }
+            guard store.flushDrawings(), !importing, pendingPDF == nil else { return }
+            prepareImport(url, folderID: nil)
         }
         .alert(editingFolder == nil ? "새로운 폴더" : "폴더 이름 변경", isPresented: $folderPrompt) {
             TextField("폴더 이름", text: $folderTitle)
@@ -211,6 +212,23 @@ struct LibraryView: View {
         }
     }
 
+    private func prepareImport(_ url: URL, folderID: UUID?) {
+        guard !importing else { return }
+        importing = true
+        Task { @MainActor in
+            await Task.yield()
+            defer { importing = false }
+            guard let prepared = store.preparePDF(url, folderID: folderID) else { return }
+            if route != nil { deferredImport = prepared; route = nil }
+            else { presentImport(prepared) }
+        }
+    }
+
+    private func presentImport(_ prepared: PreparedPDFImport) {
+        if prepared.pages.count > 1 { pendingPDF = prepared }
+        else if let id = store.importPDF(prepared, layout: .paged) { route = NoteRoute(id: id) }
+    }
+
     @ViewBuilder private func noteActions(_ note: Notebook) -> some View {
         if filter == .trash {
             Button("복원", systemImage: "arrow.uturn.backward") { store.restore(note.id) }
@@ -227,5 +245,42 @@ struct LibraryView: View {
             Button("복제", systemImage: "plus.square.on.square") { _ = store.duplicate(note.id) }
             Button("휴지통으로 이동", systemImage: "trash", role: .destructive) { store.trash(note.id) }
         }
+    }
+}
+
+private struct PDFImportChoiceView: View {
+    let title: String
+    let pageCount: Int
+    let onChoose: (PDFImportLayout) -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 24) {
+                Text("\(title) · \(pageCount)페이지").font(.subheadline).foregroundStyle(.secondary)
+                Text("어떻게 펼칠까요?").font(.title2.bold())
+                ForEach(PDFImportLayout.allCases) { layout in
+                    Button { onChoose(layout) } label: {
+                        HStack(spacing: 18) {
+                            Image(systemName: layout == .continuous ? "scroll" : "rectangle.stack")
+                                .font(.title).frame(width: 40)
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text(layout.title).font(.headline)
+                                Text(layout == .continuous
+                                     ? "모든 페이지를 세로로 연결합니다. 스크롤하며 경계 너머까지 필기할 수 있어요."
+                                     : "원래 페이지를 유지합니다. 세 손가락으로 좌우로 쓸어 페이지를 넘겨요.")
+                                    .font(.subheadline).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                            }
+                            Spacer(minLength: 0)
+                            Image(systemName: "chevron.right").font(.caption)
+                        }.padding(20).frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18))
+                    }.buttonStyle(.plain)
+                }
+                Spacer(minLength: 0)
+            }.padding(24).background(Color(uiColor: .systemGroupedBackground))
+                .navigationTitle("PDF 가져오기").navigationBarTitleDisplayMode(.inline)
+                .toolbar { ToolbarItem(placement: .cancellationAction) { Button("취소") { dismiss() } } }
+        }.presentationDetents([.large])
     }
 }

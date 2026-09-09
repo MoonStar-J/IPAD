@@ -13,8 +13,8 @@ enum ExportService {
         // Read every drawing before starting the export so a corrupt page cannot
         // silently disappear from the shared document.
         let drawings = try note.pages.map { try store.drawing(noteID: note.id, pageID: $0.id) }
-        for page in note.pages where page.pdfPageIndex != nil {
-            guard PageRenderer.pdfPage(note: note, page: page, store: store) != nil else {
+        for page in note.pages {
+            guard PageRenderer.hasValidPDFBackground(page: page, note: note, store: store) else {
                 throw CocoaError(.fileReadCorruptFile)
             }
         }
@@ -31,7 +31,7 @@ enum ExportService {
     }
 
     static func exportPNG(note: Notebook, page: NotePage, store: NoteStore) throws -> URL {
-        if page.pdfPageIndex != nil && PageRenderer.pdfPage(note: note, page: page, store: store) == nil {
+        if !PageRenderer.hasValidPDFBackground(page: page, note: note, store: store) {
             throw CocoaError(.fileReadCorruptFile)
         }
         let url = try exportURL(title: note.title, extension: "png")

@@ -20,6 +20,14 @@ enum PageRenderer {
         return document?.page(at: index)
     }
 
+    static func hasValidPDFBackground(page: NotePage, note: Notebook, store: NoteStore) -> Bool {
+        page.pdfRegions.allSatisfy { region in
+            var source = page
+            source.pdfPageIndex = region.pageIndex
+            return pdfPage(note: note, page: source, store: store) != nil
+        }
+    }
+
     static func image(noteID: UUID, name: String, store: NoteStore) -> UIImage? {
         guard let url = store.assetURL(noteID: noteID, name: name) else { return nil }
         let key = url as NSURL
@@ -34,13 +42,33 @@ enum PageRenderer {
         let bounds = CGRect(x: 0, y: 0, width: page.width, height: page.height)
         context.setFillColor(UIColor.white.cgColor)
         context.fill(bounds)
-        if let pdf = pdfPage(note: note, page: page, store: store)?.pageRef {
-            context.saveGState()
-            context.translateBy(x: 0, y: bounds.height)
-            context.scaleBy(x: 1, y: -1)
-            context.concatenate(pdf.getDrawingTransform(.mediaBox, rect: bounds, rotate: 0, preserveAspectRatio: true))
-            context.drawPDFPage(pdf)
-            context.restoreGState()
+        if !page.pdfRegions.isEmpty {
+            for region in page.pdfRegions {
+                let rect = CGRect(x: 0, y: region.y, width: page.width, height: region.height)
+                guard context.boundingBoxOfClipPath.intersects(rect) else { continue }
+                var source = page
+                source.pdfPageIndex = region.pageIndex
+                guard let pdf = pdfPage(note: note, page: source, store: store)?.pageRef else { continue }
+                context.saveGState()
+                context.clip(to: rect)
+                context.translateBy(x: 0, y: rect.maxY)
+                context.scaleBy(x: 1, y: -1)
+                var target = CGSize(width: page.width, height: region.height)
+                if page.pdfFitToPage == true || page.isContinuousPDF {
+                    // Quartz centers small PDFs without enlarging them. Explicitly scale
+                    // new imports; keep older notebooks' background/ink alignment unchanged.
+                    let box = pdf.getBoxRect(.mediaBox)
+                    let rotated = abs(pdf.rotationAngle) % 180 == 90
+                    let native = CGSize(width: rotated ? box.height : box.width, height: rotated ? box.width : box.height)
+                    if native.width > 0 && native.height > 0 {
+                        context.scaleBy(x: page.width / native.width, y: region.height / native.height)
+                        target = native
+                    }
+                }
+                context.concatenate(pdf.getDrawingTransform(.mediaBox, rect: CGRect(origin: .zero, size: target), rotate: 0, preserveAspectRatio: true))
+                context.drawPDFPage(pdf)
+                context.restoreGState()
+            }
         } else {
             context.setStrokeColor(UIColor(red: 0.78, green: 0.81, blue: 0.84, alpha: 0.65).cgColor)
             context.setFillColor(UIColor(red: 0.69, green: 0.73, blue: 0.78, alpha: 0.65).cgColor)
@@ -98,15 +126,17 @@ enum PageRenderer {
             output.cgContext.scaleBy(x: width / page.width, y: width / page.width)
             drawBackground(page: page, note: note, store: store, context: output.cgContext)
             let rect = CGRect(x: 0, y: 0, width: page.width, height: page.height)
-            drawing.image(from: rect, scale: max(width / page.width, 0.2)).draw(in: rect)
+            drawing.image(from: rect, scale: max(width / page.width, 0.001)).draw(in: rect)
         }
     }
 }
 
 final class PaperView: UIView {
+    var pageOrigin = CGPoint.zero { didSet { if oldValue != pageOrigin { setNeedsDisplay() } } }
     var render: ((CGContext) -> Void)? { didSet { setNeedsDisplay() } }
     override func draw(_ rect: CGRect) {
         guard let context = UIGraphicsGetCurrentContext() else { return }
+        context.translateBy(x: -pageOrigin.x, y: -pageOrigin.y)
         render?(context)
     }
 }

@@ -22,7 +22,7 @@ struct PageManagerView: View {
                                 PageThumbnail(note: note, page: page).frame(width: 68, height: 92)
                                 VStack(alignment: .leading, spacing: 6) {
                                     Text("\(index + 1)페이지").font(.headline).foregroundStyle(.primary)
-                                    Text(page.pdfPageIndex == nil ? page.paper.title : "PDF 페이지").font(.caption).foregroundStyle(.secondary)
+                                    Text(page.isContinuousPDF ? "PDF \(page.pdfRegions.count)페이지 연결됨" : (page.pdfRegions.isEmpty ? page.paper.title : "PDF 페이지")).font(.caption).foregroundStyle(.secondary)
                                 }
                                 Spacer()
                                 if selectedPageID == page.id { Image(systemName: "checkmark.circle.fill").foregroundStyle(Color.accentColor) }
@@ -88,7 +88,7 @@ struct PageThumbnail: View {
         .task(id: note.updatedAt) {
             do {
                 let drawing = try store.drawing(noteID: note.id, pageID: page.id)
-                image = PageRenderer.snapshot(page: page, note: note, drawing: drawing, store: store, width: 160)
+                image = PageRenderer.snapshot(page: page, note: note, drawing: drawing, store: store, width: min(160, 2048 * page.width / max(page.width, page.height)))
             } catch { failed = true }
         }
     }
