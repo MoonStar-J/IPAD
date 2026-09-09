@@ -30,10 +30,9 @@ struct NotebookCanvas: UIViewRepresentable {
     }
 }
 
-final class CanvasHostView: UIView, UIScrollViewDelegate {
+final class CanvasHostView: UIView {
     let session: DrawingSession
-    private let scroll = UIScrollView()
-    private let sheet = UIView()
+    private var canvas: PagingCanvasView { session.canvas }
     private let paper = PaperView()
     private let selectionLayer = CAShapeLayer()
     private var objectPan: UIPanGestureRecognizer!
@@ -54,40 +53,35 @@ final class CanvasHostView: UIView, UIScrollViewDelegate {
         self.session = session
         super.init(frame: .zero)
         backgroundColor = .secondarySystemBackground
-        scroll.delegate = self
-        scroll.showsVerticalScrollIndicator = false
-        scroll.showsHorizontalScrollIndicator = false
-        scroll.contentInsetAdjustmentBehavior = .never
-        scroll.panGestureRecognizer.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
-        addSubview(scroll)
-        scroll.addSubview(sheet)
-        sheet.backgroundColor = .white
-        sheet.layer.shadowColor = UIColor.black.cgColor
-        sheet.layer.shadowOpacity = 0.12
-        sheet.layer.shadowRadius = 12
-        sheet.layer.shadowOffset = CGSize(width: 0, height: 4)
-        paper.isOpaque = true
+        canvas.showsVerticalScrollIndicator = false
+        canvas.showsHorizontalScrollIndicator = false
+        canvas.contentInsetAdjustmentBehavior = .never
+        canvas.panGestureRecognizer.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
+        // PencilKit owns the viewport, scrolling, zooming and live ink rendering.
+        // The PDF is a noninteractive sibling behind it, never a parent transform.
+        paper.isOpaque = false
+        paper.backgroundColor = .clear
         paper.isUserInteractionEnabled = false
-        sheet.addSubview(paper)
-        sheet.addSubview(session.canvas)
+        addSubview(paper)
+        addSubview(canvas)
         selectionLayer.strokeColor = UIColor.systemBlue.cgColor
         selectionLayer.fillColor = UIColor.systemBlue.withAlphaComponent(0.07).cgColor
         selectionLayer.lineWidth = 2
         selectionLayer.lineDashPattern = [6, 4]
-        sheet.layer.addSublayer(selectionLayer)
+        layer.addSublayer(selectionLayer)
         objectPan = UIPanGestureRecognizer(target: self, action: #selector(moveObject(_:)))
         objectPan.maximumNumberOfTouches = 1
         objectTap = UITapGestureRecognizer(target: self, action: #selector(selectObject(_:)))
-        sheet.addGestureRecognizer(objectPan)
-        sheet.addGestureRecognizer(objectTap)
-        scroll.panGestureRecognizer.require(toFail: objectPan)
+        addGestureRecognizer(objectPan)
+        addGestureRecognizer(objectTap)
+        canvas.panGestureRecognizer.require(toFail: objectPan)
         for direction: UISwipeGestureRecognizer.Direction in [.left, .right] {
             let swipe = UISwipeGestureRecognizer(target: self, action: #selector(turnPage(_:)))
             swipe.direction = direction
             swipe.numberOfTouchesRequired = 3
             swipe.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
             addGestureRecognizer(swipe)
-            scroll.panGestureRecognizer.require(toFail: swipe)
+            canvas.panGestureRecognizer.require(toFail: swipe)
             session.canvas.drawingGestureRecognizer.require(toFail: swipe)
             pageSwipes.append(swipe)
         }
@@ -109,28 +103,35 @@ final class CanvasHostView: UIView, UIScrollViewDelegate {
         self.onMove = onMove
         self.onTurnPage = onTurnPage
         let canTurn = note.pages.count > 1 && !page.isContinuousPDF && !editingObjects && toolsVisible
-        pageSwipes.forEach { $0.isEnabled = canTurn }
+        pageSwipes.forEach { if $0.isEnabled != canTurn { $0.isEnabled = canTurn } }
         session.canvas.pageTurningEnabled = canTurn
         if pageChanged {
-            scroll.zoomScale = 1
-            sheet.frame = CGRect(x: 0, y: 0, width: page.width, height: page.height)
-            session.canvas.frame = sheet.bounds
-            session.canvas.contentSize = sheet.bounds.size
-            scroll.contentSize = sheet.bounds.size
+            canvas.minimumZoomScale = min(canvas.minimumZoomScale, 1)
+            canvas.maximumZoomScale = max(canvas.maximumZoomScale, 1)
+            canvas.zoomScale = 1
+            canvas.contentSize = CGSize(width: page.width, height: page.height)
             selectedID = nil
             needsFit = true
         }
         if contentChanged {
-            paper.render = { [weak store] context in
-                guard let store else { return }
+            paper.render = { [weak self, weak store] context in
+                guard let self, let store else { return }
+                context.saveGState()
+                context.concatenate(self.documentToViewport)
+                context.clip(to: CGRect(x: 0, y: 0, width: page.width, height: page.height))
                 PageRenderer.drawBackground(page: page, note: note, store: store, context: context)
+                context.restoreGState()
             }
         }
-        session.canvas.drawingPolicy = fingerDrawing ? .anyInput : .pencilOnly
-        session.canvas.isUserInteractionEnabled = !editingObjects && session.loadError == nil
-        objectPan.isEnabled = editingObjects
-        objectTap.isEnabled = editingObjects
-        scroll.panGestureRecognizer.minimumNumberOfTouches = (fingerDrawing || editingObjects) ? 2 : 1
+        let policy: PKCanvasViewDrawingPolicy = fingerDrawing ? .anyInput : .pencilOnly
+        if canvas.drawingPolicy != policy { canvas.drawingPolicy = policy }
+        let canDraw = !editingObjects && session.loadError == nil
+        if canvas.drawingGestureRecognizer.isEnabled != canDraw {
+            canvas.drawingGestureRecognizer.isEnabled = canDraw
+        }
+        if objectPan.isEnabled != editingObjects { objectPan.isEnabled = editingObjects }
+        if objectTap.isEnabled != editingObjects { objectTap.isEnabled = editingObjects }
+        canvas.panGestureRecognizer.minimumNumberOfTouches = (fingerDrawing || editingObjects) ? 2 : 1
         if !editingObjects { selectedID = nil }
         updateSelection()
         showTools = toolsVisible && !editingObjects && session.loadError == nil
@@ -148,7 +149,8 @@ final class CanvasHostView: UIView, UIScrollViewDelegate {
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        scroll.frame = bounds
+        if canvas.frame != bounds { canvas.frame = bounds }
+        if paper.frame != bounds { paper.frame = bounds }
         if needsFit || lastSize != bounds.size {
             lastSize = bounds.size
             if bounds.width > 0 && bounds.height > 0 { fitPage(animated: false); needsFit = false }
@@ -161,21 +163,22 @@ final class CanvasHostView: UIView, UIScrollViewDelegate {
         guard let page = currentPage, bounds.width > 0 else { return }
         let fitWidth = (bounds.width - 48) / page.width
         let fit = max(0.01, page.isContinuousPDF ? fitWidth : min(fitWidth, (bounds.height - 110) / page.height))
-        scroll.minimumZoomScale = fit
-        scroll.maximumZoomScale = max(4, fit * 6)
+        canvas.minimumZoomScale = fit
+        canvas.maximumZoomScale = max(4, fit * 6)
         let changes = {
-            self.scroll.setZoomScale(fit, animated: false)
+            self.canvas.setZoomScale(fit, animated: false)
             self.centerSheet()
-            self.scroll.setContentOffset(CGPoint(x: -self.scroll.contentInset.left, y: -self.scroll.contentInset.top), animated: false)
+            self.canvas.setContentOffset(CGPoint(x: -self.canvas.contentInset.left, y: -self.canvas.contentInset.top), animated: false)
         }
         if animated { UIView.animate(withDuration: 0.25, animations: changes) }
         else { changes() }
     }
 
     private func centerSheet() {
-        let horizontal = max(24, (scroll.bounds.width - sheet.frame.width) / 2)
-        let vertical = max(24, (scroll.bounds.height - 80 - sheet.frame.height) / 2)
-        scroll.contentInset = UIEdgeInsets(top: vertical, left: horizontal, bottom: vertical + 80, right: horizontal)
+        let horizontal = max(24, (canvas.bounds.width - ((currentPage?.width ?? 0) * canvas.zoomScale)) / 2)
+        let vertical = max(24, (canvas.bounds.height - 80 - ((currentPage?.height ?? 0) * canvas.zoomScale)) / 2)
+        let inset = UIEdgeInsets(top: vertical, left: horizontal, bottom: vertical + 80, right: horizontal)
+        if canvas.contentInset != inset { canvas.contentInset = inset }
     }
 
     @objc private func turnPage(_ gesture: UISwipeGestureRecognizer) {
@@ -184,28 +187,30 @@ final class CanvasHostView: UIView, UIScrollViewDelegate {
             let transition = CATransition()
             transition.type = .fade
             transition.duration = 0.18
-            sheet.layer.add(transition, forKey: "pageTurn")
+            layer.add(transition, forKey: "pageTurn")
         }
     }
 
-    // Keep the PDF backing bitmap bounded to the visible area even for a very long sheet.
-    private func updateVisiblePaper() {
-        guard currentPage != nil, scroll.bounds.width > 0 else { return }
-        let visible = sheet.convert(scroll.bounds, from: scroll).intersection(sheet.bounds)
-        guard !visible.isNull, !visible.isEmpty else { return }
-        paper.frame = visible
-        paper.pageOrigin = visible.origin
-        paper.setNeedsDisplay()
+    // The same transform is used for the PDF, selections and object hit-testing.
+    // Ink uses these exact offset/zoom values internally in PKCanvasView.
+    var documentToViewport: CGAffineTransform {
+        CGAffineTransform(a: canvas.zoomScale, b: 0, c: 0, d: canvas.zoomScale,
+                          tx: -canvas.contentOffset.x, ty: -canvas.contentOffset.y)
     }
 
-    func scrollViewDidScroll(_ scrollView: UIScrollView) { updateVisiblePaper() }
+    private func updateVisiblePaper() {
+        paper.setNeedsDisplay()
+        updateSelection()
+    }
 
-    func viewForZooming(in scrollView: UIScrollView) -> UIView? { sheet }
-    func scrollViewDidZoom(_ scrollView: UIScrollView) {
+    func canvasDidScroll() { updateVisiblePaper() }
+    func canvasDidZoom() {
         centerSheet()
         updateVisiblePaper()
-        let value = Int((scrollView.zoomScale / max(scrollView.minimumZoomScale, 0.01) * 100).rounded())
-        DispatchQueue.main.async { [weak session] in if session?.zoomPercent != value { session?.zoomPercent = value } }
+        let value = Int((canvas.zoomScale / max(canvas.minimumZoomScale, 0.01) * 100).rounded())
+        DispatchQueue.main.async { [weak session] in
+            if session?.zoomPercent != value { session?.zoomPercent = value }
+        }
     }
 
     private func element(at point: CGPoint) -> PageElement? {
@@ -215,7 +220,7 @@ final class CanvasHostView: UIView, UIScrollViewDelegate {
     }
 
     @objc private func selectObject(_ gesture: UITapGestureRecognizer) {
-        selectedID = element(at: gesture.location(in: sheet))?.id
+        selectedID = element(at: gesture.location(in: self).applying(documentToViewport.inverted()))?.id
         updateSelection()
         onSelect?(selectedID)
     }
@@ -223,25 +228,26 @@ final class CanvasHostView: UIView, UIScrollViewDelegate {
     @objc private func moveObject(_ gesture: UIPanGestureRecognizer) {
         guard var page = currentPage else { return }
         if gesture.state == .began {
-            guard let element = element(at: gesture.location(in: sheet)) else { selectedID = nil; updateSelection(); return }
+            guard let element = element(at: gesture.location(in: self).applying(documentToViewport.inverted())) else { selectedID = nil; updateSelection(); return }
             selectedID = element.id
             dragOrigin = CGPoint(x: element.x, y: element.y)
             onSelect?(selectedID)
         }
         guard let id = selectedID, let index = page.elements.firstIndex(where: { $0.id == id }) else { return }
-        let delta = gesture.translation(in: sheet)
+        let translation = gesture.translation(in: self)
+        let delta = CGPoint(x: translation.x / canvas.zoomScale, y: translation.y / canvas.zoomScale)
         let x = min(max(0, dragOrigin.x + delta.x), max(0, page.width - page.elements[index].width))
         let y = min(max(0, dragOrigin.y + delta.y), max(0, page.height - page.elements[index].height))
         page.elements[index].x = x
         page.elements[index].y = y
         // Commit once at the end; show the destination outline while dragging.
-        selectionLayer.path = UIBezierPath(rect: CGRect(x: x, y: y, width: page.elements[index].width, height: page.elements[index].height)).cgPath
+        selectionLayer.path = UIBezierPath(rect: CGRect(x: x, y: y, width: page.elements[index].width, height: page.elements[index].height).applying(documentToViewport)).cgPath
         if gesture.state == .ended { onMove?(id, x, y) }
         if gesture.state == .cancelled { updateSelection() }
     }
 
     private func updateSelection() {
         guard let element = currentPage?.elements.first(where: { $0.id == selectedID }) else { selectionLayer.path = nil; return }
-        selectionLayer.path = UIBezierPath(rect: CGRect(x: element.x, y: element.y, width: element.width, height: element.height)).cgPath
+        selectionLayer.path = UIBezierPath(rect: CGRect(x: element.x, y: element.y, width: element.width, height: element.height).applying(documentToViewport)).cgPath
     }
 }

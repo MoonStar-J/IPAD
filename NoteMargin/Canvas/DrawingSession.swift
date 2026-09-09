@@ -14,6 +14,7 @@ final class DrawingSession: NSObject, ObservableObject, PKCanvasViewDelegate {
     private var noteID: UUID?
     private var pageID: UUID?
     private var loading = false
+    private var toolsAreVisible = false
     private var undoObservers: [NSObjectProtocol] = []
 
     override init() {
@@ -21,7 +22,7 @@ final class DrawingSession: NSObject, ObservableObject, PKCanvasViewDelegate {
         canvas.delegate = self
         canvas.backgroundColor = .clear
         canvas.isOpaque = false
-        canvas.isScrollEnabled = false
+        canvas.isScrollEnabled = true
         canvas.overrideUserInterfaceStyle = .light
         canvas.tool = PKInkingTool(.pen, color: .black, width: 3)
         canvas.drawingPolicy = .pencilOnly
@@ -65,18 +66,29 @@ final class DrawingSession: NSObject, ObservableObject, PKCanvasViewDelegate {
         DispatchQueue.main.async { [weak self] in self?.refreshUndo() }
     }
 
+    func scrollViewDidScroll(_ scrollView: UIScrollView) { host?.canvasDidScroll() }
+    func scrollViewDidZoom(_ scrollView: UIScrollView) { host?.canvasDidZoom() }
+
     func refreshUndo() {
-        canUndo = canvas.undoManager?.canUndo ?? false
-        canRedo = canvas.undoManager?.canRedo ?? false
+        let undo = canvas.undoManager?.canUndo ?? false
+        let redo = canvas.undoManager?.canRedo ?? false
+        if canUndo != undo { canUndo = undo }
+        if canRedo != redo { canRedo = redo }
     }
     func undo() { canvas.undoManager?.undo(); refreshUndo() }
     func redo() { canvas.undoManager?.redo(); refreshUndo() }
     func fitPage() { host?.fitPage(animated: true) }
 
     func setToolsVisible(_ visible: Bool) {
-        toolPicker.setVisible(visible, forFirstResponder: canvas)
-        if visible && canvas.window != nil { canvas.becomeFirstResponder() }
-        else if !visible { canvas.resignFirstResponder() }
+        // SwiftUI updates while ink is being saved. Do not repeatedly reattach the
+        // picker / first responder during an active stroke.
+        let shouldShow = visible && canvas.window != nil
+        if toolsAreVisible != shouldShow {
+            toolPicker.setVisible(shouldShow, forFirstResponder: canvas)
+            toolsAreVisible = shouldShow
+        }
+        if shouldShow && !canvas.isFirstResponder { canvas.becomeFirstResponder() }
+        else if !shouldShow && canvas.isFirstResponder { canvas.resignFirstResponder() }
     }
 
     func stop() { store?.flushDrawings(); setToolsVisible(false) }
