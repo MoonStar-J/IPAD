@@ -8,6 +8,7 @@ struct PreparedPDFImport: Identifiable {
     let data: Data
     let pages: [NotePage]
     let folderID: UUID?
+    var projectID: UUID? = nil
 }
 
 @MainActor
@@ -35,6 +36,29 @@ final class NoteStore: ObservableObject {
     }
 
     func note(_ id: UUID) -> Notebook? { library.notebooks.first { $0.id == id } }
+    func project(_ id: UUID) -> NoteProject? { library.projects.first { $0.id == id } }
+
+    func createProject(title: String, agentInstructions: String = "") -> UUID? {
+        let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty else { return nil }
+        let project = NoteProject(title: title, agentInstructions: agentInstructions)
+        return commit { $0.projects.append(project) } ? project.id : nil
+    }
+    @discardableResult func updateProject(_ id: UUID, title: String, agentInstructions: String) -> Bool {
+        let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty, project(id) != nil else { return false }
+        return commit { library in
+            guard let index = library.projects.firstIndex(where: { $0.id == id }) else { return }
+            library.projects[index].title = title
+            library.projects[index].agentInstructions = agentInstructions
+        }
+    }
+    @discardableResult func assignProject(noteID: UUID, projectID: UUID?) -> Bool {
+        guard note(noteID) != nil, projectID == nil || project(projectID!) != nil else { return false }
+        guard flushDrawings() else { return false }
+        return commit { $0.assignProject(noteID: noteID, projectID: projectID) }
+    }
+    func deleteProject(_ id: UUID) { commit { $0.removeProject(id) } }
 
     @discardableResult
     private func commit(_ change: (inout Library) -> Void) -> Bool {
@@ -65,8 +89,8 @@ final class NoteStore: ObservableObject {
         }
     }
 
-    func createNote(title: String, paper: PaperStyle, cover: CoverColor, folderID: UUID?) -> UUID? {
-        var note = Notebook(title: title.trimmedOrUntitled, cover: cover, folderID: folderID)
+    func createNote(title: String, paper: PaperStyle, cover: CoverColor, folderID: UUID?, projectID: UUID? = nil) -> UUID? {
+        var note = Notebook(title: title.trimmedOrUntitled, cover: cover, folderID: folderID, projectID: projectID.flatMap { project($0)?.id })
         note.pages = [NotePage(paper: paper)]
         return commit { $0.notebooks.append(note) } ? note.id : nil
     }
@@ -95,6 +119,7 @@ final class NoteStore: ObservableObject {
 
     func permanentlyDelete(_ id: UUID) {
         guard flushDrawings(), commit({ $0.notebooks.removeAll { $0.id == id } }) else { return }
+        MarginAIStore.shared.deleteNote(id)
         do { try repository?.deleteAssets(noteID: id) }
         catch { errorMessage = "노트는 삭제했지만 첨부 파일을 정리하지 못했습니다. \(error.localizedDescription)" }
     }
@@ -209,7 +234,7 @@ final class NoteStore: ObservableObject {
 
     func importPDF(_ prepared: PreparedPDFImport, layout: PDFImportLayout) -> UUID? {
         guard let repository else { return nil }
-        var note = Notebook(title: prepared.title, cover: .sand, folderID: prepared.folderID)
+        var note = Notebook(title: prepared.title, cover: .sand, folderID: prepared.folderID, projectID: prepared.projectID.flatMap { project($0)?.id })
         note.pdfAssetName = "original.pdf"
         do {
             note.pages = try NotePage.importedPDFPages(prepared.pages, layout: layout)

@@ -22,6 +22,10 @@ struct LibraryView: View {
     @State private var editingFolder: NoteFolder?
     @State private var deletingNote: Notebook?
     @State private var deletingFolder: NoteFolder?
+    @State private var editingProject: NoteProject?
+    @State private var creatingProject = false
+    @State private var deletingProject: NoteProject?
+    @State private var connectingAI = false
 
     private var filter: LibraryFilter { selection ?? .all }
     private var title: String {
@@ -29,10 +33,13 @@ struct LibraryView: View {
         case .all: return "모든 노트"
         case .favorites: return "즐겨찾기"
         case .trash: return "최근 삭제된 항목"
+        case .unassigned: return "프로젝트 미지정"
+        case .project(let id): return store.project(id)?.title ?? "프로젝트"
         case .folder(let id): return store.library.folders.first { $0.id == id }?.title ?? "폴더"
         }
     }
     private var currentFolderID: UUID? { if case .folder(let id) = filter { return id }; return nil }
+    private var currentProjectID: UUID? { if case .project(let id) = filter { return id }; return nil }
     private var notes: [Notebook] { store.library.notes(in: filter, query: query, sort: sort) }
 
     var body: some View {
@@ -47,6 +54,17 @@ struct LibraryView: View {
                         Section {
                             sidebarRow("모든 노트", icon: "square.grid.2x2", filter: .all)
                             sidebarRow("즐겨찾기", icon: "star", filter: .favorites)
+                        }
+                        Section("프로젝트") {
+                            ForEach(store.library.projects) { project in
+                                sidebarRow(project.title, icon: "square.stack.3d.up", filter: .project(project.id))
+                                    .contextMenu {
+                                        Button("프로젝트 · 에이전트 설정", systemImage: "slider.horizontal.3") { editingProject = project }
+                                        Button("프로젝트 삭제", systemImage: "trash", role: .destructive) { deletingProject = project }
+                                    }
+                            }
+                            sidebarRow("프로젝트 미지정", icon: "tray", filter: .unassigned)
+                            Button { creatingProject = true } label: { Label("새 프로젝트", systemImage: "plus") }
                         }
                         Section("폴더") {
                             ForEach(store.library.folders) { folder in
@@ -63,6 +81,7 @@ struct LibraryView: View {
                             }
                         }
                         Section { sidebarRow("최근 삭제된 항목", icon: "trash", filter: .trash) }
+                        Section { Button { connectingAI = true } label: { Label("AI 연결", systemImage: "sparkles") } }
                     }
                     .navigationTitle(AppIdentity.displayName)
                     .safeAreaInset(edge: .bottom) {
@@ -76,7 +95,7 @@ struct LibraryView: View {
                             VStack(alignment: .leading, spacing: 28) {
                                 if filter != .trash && query.isEmpty {
                                     VStack(alignment: .leading, spacing: 8) {
-                                        Text("생각이 머무는 곳.").font(.system(.largeTitle, design: .serif))
+                                        Text(currentProjectID == nil ? "생각이 머무는 곳." : title).font(.system(.largeTitle, design: .serif))
                                         Text("가볍게 펼치고, 자유롭게 기록하세요.").font(.subheadline).foregroundStyle(.secondary)
                                     }.padding(.top, 12)
                                 }
@@ -130,6 +149,9 @@ struct LibraryView: View {
                         .toolbar {
                             if filter != .trash {
                                 ToolbarItemGroup(placement: .topBarTrailing) {
+                                    if let id = currentProjectID, let project = store.project(id) {
+                                        Button { editingProject = project } label: { Label("프로젝트 설정", systemImage: "slider.horizontal.3") }
+                                    }
                                     Button { importingPDF = true } label: { Label("PDF 가져오기", systemImage: "square.and.arrow.down") }
                                     Button { creatingNote = true } label: { Label("새로운 노트", systemImage: "square.and.pencil") }
                                         .keyboardShortcut("n", modifiers: .command)
@@ -143,7 +165,17 @@ struct LibraryView: View {
         }
         .sheet(isPresented: $creatingNote, onDismiss: {
             if let id = createdNoteID { route = NoteRoute(id: id); createdNoteID = nil }
-        }) { NotebookForm(folderID: currentFolderID, onCreated: { createdNoteID = $0 }) }
+        }) { NotebookForm(folderID: currentFolderID, projectID: currentProjectID, onCreated: { createdNoteID = $0 }) }
+        .sheet(isPresented: $creatingProject) { ProjectForm() }
+        .sheet(item: $editingProject) { ProjectForm(existing: $0) }
+        .sheet(isPresented: $connectingAI) { AIConnectionSettingsView() }
+        .alert("프로젝트를 삭제할까요?", isPresented: Binding(get: { deletingProject != nil }, set: { if !$0 { deletingProject = nil } })) {
+            Button("취소", role: .cancel) { deletingProject = nil }
+            Button("프로젝트 삭제", role: .destructive) {
+                if let project = deletingProject { store.deleteProject(project.id); selection = .unassigned }
+                deletingProject = nil
+            }
+        } message: { Text("노트는 삭제되지 않고 ‘프로젝트 미지정’으로 이동합니다.") }
         .sheet(item: $editingNote) { NotebookForm(existing: $0) }
         .sheet(item: $pendingPDF, onDismiss: {
             if let id = importedNoteID { route = NoteRoute(id: id); importedNoteID = nil }
@@ -215,10 +247,12 @@ struct LibraryView: View {
     private func prepareImport(_ url: URL, folderID: UUID?) {
         guard !importing else { return }
         importing = true
+        let projectID = currentProjectID
         Task { @MainActor in
             await Task.yield()
             defer { importing = false }
-            guard let prepared = store.preparePDF(url, folderID: folderID) else { return }
+            guard var prepared = store.preparePDF(url, folderID: folderID) else { return }
+            prepared.projectID = projectID
             if route != nil { deferredImport = prepared; route = nil }
             else { presentImport(prepared) }
         }
@@ -237,6 +271,12 @@ struct LibraryView: View {
             Button("이름 및 표지 변경", systemImage: "pencil") { editingNote = note }
             Button(note.isFavorite ? "즐겨찾기 해제" : "즐겨찾기", systemImage: note.isFavorite ? "star.slash" : "star") {
                 store.updateNote(note.id) { $0.isFavorite.toggle() }
+            }
+            Menu("프로젝트로 이동", systemImage: "square.stack.3d.up") {
+                Button("프로젝트 미지정") { store.assignProject(noteID: note.id, projectID: nil) }
+                ForEach(store.library.projects) { project in
+                    Button(project.title) { store.assignProject(noteID: note.id, projectID: project.id) }
+                }
             }
             Menu("폴더로 이동", systemImage: "folder") {
                 Button("폴더 없음") { store.updateNote(note.id) { $0.folderID = nil } }
@@ -282,5 +322,38 @@ private struct PDFImportChoiceView: View {
                 .navigationTitle("PDF 가져오기").navigationBarTitleDisplayMode(.inline)
                 .toolbar { ToolbarItem(placement: .cancellationAction) { Button("취소") { dismiss() } } }
         }.presentationDetents([.large])
+    }
+}
+
+struct ProjectForm: View {
+    var existing: NoteProject?
+    @EnvironmentObject private var store: NoteStore
+    @Environment(\.dismiss) private var dismiss
+    @State private var title = ""
+    @State private var instructions = ""
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("프로젝트") { TextField("예: 선형대수 · 1학기", text: $title) }
+                Section {
+                    TextEditor(text: $instructions).frame(minHeight: 180)
+                } header: { Text("프로젝트 에이전트 지침") } footer: {
+                    Text("예: 대학 1학년 수준으로 설명하고, 답보다 풀이 과정을 먼저 알려줘. 이 지침은 이 프로젝트의 대화에만 적용됩니다.")
+                }
+            }
+            .navigationTitle(existing == nil ? "새 프로젝트" : "프로젝트 설정")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("취소") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("저장") {
+                        if let existing {
+                            if store.updateProject(existing.id, title: title, agentInstructions: instructions) { dismiss() }
+                        } else if store.createProject(title: title, agentInstructions: instructions) != nil { dismiss() }
+                    }.disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+            .onAppear { title = existing?.title ?? ""; instructions = existing?.agentInstructions ?? "" }
+        }.storeErrorAlert()
     }
 }

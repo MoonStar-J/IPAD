@@ -113,3 +113,129 @@ final class StrokeEraserVisualTests: XCTestCase {
         add(attachment)
     }
 }
+
+final class MarginChatVisualTests: XCTestCase {
+    @MainActor func testDraftSurvivesClosingItsMarginChat() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--page-swap"]
+        app.launch()
+        XCTAssertTrue(app.buttons["ai-question-start"].waitForExistence(timeout: 30))
+        app.buttons["ai-question-start"].tap()
+        let confirm = app.buttons["ai-region-confirm"]
+        expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: confirm)
+        waitForExpectations(timeout: 5)
+        confirm.tap()
+        let input = app.textFields["ai-question-input"]
+        XCTAssertTrue(input.waitForExistence(timeout: 5))
+        input.tap()
+        input.typeText("Draft stays here")
+        app.buttons["ai-chat-close"].tap()
+        expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: input)
+        waitForExpectations(timeout: 5)
+        app.buttons["ai-margin-pin-0"].tap()
+        XCTAssertTrue(input.waitForExistence(timeout: 5))
+        XCTAssertEqual(input.value as? String, "Draft stays here")
+        // This flow deliberately never taps Send and requires no API key.
+    }
+
+    @MainActor func testQuestionRegionPreviewAndPageScopedPinRoundTrip() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        // This existing fixture opens the real editor with red ink on page 1,
+        // a blank page 2 and blue ink on page 3. No API request is sent.
+        app.launchArguments = ["--page-swap"]
+        app.launch()
+        let question = app.buttons["ai-question-start"]
+        let confirm = app.buttons["ai-region-confirm"]
+        let close = app.buttons["ai-chat-close"]
+        let pin = app.buttons["ai-margin-pin-0"]
+        XCTAssertTrue(question.waitForExistence(timeout: 30))
+        XCTAssertFalse(pin.exists, "new note must not inherit another note's AI pins")
+        let originalRed = inkPixels(app, channel: 0)
+        XCTAssertGreaterThan(originalRed, 40, "red handwritten source is visible before selection")
+
+        question.tap()
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5))
+        expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: confirm)
+        waitForExpectations(timeout: 5)
+        // Move the initial selection by dragging its interior. This exercises
+        // the real overlay gesture without sending the gesture to PencilKit.
+        let from = app.coordinate(withNormalizedOffset: CGVector(dx: 0.45, dy: 0.45))
+        let to = app.coordinate(withNormalizedOffset: CGVector(dx: 0.48, dy: 0.48))
+        from.press(forDuration: 0.1, thenDragTo: to, withVelocity: .slow, thenHoldForDuration: 0.1)
+        confirm.tap()
+        XCTAssertTrue(close.waitForExistence(timeout: 5), "confirming the rectangle opens its margin chat")
+        XCTAssertFalse(confirm.exists, "confirming ends rectangle selection")
+        XCTAssertTrue(app.descendants(matching: .any)["ai-question-input"].firstMatch.exists, "chat is ready for the user's question")
+
+        func openPreviewAndCheckInk() {
+            let disclosure = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "선택 영역 보기")).firstMatch
+            XCTAssertTrue(disclosure.waitForExistence(timeout: 5))
+            disclosure.tap()
+            let preview = app.images["질문에 첨부될 PDF와 필기 영역"]
+            XCTAssertTrue(preview.waitForExistence(timeout: 5), "chat reveals the captured source image")
+            expectation(for: NSPredicate(format: "hittable == true"), evaluatedWith: preview)
+            waitForExpectations(timeout: 5)
+            let image = preview.screenshot().image.cgImage!
+            var pixels = [UInt8](repeating: 0, count: image.width * image.height * 4)
+            pixels.withUnsafeMutableBytes { bytes in
+                let context = CGContext(data: bytes.baseAddress, width: image.width, height: image.height,
+                                        bitsPerComponent: 8, bytesPerRow: image.width * 4,
+                                        space: CGColorSpaceCreateDeviceRGB(),
+                                        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue)!
+                context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+            }
+            let red = stride(from: 0, to: pixels.count, by: 16).filter {
+                pixels[$0] > 150 && pixels[$0 + 1] < 130 && pixels[$0 + 2] < 110
+            }.count
+            XCTAssertGreaterThan(red, 20, "the captured source preview includes the selected handwritten ink")
+        }
+        func waitForChatToClose() {
+            expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: close)
+            waitForExpectations(timeout: 5)
+        }
+        openPreviewAndCheckInk()
+        let sourceAttachment = XCTAttachment(screenshot: app.screenshot())
+        sourceAttachment.name = "Margin-chat-source-preview"
+        sourceAttachment.lifetime = .keepAlways
+        add(sourceAttachment)
+
+        close.tap()
+        waitForChatToClose()
+        XCTAssertTrue(pin.waitForExistence(timeout: 5), "closing the chat leaves its circular margin pin")
+        XCTAssertEqual(inkPixels(app, channel: 0), originalRed, "selection and chat must preserve the original ink presentation")
+        pin.tap()
+        XCTAssertTrue(close.waitForExistence(timeout: 5), "a pin opens its saved conversation")
+        pin.tap()
+        waitForChatToClose()
+        XCTAssertTrue(pin.exists, "tapping an open pin collapses the chat without deleting it")
+
+        // The system PencilKit palette may float over the footer. Use the
+        // always-accessible page manager, as the existing page-swap test does.
+        func selectPage(_ number: Int) {
+            app.buttons["페이지"].tap()
+            let row = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@ AND NOT (label CONTAINS '페이지 중')", "\(number)페이지")).firstMatch
+            XCTAssertTrue(row.waitForExistence(timeout: 5))
+            row.tap()
+        }
+        selectPage(2)
+        XCTAssertTrue(app.buttons["3페이지 중 2페이지, 페이지 관리"].waitForExistence(timeout: 5))
+        XCTAssertFalse(pin.exists, "a conversation pin must stay on its own page")
+        XCTAssertFalse(close.exists)
+        XCTAssertEqual(inkPixels(app, channel: 0), 0, "page change after AI interaction must not carry old ink")
+        selectPage(1)
+        XCTAssertTrue(app.buttons["3페이지 중 1페이지, 페이지 관리"].waitForExistence(timeout: 5))
+        XCTAssertTrue(pin.waitForExistence(timeout: 5), "returning to the source page restores its pin")
+        pin.tap()
+        XCTAssertTrue(close.waitForExistence(timeout: 5))
+        openPreviewAndCheckInk()
+        close.tap()
+        waitForChatToClose()
+        XCTAssertEqual(inkPixels(app, channel: 0), originalRed, "returning from a page restores all source ink unchanged")
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = "Margin-pin-page-round-trip"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+}

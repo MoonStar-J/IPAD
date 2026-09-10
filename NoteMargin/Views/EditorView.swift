@@ -42,7 +42,7 @@ struct EditorView: View {
                             Button("완료") { editingObjects = false; selectedElementID = nil }.bold()
                         }.padding(.horizontal, 20).padding(.vertical, 12).background(.bar)
                     }
-                    NotebookCanvas(note: note, page: page, session: session, store: store,
+                    AIEditorCanvas(note: note, page: page, session: session, store: store,
                                    fingerDrawing: fingerDrawing, editingObjects: editingObjects,
                                    toolsVisible: sheet == nil && !choosingPhoto,
                                    onTurnPage: { goToPage(pageIndex + $0) },

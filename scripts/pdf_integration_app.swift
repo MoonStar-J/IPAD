@@ -175,7 +175,96 @@ struct NoteMarginApp: App {
         session.stop()
     }
 
+    static func checkRegionCapture(_ store: NoteStore, joined: Notebook, drawing: PKDrawing) throws {
+        let page = joined.pages[0]
+        let original = drawing.dataRepresentation()
+        func pixel(_ image: UIImage, x: Int, y: Int) throws -> [UInt8] {
+            guard let cgImage = image.cgImage,
+                  let crop = cgImage.cropping(to: CGRect(x: x, y: y, width: 1, height: 1)) else {
+                throw NSError(domain: "region image pixel", code: 1)
+            }
+            var bytes = [UInt8](repeating: 0, count: 4)
+            bytes.withUnsafeMutableBytes {
+                let context = CGContext(data: $0.baseAddress, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,
+                                        space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+                context.draw(crop, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+            }
+            return bytes
+        }
+        // The black fixture stroke crosses the red/green PDF seam at (135, 960).
+        // All three layers must stay in the same coordinate system after cropping.
+        let seam = try RegionContextService.capture(note: joined, page: page, drawing: drawing, store: store,
+                                                     rect: CGRect(x: 100, y: 920, width: 100, height: 100))
+        let image = UIImage(data: seam.imageData)!
+        try check(image.size == CGSize(width: 200, height: 200), "region image contains only the selected crop")
+        let red = try pixel(image, x: 10, y: 10)
+        let green = try pixel(image, x: 10, y: 160)
+        let ink = try pixel(image, x: 70, y: 80)
+        try check(red[0] > 200 && red[1] < 80, "region crop preserves preceding PDF background")
+        try check(green[1] > 200 && green[0] < 80, "region crop preserves following rotated PDF background")
+        try check(ink.prefix(3).allSatisfy { $0 < 80 }, "region crop includes ink at its exact PDF seam position")
+        try check(seam.pdfPageNumbers == [1, 2], "region cites both crossed PDF pages")
+        try check(seam.pageID == page.id && seam.rect == CGRect(x: 100, y: 920, width: 100, height: 100), "region stores original document coordinates")
+
+        let clipped = try RegionContextService.capture(note: joined, page: page, drawing: drawing, store: store,
+                                                        rect: CGRect(x: -30, y: -30, width: 130, height: 130))
+        try check(clipped.rect == CGRect(x: 0, y: 0, width: 100, height: 100), "region clips off-page selection")
+        let bounded = try RegionContextService.capture(note: joined, page: page, drawing: drawing, store: store,
+                                                        rect: CGRect(x: 0, y: 0, width: page.width, height: page.height))
+        let boundedImage = UIImage(data: bounded.imageData)!
+        try check(max(boundedImage.size.width, boundedImage.size.height) <= 1800, "region image allocation is bounded for continuous PDFs")
+
+        let firstText = try RegionContextService.capture(note: joined, page: page, drawing: drawing, store: store,
+                                                          rect: CGRect(x: 0, y: 0, width: 440, height: 180))
+        try check(firstText.extractedText.contains("PAGE 1") && !firstText.extractedText.contains("PAGE 2"), "PDF text is limited to selected first-page content")
+        // A 90-degree clockwise page puts its original top-left text at top-right.
+        let rotatedText = try RegionContextService.capture(note: joined, page: page, drawing: drawing, store: store,
+                                                            rect: CGRect(x: 560, y: 960, width: 208, height: 600))
+        try check(rotatedText.extractedText.contains("PAGE 2") && !rotatedText.extractedText.contains("PAGE 1"), "rotated continuous PDF text maps back into source PDF coordinates")
+        let emptyText = try RegionContextService.capture(note: joined, page: page, drawing: drawing, store: store,
+                                                          rect: CGRect(x: 40, y: 1800, width: 220, height: 200))
+        try check(emptyText.extractedText.isEmpty, "blank selected region does not include unrelated PDF text")
+        try check(drawing.dataRepresentation() == original, "region capture never mutates handwritten strokes")
+    }
+
+    static func checkProjectAndChatWorkflow(_ store: NoteStore) throws {
+        let first = store.createProject(title: "AI 프로젝트 검사", agentInstructions: "과정을 설명해 줘")!
+        let second = store.createProject(title: "다른 프로젝트")!
+        let noteID = store.createNote(title: "Project workflow", paper: .plain, cover: .sage, folderID: nil, projectID: first)!
+        let note = store.note(noteID)!
+        try check(NoteStore().note(noteID)?.projectID == first, "new notes retain selected project after reload")
+        let region = try RegionContextService.capture(note: note, page: note.pages[0], drawing: PKDrawing(), store: store,
+                                                     rect: CGRect(x: 100, y: 100, width: 200, height: 200))
+        let repository = MarginChatRepository(root: directory.appendingPathComponent("ChatChecks-" + UUID().uuidString))
+        let ai = MarginAIStore(repository: repository)
+        let id = ai.create(note: note, project: store.project(first), region: region)!
+        ai.setDraft("질문 작성 중", for: id); ai.flushDraft(id)
+        let restored = MarginAIStore(repository: repository); restored.load(noteID: noteID)
+        try check(restored.conversation(id)?.draft == "질문 작성 중", "chat draft survives reopening the store")
+        try check(store.assignProject(noteID: noteID, projectID: second), "move project persists")
+        try check(!ai.send("other project", conversationID: id, note: store.note(noteID)!, project: store.project(second)),
+                  "old-project chat cannot send under the destination project")
+        // Make atomic replacement fail in the disposable test directory, without
+        // discarding the previously saved chat. No API or Keychain is accessed.
+        let file = repository.root.appendingPathComponent(noteID.uuidString).appendingPathComponent(id.uuidString + ".json")
+        let backup = file.appendingPathExtension("backup")
+        try FileManager.default.moveItem(at: file, to: backup)
+        try FileManager.default.createDirectory(at: file, withIntermediateDirectories: false)
+        ai.setDraft("저장 실패 후에도 보존", for: id); ai.flushDraft(id)
+        try check(ai.needsSaving(id) && ai.conversation(id)?.draft == "저장 실패 후에도 보존" && ai.failures[id] != nil,
+                  "failed draft save remains in memory with a visible retry action")
+        try FileManager.default.removeItem(at: file)
+        try FileManager.default.moveItem(at: backup, to: file)
+        ai.retrySave(id)
+        try check(!ai.needsSaving(id) && ai.failures[id] == nil && repository.load(noteID: noteID).first?.draft == "저장 실패 후에도 보존",
+                  "retry saves retained draft without a billable request")
+        store.deleteProject(second)
+        try check(store.note(noteID) != nil && store.note(noteID)?.projectID == nil, "deleting project preserves its notebook")
+        store.deleteProject(first)
+    }
+
     static func run(_ store: NoteStore) throws -> UUID {
+        try checkProjectAndChatWorkflow(store)
         let sizes = [CGSize(width: 400, height: 500), CGSize(width: 600, height: 300), CGSize(width: 300, height: 500)]
         let colors: [UIColor] = [.red, .green, .blue]
         let data = UIGraphicsPDFRenderer(bounds: CGRect(origin: .zero, size: sizes[0])).pdfData { output in
@@ -217,6 +306,7 @@ struct NoteMarginApp: App {
         let reopened = NoteStore()
         let drawing = try reopened.drawing(noteID: joinedID, pageID: page.id)
         try check(drawing.strokes.count == 1 && drawing.bounds.minY < 960 && drawing.bounds.maxY > 960, "cross-boundary ink survives reopen")
+        try checkRegionCapture(reopened, joined: joined, drawing: drawing)
         let output = try ExportService.exportPDF(note: joined, store: reopened)
         let exported = PDFDocument(url: output)!
         try check(exported.pageCount == 1 && exported.page(at: 0)!.bounds(for: .mediaBox).height == 3776, "continuous PDF export")
@@ -229,7 +319,7 @@ struct NoteMarginApp: App {
         try checkViewport(store, prepared: prepared)
         try checkPageReplacement(store)
         try checkEraserPersistence(store)
-        report("PASS: page render replacement; blank and existing ink destinations; stale callback rejection; selected pen preservation; bounded native PencilKit viewport; deep scrolling; zoom/background coordinates; repeated update stability; rotated and mixed-size PDF preparation; prepare without commit; both layouts; joined background pixel order; cross-boundary drawing save/reopen; continuous and paged PDF export; PNG export; duplicated assets")
+        report("PASS: bounded region capture; PDF/ink seam alignment; rotated region PDF text; page render replacement; blank and existing ink destinations; stale callback rejection; selected pen preservation; bounded native PencilKit viewport; deep scrolling; zoom/background coordinates; repeated update stability; rotated and mixed-size PDF preparation; prepare without commit; both layouts; joined background pixel order; cross-boundary drawing save/reopen; continuous and paged PDF export; PNG export; duplicated assets")
         return joinedID
     }
 }

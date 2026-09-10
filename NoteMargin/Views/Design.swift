@@ -44,6 +44,7 @@ struct NotebookForm: View {
     @EnvironmentObject private var store: NoteStore
     var existing: Notebook?
     var folderID: UUID?
+    var projectID: UUID?
     var onCreated: (UUID) -> Void = { _ in }
     @State private var title = ""
     @State private var paper: PaperStyle = .ruled
@@ -89,7 +90,7 @@ struct NotebookForm: View {
                     Button(existing == nil ? "만들기" : "완료") {
                         if let existing {
                             if store.updateNote(existing.id, { $0.title = title.trimmedOrUntitled; $0.cover = cover }) { dismiss() }
-                        } else if let id = store.createNote(title: title, paper: paper, cover: cover, folderID: folderID) {
+                        } else if let id = store.createNote(title: title, paper: paper, cover: cover, folderID: folderID, projectID: projectID) {
                             dismiss()
                             onCreated(id)
                         }

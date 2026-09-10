@@ -1,4 +1,5 @@
 import Foundation
+import CoreGraphics
 
 // A portable executable suite: also runs with Command Line Tools, where XCTest
 // is not shipped. The app and these checks compile the same Core sources.
@@ -18,6 +19,13 @@ func expectThrows(_ action: () throws -> Void) throws {
 struct CoreCheck {
     let name: String
     let run: (LibraryRepository) throws -> Void
+}
+
+func sampleConversation(for note: Notebook) -> MarginConversation {
+    MarginConversation(noteID: note.id, pageID: note.pages[0].id, projectID: note.projectID,
+                       projectTitle: "학습 프로젝트", rect: CGRect(x: 30, y: 40, width: 120, height: 180),
+                       imageData: Data([137, 80, 78, 71]), extractedText: "선택한 PDF 내용",
+                       sourceDescription: "\(note.title) · 1페이지")
 }
 
 let checks: [CoreCheck] = [
@@ -135,6 +143,216 @@ let checks: [CoreCheck] = [
         try expect(library.notebooks.count == 2)
         try expect(library.notebooks.allSatisfy { $0.folderID == nil })
         try expect(library.notebooks[1].deletedAt != nil)
+    },
+    CoreCheck(name: "Libraries saved before projects reopen without losing note data") { repository in
+        let folder = NoteFolder(title: "기존 강의")
+        var note = Notebook(title: "이전 버전 노트", folderID: folder.id, isFavorite: true)
+        note.pdfAssetName = "original.pdf"
+        note.pages[0].elements = [PageElement(kind: .text, text: "기존 필기")]
+        let expected = Library(folders: [folder], notebooks: [note])
+        var fields = try JSONSerialization.jsonObject(with: JSONEncoder().encode(expected)) as! [String: Any]
+        fields.removeValue(forKey: "projects")
+        var notebooks = fields["notebooks"] as! [[String: Any]]
+        notebooks[0].removeValue(forKey: "projectID")
+        fields["notebooks"] = notebooks
+        try JSONSerialization.data(withJSONObject: fields).write(to: repository.root.appendingPathComponent("library.json"))
+        try repository.writeDrawing(Data([4, 8, 15]), noteID: note.id, pageID: note.pages[0].id)
+        try repository.writeAsset(Data([16, 23, 42]), noteID: note.id, name: "original.pdf")
+        let reopened = try repository.load()
+        try expect(reopened == expected)
+        try expect(reopened.projects.isEmpty && reopened.notebooks[0].projectID == nil)
+        try repository.save(reopened)
+        try expect(repository.load() == expected)
+        try expect(repository.readDrawing(noteID: note.id, pageID: note.pages[0].id) == Data([4, 8, 15]))
+        try expect(Data(contentsOf: repository.assetURL(noteID: note.id, name: "original.pdf")) == Data([16, 23, 42]))
+    },
+    CoreCheck(name: "Projects retain instructions, provider preferences and notebook membership") { repository in
+        let project = NoteProject(title: "물리학", agentInstructions: "단위를 설명하고 단계별로 풀이해 주세요.",
+                                  preferredProvider: "openai", preferredModel: "gpt-5-mini")
+        let other = NoteProject(title: "수학", agentInstructions: "먼저 힌트를 주세요.")
+        let note = Notebook(title: "운동량", projectID: project.id)
+        let expected = Library(projects: [project, other], notebooks: [note, Notebook(title: "미분", projectID: other.id)])
+        try repository.save(expected)
+        try expect(LibraryRepository(root: repository.root).load() == expected)
+    },
+    CoreCheck(name: "Project assignment rejects unknown identifiers and preserves notebook content") { _ in
+        let first = NoteProject(title: "첫 프로젝트"), second = NoteProject(title: "다음 프로젝트")
+        let folder = NoteFolder(title: "강의 자료")
+        let note = Notebook(title: "이동할 노트", folderID: folder.id, projectID: first.id,
+                            updatedAt: Date(timeIntervalSince1970: 1), pdfAssetName: "original.pdf")
+        var library = Library(folders: [folder], projects: [first, second], notebooks: [note])
+        let original = library
+        try expect(!library.assignProject(noteID: note.id, projectID: UUID()))
+        try expect(library == original, "Unknown projects must not change membership or timestamps")
+        try expect(!library.assignProject(noteID: UUID(), projectID: second.id))
+        try expect(!library.assignProject(noteID: UUID(), projectID: nil))
+        try expect(library == original, "Unknown notebooks must not change the library")
+        try expect(library.assignProject(noteID: note.id, projectID: second.id))
+        var expected = note
+        expected.projectID = second.id
+        expected.updatedAt = library.notebooks[0].updatedAt
+        try expect(library.notebooks == [expected])
+        try expect(expected.updatedAt > note.updatedAt)
+        try expect(library.assignProject(noteID: note.id, projectID: nil))
+        expected.projectID = nil
+        expected.updatedAt = library.notebooks[0].updatedAt
+        try expect(library.notebooks == [expected])
+        try expect(library.folders == original.folders && library.projects == original.projects)
+    },
+    CoreCheck(name: "Removing a project preserves active notes, trash, folders and stored ink") { repository in
+        let removed = NoteProject(title: "삭제할 프로젝트"), retained = NoteProject(title: "남길 프로젝트")
+        let folder = NoteFolder(title: "유지할 폴더")
+        let active = Notebook(title: "활성 노트", folderID: folder.id, projectID: removed.id, pdfAssetName: "original.pdf")
+        let trashed = Notebook(title: "휴지통 노트", projectID: removed.id, deletedAt: Date(timeIntervalSince1970: 10))
+        let unrelated = Notebook(title: "다른 프로젝트 노트", projectID: retained.id)
+        var library = Library(folders: [folder], projects: [removed, retained], notebooks: [active, trashed, unrelated])
+        try repository.writeDrawing(Data([1, 9, 2]), noteID: active.id, pageID: active.pages[0].id)
+        try repository.writeAsset(Data([6, 5]), noteID: active.id, name: "original.pdf")
+        library.removeProject(removed.id)
+        var expectedActive = active, expectedTrashed = trashed
+        expectedActive.projectID = nil
+        expectedTrashed.projectID = nil
+        try expect(library.projects == [retained])
+        try expect(library.folders == [folder])
+        try expect(library.notebooks == [expectedActive, expectedTrashed, unrelated])
+        let afterRemoval = library
+        library.removeProject(removed.id)
+        try expect(library == afterRemoval, "Repeated project deletion must be harmless")
+        try repository.save(library)
+        try expect(repository.load() == afterRemoval)
+        try expect(repository.readDrawing(noteID: active.id, pageID: active.pages[0].id) == Data([1, 9, 2]))
+        try expect(Data(contentsOf: repository.assetURL(noteID: active.id, name: "original.pdf")) == Data([6, 5]))
+    },
+    CoreCheck(name: "Project filters isolate membership, search and trash") { _ in
+        let first = NoteProject(title: "물리학"), second = NoteProject(title: "수학")
+        let folderID = UUID()
+        let assigned = Notebook(title: "공통 키워드 A", folderID: folderID, projectID: first.id)
+        let other = Notebook(title: "공통 키워드 B", folderID: folderID, projectID: second.id)
+        let unassigned = Notebook(title: "공통 키워드 C", folderID: folderID)
+        let trashed = Notebook(title: "공통 키워드 D", projectID: first.id, deletedAt: Date())
+        let unassignedTrash = Notebook(title: "공통 키워드 E", deletedAt: Date())
+        let library = Library(projects: [first, second], notebooks: [assigned, other, unassigned, trashed, unassignedTrash])
+        try expect(library.notes(in: .project(first.id), query: " 공통 ", sort: .title).map(\.id) == [assigned.id])
+        try expect(library.notes(in: .project(second.id), query: "", sort: .title).map(\.id) == [other.id])
+        try expect(library.notes(in: .unassigned, query: "", sort: .title).map(\.id) == [unassigned.id])
+        try expect(library.notes(in: .project(UUID()), query: "", sort: .title).isEmpty)
+        try expect(library.notes(in: .project(first.id), query: "키워드 B", sort: .title).isEmpty)
+        try expect(library.notes(in: .folder(folderID), query: "", sort: .title).map(\.id) == [assigned.id, other.id, unassigned.id])
+        try expect(library.notes(in: .trash, query: "", sort: .title).map(\.id) == [trashed.id, unassignedTrash.id])
+    },
+    CoreCheck(name: "A missing chat directory loads empty without writing files") { repository in
+        let root = repository.root.appendingPathComponent("MarginChats")
+        let chats = MarginChatRepository(root: root)
+        try expect(chats.load(noteID: UUID()).isEmpty)
+        try expect(!FileManager.default.fileExists(atPath: root.path))
+    },
+    CoreCheck(name: "Margin chats reopen with the original region, image, messages and order") { repository in
+        let root = repository.root.appendingPathComponent("MarginChats")
+        let chats = MarginChatRepository(root: root)
+        let note = Notebook(title: "물리학", projectID: UUID())
+        var first = sampleConversation(for: note)
+        first.createdAt = Date(timeIntervalSince1970: 1)
+        first.messages = [MarginMessage(role: .user, text: "이 공식의 의미는?"),
+                          MarginMessage(role: .assistant, text: "운동량 보존을 나타냅니다.")]
+        first.lastProvider = "openai"
+        first.lastModel = "gpt-5-mini"
+        first.draft = "아직 보내지 않은 후속 질문"
+        var second = sampleConversation(for: note)
+        second.createdAt = Date(timeIntervalSince1970: 2)
+        try chats.save(second)
+        try chats.save(first)
+        try expect(MarginChatRepository(root: root).load(noteID: note.id) == [first, second])
+        first.messages.append(MarginMessage(role: .user, text: "예제도 보여 줘."))
+        first.updatedAt = Date(timeIntervalSince1970: 3)
+        try chats.save(first)
+        let reopened = try MarginChatRepository(root: root).load(noteID: note.id)
+        try expect(reopened == [first, second], "Saving a reply must replace one chat without duplicating or changing another")
+        try expect(reopened[0].title == "이 공식의 의미는?")
+        try expect(reopened[1].title == "선택 영역 질문")
+    },
+    CoreCheck(name: "Margin conversations stay isolated by both notebook and project") { _ in
+        let firstProject = UUID(), secondProject = UUID()
+        let first = Notebook(title: "첫 노트", projectID: firstProject)
+        let other = Notebook(title: "같은 프로젝트의 다른 노트", projectID: firstProject)
+        let chat = sampleConversation(for: first)
+        try expect(chat.belongs(to: first))
+        try expect(!chat.belongs(to: other), "A shared project must not expose another notebook's margin pins")
+        var moved = first
+        moved.projectID = secondProject
+        try expect(!chat.belongs(to: moved), "Moving a notebook must not expose the old project's conversation")
+        moved.projectID = nil
+        try expect(!chat.belongs(to: moved))
+        let unassignedChat = sampleConversation(for: moved)
+        try expect(unassignedChat.belongs(to: moved))
+        try expect(!unassignedChat.belongs(to: Notebook(title: "다른 미지정 노트")))
+        try expect(!unassignedChat.belongs(to: first), "Assigning a project must not inherit unassigned conversations")
+        moved.projectID = firstProject
+        try expect(chat.belongs(to: moved), "Returning to the original project should recover its conversation")
+    },
+    CoreCheck(name: "Corrupt chat data is reported without replacing valid or broken files") { repository in
+        let root = repository.root.appendingPathComponent("MarginChats")
+        let chats = MarginChatRepository(root: root)
+        let note = Notebook(title: "보존할 노트")
+        let chat = sampleConversation(for: note)
+        try chats.save(chat)
+        let directory = root.appendingPathComponent(note.id.uuidString)
+        let validURL = directory.appendingPathComponent(chat.id.uuidString + ".json")
+        let validData = try Data(contentsOf: validURL)
+        let brokenURL = directory.appendingPathComponent(UUID().uuidString + ".json")
+        let brokenData = Data("{\"messages\": interrupted save".utf8)
+        try brokenData.write(to: brokenURL)
+        try expectThrows { _ = try chats.load(noteID: note.id) }
+        try expect(Data(contentsOf: brokenURL) == brokenData)
+        try expect(Data(contentsOf: validURL) == validData)
+    },
+    CoreCheck(name: "Misfiled chat identities are rejected without crossing notebook boundaries") { repository in
+        let root = repository.root.appendingPathComponent("MarginChats")
+        let chats = MarginChatRepository(root: root)
+        let note = Notebook(title: "원래 노트")
+        let chat = sampleConversation(for: note)
+        try chats.save(chat)
+        let data = try JSONEncoder().encode(chat)
+        let otherNoteID = UUID()
+        let otherDirectory = root.appendingPathComponent(otherNoteID.uuidString)
+        try FileManager.default.createDirectory(at: otherDirectory, withIntermediateDirectories: true)
+        let wrongNoteURL = otherDirectory.appendingPathComponent(chat.id.uuidString + ".json")
+        try data.write(to: wrongNoteURL)
+        try expectThrows { _ = try chats.load(noteID: otherNoteID) }
+        try expect(Data(contentsOf: wrongNoteURL) == data)
+        try expect(chats.load(noteID: note.id) == [chat])
+        let wrongIDURL = root.appendingPathComponent(note.id.uuidString).appendingPathComponent(UUID().uuidString + ".json")
+        try data.write(to: wrongIDURL)
+        try expectThrows { _ = try chats.load(noteID: note.id) }
+        try expect(Data(contentsOf: wrongIDURL) == data)
+    },
+    CoreCheck(name: "Deleting a conversation or notebook preserves unrelated chat history") { repository in
+        let root = repository.root.appendingPathComponent("MarginChats")
+        let chats = MarginChatRepository(root: root)
+        let first = Notebook(title: "첫 노트"), other = Notebook(title: "다른 노트")
+        let removed = sampleConversation(for: first), sibling = sampleConversation(for: first)
+        let unrelated = sampleConversation(for: other)
+        try chats.save(removed)
+        try chats.save(sibling)
+        try chats.save(unrelated)
+        try chats.delete(removed)
+        try expect(chats.load(noteID: first.id) == [sibling])
+        try expect(chats.load(noteID: other.id) == [unrelated])
+        try chats.deleteNote(first.id)
+        try expect(chats.load(noteID: first.id).isEmpty)
+        try expect(chats.load(noteID: other.id) == [unrelated])
+        try chats.deleteNote(first.id)
+        try expect(MarginChatRepository(root: root).load(noteID: other.id) == [unrelated])
+    },
+    CoreCheck(name: "An invalid chat update cannot replace its last valid save") { repository in
+        let root = repository.root.appendingPathComponent("MarginChats")
+        let chats = MarginChatRepository(root: root)
+        let note = Notebook(title: "학습 노트")
+        var chat = sampleConversation(for: note)
+        try chats.save(chat)
+        let saved = chat
+        chat.updatedAt = Date(timeIntervalSince1970: .nan)
+        try expectThrows { try chats.save(chat) }
+        try expect(chats.load(noteID: note.id) == [saved])
     },
     CoreCheck(name: "Trash filtering and restoration") { _ in
         let folderID = UUID()

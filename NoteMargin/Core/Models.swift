@@ -87,6 +87,7 @@ struct Notebook: Codable, Identifiable, Equatable {
     var title: String
     var cover: CoverColor = .blue
     var folderID: UUID?
+    var projectID: UUID?
     var isFavorite = false
     var createdAt = Date()
     var updatedAt = Date()
@@ -100,10 +101,36 @@ struct NoteFolder: Codable, Identifiable, Equatable {
     var title: String
 }
 
+struct NoteProject: Codable, Identifiable, Equatable {
+    var id = UUID()
+    var title: String
+    var agentInstructions = ""
+    var preferredProvider: String?
+    var preferredModel: String?
+}
+
 struct Library: Codable, Equatable {
     var version = 1
     var folders: [NoteFolder] = []
+    var projects: [NoteProject] = []
     var notebooks: [Notebook] = []
+
+    init(version: Int = 1, folders: [NoteFolder] = [], projects: [NoteProject] = [], notebooks: [Notebook] = []) {
+        self.version = version
+        self.folders = folders
+        self.projects = projects
+        self.notebooks = notebooks
+    }
+
+    private enum CodingKeys: String, CodingKey { case version, folders, projects, notebooks }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        version = try values.decode(Int.self, forKey: .version)
+        folders = try values.decode([NoteFolder].self, forKey: .folders)
+        projects = try values.decodeIfPresent([NoteProject].self, forKey: .projects) ?? []
+        notebooks = try values.decode([Notebook].self, forKey: .notebooks)
+    }
 
     mutating func removeFolder(_ id: UUID) {
         folders.removeAll { $0.id == id }
@@ -111,16 +138,34 @@ struct Library: Codable, Equatable {
             notebooks[index].folderID = nil
         }
     }
+
+    mutating func removeProject(_ id: UUID) {
+        projects.removeAll { $0.id == id }
+        for index in notebooks.indices where notebooks[index].projectID == id {
+            notebooks[index].projectID = nil
+        }
+    }
+
+    @discardableResult
+    mutating func assignProject(noteID: UUID, projectID: UUID?) -> Bool {
+        guard projectID == nil || projects.contains(where: { $0.id == projectID }),
+              let index = notebooks.firstIndex(where: { $0.id == noteID }) else { return false }
+        notebooks[index].projectID = projectID
+        notebooks[index].updatedAt = Date()
+        return true
+    }
 }
 
 enum LibraryFilter: Hashable {
-    case all, favorites, trash, folder(UUID)
+    case all, favorites, trash, folder(UUID), project(UUID), unassigned
     func includes(_ note: Notebook) -> Bool {
         switch self {
         case .all: return note.deletedAt == nil
         case .favorites: return note.deletedAt == nil && note.isFavorite
         case .trash: return note.deletedAt != nil
         case .folder(let id): return note.deletedAt == nil && note.folderID == id
+        case .project(let id): return note.deletedAt == nil && note.projectID == id
+        case .unassigned: return note.deletedAt == nil && note.projectID == nil
         }
     }
 }

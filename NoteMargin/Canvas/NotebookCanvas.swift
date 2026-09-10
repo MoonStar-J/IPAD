@@ -12,6 +12,9 @@ struct NotebookCanvas: UIViewRepresentable {
     var onTurnPage: (Int) -> Bool
     var onSelectElement: (UUID?) -> Void
     var onMoveElement: (UUID, Double, Double) -> Void
+    var selectingRegion = false
+    var onRegionChange: ((CGRect?) -> Void)? = nil
+    var onViewportChange: ((CGAffineTransform, CGRect) -> Void)? = nil
 
     func makeUIView(context: Context) -> CanvasHostView {
         let view = CanvasHostView(session: session)
@@ -22,7 +25,8 @@ struct NotebookCanvas: UIViewRepresentable {
     func updateUIView(_ view: CanvasHostView, context: Context) {
         view.configure(note: note, page: page, store: store, fingerDrawing: fingerDrawing,
                        editingObjects: editingObjects, toolsVisible: toolsVisible,
-                       onSelect: onSelectElement, onMove: onMoveElement, onTurnPage: onTurnPage)
+                       onSelect: onSelectElement, onMove: onMoveElement, onTurnPage: onTurnPage, selectingRegion: selectingRegion,
+                       onRegionChange: onRegionChange, onViewportChange: onViewportChange)
     }
 
     static func dismantleUIView(_ view: CanvasHostView, coordinator: ()) {
@@ -34,6 +38,11 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
     let session: DrawingSession
     private var canvas: PagingCanvasView { session.canvas }
     private let paper = PaperView()
+    private let regionSelection = RegionSelectionView()
+    private var onViewportChange: ((CGAffineTransform, CGRect) -> Void)?
+    private var lastReportedTransform = CGAffineTransform.identity
+    private var lastReportedBounds = CGRect.zero
+    private var lastReportedRegion: CGRect?
     private let eraserPreview = StrokeEraserPreviewView()
     private var strokeEraser: StrokeEraserGestureRecognizer!
     private var eraserTransaction: StrokeEraserTransaction?
@@ -94,6 +103,7 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
         canvas.frame = bounds
         addSubview(canvas)
         addSubview(eraserPreview)
+        addSubview(regionSelection)
         strokeEraser = StrokeEraserGestureRecognizer(target: self, action: #selector(eraseStroke(_:)))
         strokeEraser.delegate = self
         canvas.addGestureRecognizer(strokeEraser)
@@ -126,7 +136,9 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
 
     func configure(note: Notebook, page: NotePage, store: NoteStore, fingerDrawing: Bool,
                    editingObjects: Bool, toolsVisible: Bool,
-                   onSelect: @escaping (UUID?) -> Void, onMove: @escaping (UUID, Double, Double) -> Void, onTurnPage: @escaping (Int) -> Bool) {
+                   onSelect: @escaping (UUID?) -> Void, onMove: @escaping (UUID, Double, Double) -> Void, onTurnPage: @escaping (Int) -> Bool,
+                   selectingRegion: Bool = false, onRegionChange: ((CGRect?) -> Void)? = nil,
+                   onViewportChange: ((CGAffineTransform, CGRect) -> Void)? = nil) {
         let pageChanged = currentPage?.id != page.id
         let contentChanged = currentPage != page || currentNote?.pdfAssetName != note.pdfAssetName
         currentNote = note
@@ -134,7 +146,18 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
         self.onSelect = onSelect
         self.onMove = onMove
         self.onTurnPage = onTurnPage
-        let canTurn = note.pages.count > 1 && !page.isContinuousPDF && !editingObjects && toolsVisible
+        self.onViewportChange = onViewportChange
+        regionSelection.onChange = { [weak self] rect in
+            guard let self else { return }
+            let document = rect.applying(self.documentToViewport.inverted())
+                .intersection(CGRect(x: 0, y: 0, width: page.width, height: page.height))
+            guard document != self.lastReportedRegion else { return }
+            self.lastReportedRegion = document
+            DispatchQueue.main.async { onRegionChange?(document) }
+        }
+        regionSelection.isHidden = !selectingRegion
+        if !selectingRegion { regionSelection.clear(); lastReportedRegion = nil }
+        let canTurn = note.pages.count > 1 && !page.isContinuousPDF && !editingObjects && !selectingRegion && toolsVisible
         pageSwipes.forEach { if $0.isEnabled != canTurn { $0.isEnabled = canTurn } }
         session.canvas.pageTurningEnabled = canTurn
         if pageChanged {
@@ -157,18 +180,18 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
         }
         let policy: PKCanvasViewDrawingPolicy = fingerDrawing ? .anyInput : .pencilOnly
         if canvas.drawingPolicy != policy { canvas.drawingPolicy = policy }
-        let canDraw = !editingObjects && session.loadError == nil
+        let canDraw = !editingObjects && !selectingRegion && session.loadError == nil
         canErase = canDraw
         if !canDraw { cancelStrokeErasing() }
         if canvas.drawingGestureRecognizer.isEnabled != canDraw {
             canvas.drawingGestureRecognizer.isEnabled = canDraw
         }
-        if objectPan.isEnabled != editingObjects { objectPan.isEnabled = editingObjects }
-        if objectTap.isEnabled != editingObjects { objectTap.isEnabled = editingObjects }
+        if objectPan.isEnabled != (editingObjects && !selectingRegion) { objectPan.isEnabled = editingObjects && !selectingRegion }
+        if objectTap.isEnabled != (editingObjects && !selectingRegion) { objectTap.isEnabled = editingObjects && !selectingRegion }
         canvas.panGestureRecognizer.minimumNumberOfTouches = (fingerDrawing || editingObjects) ? 2 : 1
         if !editingObjects { selectedID = nil }
         updateSelection()
-        showTools = toolsVisible && !editingObjects && session.loadError == nil
+        showTools = toolsVisible && !editingObjects && !selectingRegion && session.loadError == nil
         DispatchQueue.main.async { [weak self] in
             guard let self, self.window != nil else { return }
             self.session.setToolsVisible(self.showTools)
@@ -186,6 +209,7 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
         if eraserTransaction != nil && lastSize != bounds.size { cancelStrokeErasing() }
         if canvas.frame != bounds { canvas.frame = bounds }
         if paper.frame != bounds { paper.frame = bounds }
+        if regionSelection.frame != bounds { regionSelection.frame = bounds }
         if eraserPreview.frame != bounds { eraserPreview.frame = bounds }
         if needsFit || lastSize != bounds.size {
             lastSize = bounds.size
@@ -233,6 +257,16 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
         paper.setNeedsDisplay()
         eraserPreview.documentToViewport = documentToViewport
         if !eraserPreview.isHidden { eraserPreview.paperImage = eraserPaperImage() }
+        if !regionSelection.isHidden, let page = currentPage {
+            let visiblePage = CGRect(x: 0, y: 0, width: page.width, height: page.height).applying(documentToViewport).intersection(bounds.insetBy(dx: 12, dy: 12))
+            regionSelection.configure(available: visiblePage)
+        }
+        if lastReportedTransform != documentToViewport || lastReportedBounds != bounds {
+            lastReportedTransform = documentToViewport
+            lastReportedBounds = bounds
+            let transform = documentToViewport, viewport = bounds
+            DispatchQueue.main.async { [weak self] in self?.onViewportChange?(transform, viewport) }
+        }
         updateSelection()
     }
 
@@ -497,5 +531,82 @@ final class StrokeEraserGestureRecognizer: UIGestureRecognizer {
         let points = samples.map { view.convert($0, from: nil) }
         samples.removeAll(keepingCapacity: true)
         return points
+    }
+}
+
+
+/// An input overlay used only while the user adjusts a question's crop.
+final class RegionSelectionView: UIView {
+    var onChange: ((CGRect) -> Void)?
+    private var available = CGRect.zero
+    private var selection = CGRect.zero
+    private var start = CGRect.zero
+    private var corner: Int?
+    private var freshOrigin: CGPoint?
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        isOpaque = false
+        isHidden = true
+        addGestureRecognizer(UIPanGestureRecognizer(target: self, action: #selector(pan(_:))))
+        accessibilityIdentifier = "ai-region-selection"
+        accessibilityLabel = "질문 영역 선택. 사각형을 이동하거나 모서리를 끌어 크기를 조절하세요."
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    func clear() { selection = .zero }
+    func configure(available: CGRect) {
+        guard !available.isNull, available.width >= 40, available.height >= 40 else { return }
+        self.available = available
+        if selection.isEmpty {
+            selection = available.insetBy(dx: available.width * 0.16, dy: available.height * 0.3)
+        } else if !available.contains(selection) {
+            selection = selection.intersection(available)
+            if selection.isNull || selection.width < 24 || selection.height < 24 {
+                selection = available.insetBy(dx: available.width * 0.16, dy: available.height * 0.3)
+            }
+        }
+        onChange?(selection)
+        setNeedsDisplay()
+    }
+    private var corners: [CGPoint] {
+        [CGPoint(x: selection.minX, y: selection.minY), CGPoint(x: selection.maxX, y: selection.minY),
+         CGPoint(x: selection.minX, y: selection.maxY), CGPoint(x: selection.maxX, y: selection.maxY)]
+    }
+    @objc private func pan(_ gesture: UIPanGestureRecognizer) {
+        let location = gesture.location(in: self)
+        let point = CGPoint(x: min(available.maxX, max(available.minX, location.x)), y: min(available.maxY, max(available.minY, location.y)))
+        if gesture.state == .began {
+            start = selection
+            corner = corners.indices.min(by: { hypot(corners[$0].x - point.x, corners[$0].y - point.y) < hypot(corners[$1].x - point.x, corners[$1].y - point.y) })
+            if let index = corner, hypot(corners[index].x - point.x, corners[index].y - point.y) > 35 { corner = nil }
+            freshOrigin = corner == nil && !selection.contains(point) ? point : nil
+        }
+        if let origin = freshOrigin {
+            selection = CGRect(x: min(origin.x, point.x), y: min(origin.y, point.y), width: max(24, abs(point.x-origin.x)), height: max(24, abs(point.y-origin.y))).intersection(available)
+        } else if let corner {
+            let opposite = [CGPoint(x: start.maxX, y: start.maxY), CGPoint(x: start.minX, y: start.maxY),
+                            CGPoint(x: start.maxX, y: start.minY), CGPoint(x: start.minX, y: start.minY)][corner]
+            selection = CGRect(x: min(opposite.x, point.x), y: min(opposite.y, point.y), width: max(24, abs(point.x-opposite.x)), height: max(24, abs(point.y-opposite.y))).intersection(available)
+        } else {
+            let delta = gesture.translation(in: self)
+            selection.origin = CGPoint(x: min(available.maxX-start.width, max(available.minX, start.minX+delta.x)),
+                                       y: min(available.maxY-start.height, max(available.minY, start.minY+delta.y)))
+        }
+        if gesture.state == .cancelled { selection = start }
+        onChange?(selection)
+        setNeedsDisplay()
+    }
+    override func draw(_ rect: CGRect) {
+        guard !selection.isEmpty else { return }
+        let dim = UIBezierPath(rect: bounds)
+        dim.append(UIBezierPath(roundedRect: selection, cornerRadius: 6))
+        dim.usesEvenOddFillRule = true
+        UIColor.black.withAlphaComponent(0.16).setFill(); dim.fill()
+        UIColor.systemBlue.setStroke()
+        let border = UIBezierPath(roundedRect: selection, cornerRadius: 6)
+        border.lineWidth = 2; border.stroke()
+        for corner in corners {
+            let handle = UIBezierPath(ovalIn: CGRect(x: corner.x-7, y: corner.y-7, width: 14, height: 14))
+            UIColor.white.setFill(); handle.fill(); handle.lineWidth = 2; handle.stroke()
+        }
     }
 }
