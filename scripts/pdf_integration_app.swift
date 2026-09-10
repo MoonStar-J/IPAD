@@ -17,7 +17,10 @@ struct NoteMarginApp: App {
                 else { ProgressView("PDF integration checks") }
             }.environmentObject(store).task {
                 guard !ran else { return }; ran = true
-                do { noteID = try PDFIntegrationChecks.run(store) }
+                do {
+                    let checked = try PDFIntegrationChecks.run(store)
+                    noteID = CommandLine.arguments.contains("--page-swap") ? try PDFIntegrationChecks.pageSwapFixture(store).id : checked
+                }
                 catch { PDFIntegrationChecks.report("FAIL: \(error)") }
             }
         }
@@ -40,6 +43,58 @@ struct NoteMarginApp: App {
         }
         return pixel
     }
+    static func pageSwapFixture(_ store: NoteStore) throws -> Notebook {
+        guard let id = store.createNote(title: "Page swap regression", paper: .plain, cover: .blue, folderID: nil) else {
+            throw NSError(domain: "page fixture", code: 1)
+        }
+        let pages = [NotePage(), NotePage(height: 1300), NotePage(height: 768)]
+        try check(store.updateNote(id) { $0.pages = pages }, "fixture pages")
+        for (index, color) in [(0, UIColor.red), (2, UIColor.blue)] {
+            let points = [CGPoint(x: 140, y: 360), CGPoint(x: 600, y: 480)].enumerated().map { index, point in
+                PKStrokePoint(location: point, timeOffset: Double(index) * 0.1, size: CGSize(width: 18, height: 18), opacity: 1, force: 1, azimuth: 0, altitude: .pi / 2)
+            }
+            let stroke = PKStroke(ink: PKInk(.pen, color: color), path: PKStrokePath(controlPoints: points, creationDate: Date()))
+            store.queueDrawing(PKDrawing(strokes: [stroke]), noteID: id, pageID: pages[index].id)
+        }
+        try check(store.flushDrawings(), "fixture ink")
+        return store.note(id)!
+    }
+
+    static func checkPageReplacement(_ store: NoteStore) throws {
+        let note = try pageSwapFixture(store)
+        let session = DrawingSession()
+        let host = CanvasHostView(session: session)
+        session.host = host
+        host.frame = CGRect(x: 0, y: 0, width: 820, height: 1000)
+        func open(_ index: Int) {
+            session.load(noteID: note.id, pageID: note.pages[index].id, store: store)
+            host.configure(note: note, page: note.pages[index], store: store, fingerDrawing: true,
+                           editingObjects: false, toolsVisible: false, onSelect: { _ in },
+                           onMove: { _, _, _ in }, onTurnPage: { _ in false })
+            host.layoutIfNeeded()
+        }
+        open(0)
+        let oldCanvas = session.canvas
+        let ink = oldCanvas.drawing.dataRepresentation()
+        let chosenTool = PKInkingTool(.pen, color: .purple, width: 7)
+        oldCanvas.tool = chosenTool
+        open(1)
+        try check(session.canvas !== oldCanvas && oldCanvas.superview == nil && oldCanvas.delegate == nil, "old render surface detached")
+        try check(session.canvas.drawing.strokes.isEmpty, "blank page starts with no ink")
+        try check((session.canvas.tool as? PKInkingTool) == chosenTool, "selected pen preserved across pages")
+        // Simulate a queued callback from the removed page arriving after the switch.
+        session.canvasViewDrawingDidChange(oldCanvas)
+        try check(store.drawing(noteID: note.id, pageID: note.pages[1].id).strokes.isEmpty, "late callback cannot pollute blank page")
+        let blankCanvas = session.canvas
+        open(1)
+        try check(session.canvas === blankCanvas, "same-page updates must retain the live canvas")
+        open(2)
+        try check(session.canvas.drawing.strokes.count == 1, "existing destination ink loads without new input")
+        open(0)
+        try check(session.canvas.drawing.dataRepresentation() == ink, "original ink survives round trip")
+        session.stop()
+    }
+
     static func checkViewport(_ store: NoteStore, prepared: PreparedPDFImport) throws {
         let longPDF = PreparedPDFImport(title: "Long canvas regression", data: prepared.data,
                                         pages: Array(repeating: prepared.pages, count: 20).flatMap { $0 }, folderID: nil)
@@ -135,7 +190,8 @@ struct NoteMarginApp: App {
         guard let copyID = reopened.duplicate(joinedID), let copy = reopened.note(copyID) else { throw NSError(domain: "duplicate", code: 1) }
         try check(copy.pages == joined.pages && PageRenderer.hasValidPDFBackground(page: copy.pages[0], note: copy, store: reopened), "continuous duplicate assets")
         try checkViewport(store, prepared: prepared)
-        report("PASS: bounded native PencilKit viewport; deep scrolling; zoom/background coordinates; repeated update stability; rotated and mixed-size PDF preparation; prepare without commit; both layouts; joined background pixel order; cross-boundary drawing save/reopen; continuous and paged PDF export; PNG export; duplicated assets")
+        try checkPageReplacement(store)
+        report("PASS: page render replacement; blank and existing ink destinations; stale callback rejection; selected pen preservation; bounded native PencilKit viewport; deep scrolling; zoom/background coordinates; repeated update stability; rotated and mixed-size PDF preparation; prepare without commit; both layouts; joined background pixel order; cross-boundary drawing save/reopen; continuous and paged PDF export; PNG export; duplicated assets")
         return joinedID
     }
 }

@@ -53,17 +53,12 @@ final class CanvasHostView: UIView {
         self.session = session
         super.init(frame: .zero)
         backgroundColor = .secondarySystemBackground
-        canvas.showsVerticalScrollIndicator = false
-        canvas.showsHorizontalScrollIndicator = false
-        canvas.contentInsetAdjustmentBehavior = .never
-        canvas.panGestureRecognizer.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
         // PencilKit owns the viewport, scrolling, zooming and live ink rendering.
         // The PDF is a noninteractive sibling behind it, never a parent transform.
         paper.isOpaque = false
         paper.backgroundColor = .clear
         paper.isUserInteractionEnabled = false
         addSubview(paper)
-        addSubview(canvas)
         selectionLayer.strokeColor = UIColor.systemBlue.cgColor
         selectionLayer.fillColor = UIColor.systemBlue.withAlphaComponent(0.07).cgColor
         selectionLayer.lineWidth = 2
@@ -74,20 +69,45 @@ final class CanvasHostView: UIView {
         objectTap = UITapGestureRecognizer(target: self, action: #selector(selectObject(_:)))
         addGestureRecognizer(objectPan)
         addGestureRecognizer(objectTap)
-        canvas.panGestureRecognizer.require(toFail: objectPan)
         for direction: UISwipeGestureRecognizer.Direction in [.left, .right] {
             let swipe = UISwipeGestureRecognizer(target: self, action: #selector(turnPage(_:)))
             swipe.direction = direction
             swipe.numberOfTouchesRequired = 3
             swipe.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
             addGestureRecognizer(swipe)
-            canvas.panGestureRecognizer.require(toFail: swipe)
-            session.canvas.drawingGestureRecognizer.require(toFail: swipe)
             pageSwipes.append(swipe)
         }
         isAccessibilityElement = false
-        session.canvas.accessibilityLabel = "필기 용지"
-        session.canvas.accessibilityHint = "Apple Pencil로 필기합니다. 손가락으로 화면을 확대하거나 이동할 수 있습니다."
+        installCanvas()
+    }
+
+    private func installCanvas() {
+        canvas.showsVerticalScrollIndicator = false
+        canvas.showsHorizontalScrollIndicator = false
+        canvas.contentInsetAdjustmentBehavior = .never
+        canvas.panGestureRecognizer.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
+        canvas.frame = bounds
+        addSubview(canvas)
+        // Selection must stay above the new render surface.
+        layer.addSublayer(selectionLayer)
+        canvas.panGestureRecognizer.require(toFail: objectPan)
+        for swipe in pageSwipes {
+            canvas.panGestureRecognizer.require(toFail: swipe)
+            canvas.drawingGestureRecognizer.require(toFail: swipe)
+        }
+        canvas.accessibilityLabel = "필기 용지"
+        canvas.accessibilityIdentifier = "notebook-canvas"
+        canvas.accessibilityHint = "Apple Pencil로 필기합니다. 손가락으로 화면을 확대하거나 이동할 수 있습니다."
+    }
+
+    func replaceCanvas(_ previous: PKCanvasView) {
+        previous.removeFromSuperview()
+        installCanvas()
+        // Force configuration of the new page even if SwiftUI delivered its
+        // page metadata before onChange loaded that page's drawing.
+        currentPage = nil
+        needsFit = true
+        setNeedsLayout()
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
@@ -183,12 +203,7 @@ final class CanvasHostView: UIView {
 
     @objc private func turnPage(_ gesture: UISwipeGestureRecognizer) {
         guard gesture.state == .ended, onTurnPage?(gesture.direction == .left ? 1 : -1) == true else { return }
-        if !UIAccessibility.isReduceMotionEnabled {
-            let transition = CATransition()
-            transition.type = .fade
-            transition.duration = 0.18
-            layer.add(transition, forKey: "pageTurn")
-        }
+        // Do not snapshot/crossfade the whole host: that includes the previous ink.
     }
 
     // The same transform is used for the PDF, selections and object hit-testing.

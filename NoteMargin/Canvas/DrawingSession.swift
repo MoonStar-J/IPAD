@@ -3,7 +3,7 @@ import PencilKit
 
 @MainActor
 final class DrawingSession: NSObject, ObservableObject, PKCanvasViewDelegate {
-    let canvas = PagingCanvasView()
+    private(set) var canvas = PagingCanvasView()
     let toolPicker = PKToolPicker()
     @Published var canUndo = false
     @Published var canRedo = false
@@ -19,13 +19,7 @@ final class DrawingSession: NSObject, ObservableObject, PKCanvasViewDelegate {
 
     override init() {
         super.init()
-        canvas.delegate = self
-        canvas.backgroundColor = .clear
-        canvas.isOpaque = false
-        canvas.isScrollEnabled = true
-        canvas.overrideUserInterfaceStyle = .light
-        canvas.tool = PKInkingTool(.pen, color: .black, width: 3)
-        canvas.drawingPolicy = .pencilOnly
+        configureCanvas(canvas)
         toolPicker.addObserver(canvas)
         for name in [Notification.Name.NSUndoManagerDidUndoChange, .NSUndoManagerDidRedoChange, .NSUndoManagerDidCloseUndoGroup] {
             undoObservers.append(NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
@@ -36,6 +30,16 @@ final class DrawingSession: NSObject, ObservableObject, PKCanvasViewDelegate {
 
     deinit { for observer in undoObservers { NotificationCenter.default.removeObserver(observer) } }
 
+    private func configureCanvas(_ canvas: PagingCanvasView) {
+        canvas.delegate = self
+        canvas.backgroundColor = .clear
+        canvas.isOpaque = false
+        canvas.isScrollEnabled = true
+        canvas.overrideUserInterfaceStyle = .light
+        canvas.tool = PKInkingTool(.pen, color: .black, width: 3)
+        canvas.drawingPolicy = .pencilOnly
+    }
+
     func load(noteID: UUID, pageID: UUID, store: NoteStore) {
         guard self.noteID != noteID || self.pageID != pageID else { return }
         store.flushDrawings()
@@ -44,6 +48,21 @@ final class DrawingSession: NSObject, ObservableObject, PKCanvasViewDelegate {
         self.pageID = pageID
         loading = true
         loadError = nil
+        let previous = canvas
+        let selectedTool = previous.tool
+        let replacement = PagingCanvasView()
+        configureCanvas(replacement)
+        // An empty drawing can leave old PencilKit render tiles alive on a reused
+        // view. Give each page its own render surface, without changing ink coordinates.
+        previous.delegate = nil
+        toolPicker.setVisible(false, forFirstResponder: previous)
+        toolPicker.removeObserver(previous)
+        if previous.isFirstResponder { previous.resignFirstResponder() }
+        toolsAreVisible = false
+        canvas = replacement
+        toolPicker.addObserver(replacement)
+        replacement.tool = selectedTool
+        host?.replaceCanvas(previous)
         do {
             if let note = store.note(noteID), let page = note.pages.first(where: { $0.id == pageID }), !PageRenderer.hasValidPDFBackground(page: page, note: note, store: store) {
                 throw CocoaError(.fileReadCorruptFile)
@@ -60,14 +79,18 @@ final class DrawingSession: NSObject, ObservableObject, PKCanvasViewDelegate {
     }
 
     func canvasViewDrawingDidChange(_ canvasView: PKCanvasView) {
-        guard !loading, loadError == nil, let noteID, let pageID else { return }
+        guard canvasView === canvas, !loading, loadError == nil, let noteID, let pageID else { return }
         store?.queueDrawing(canvasView.drawing, noteID: noteID, pageID: pageID)
         // Undo groups close at the end of the current event.
         DispatchQueue.main.async { [weak self] in self?.refreshUndo() }
     }
 
-    func scrollViewDidScroll(_ scrollView: UIScrollView) { host?.canvasDidScroll() }
-    func scrollViewDidZoom(_ scrollView: UIScrollView) { host?.canvasDidZoom() }
+    func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        if scrollView === canvas { host?.canvasDidScroll() }
+    }
+    func scrollViewDidZoom(_ scrollView: UIScrollView) {
+        if scrollView === canvas { host?.canvasDidZoom() }
+    }
 
     func refreshUndo() {
         let undo = canvas.undoManager?.canUndo ?? false
