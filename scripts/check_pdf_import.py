@@ -19,6 +19,7 @@ def run(*args):
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('device', nargs='?', help='Available iPad simulator UUID')
 parser.add_argument('--live-ui', action='store_true', help='Exercise real touch strokes with XCUITest')
+parser.add_argument('--only-testing', action='append', default=[], help='UI test class or method, e.g. CanvasLiveInkTests/StrokeEraserVisualTests')
 args = parser.parse_args()
 
 available = json.loads(run('xcrun', 'simctl', 'list', 'devices', 'available', '-j'))
@@ -79,7 +80,8 @@ with tempfile.TemporaryDirectory(prefix='NoteMarginPDFChecks-') as temporary:
         print('UI test results:', result_bundle, flush=True)
         result = subprocess.run(['xcodebuild', '-quiet', '-project', str(project.parent), '-scheme', 'NoteMargin',
             '-destination', 'id=' + device['udid'], '-derivedDataPath', str(work / 'build'),
-            '-parallel-testing-enabled', 'NO', '-resultBundlePath', str(result_bundle), 'CODE_SIGNING_ALLOWED=NO', 'test'])
+            '-parallel-testing-enabled', 'NO', '-resultBundlePath', str(result_bundle),
+            *['-only-testing:' + name for name in args.only_testing], 'CODE_SIGNING_ALLOWED=NO', 'test'])
         sys.exit(result.returncode)
     run('xcodebuild', '-quiet', '-project', str(project.parent), '-scheme', 'NoteMargin', '-configuration', 'Debug',
         '-sdk', 'iphonesimulator', '-destination', 'generic/platform=iOS Simulator', '-derivedDataPath', str(work / 'build'), 'CODE_SIGNING_ALLOWED=NO', 'build')

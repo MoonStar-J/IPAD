@@ -10,7 +10,9 @@ struct NoteMarginApp: App {
     var body: some Scene {
         WindowGroup {
             Group {
-                if CommandLine.arguments.contains("--live-ink"), noteID != nil,
+                if CommandLine.arguments.contains("--eraser"), let noteID, let note = store.note(noteID) {
+                    EraserRegressionView(note: note)
+                } else if CommandLine.arguments.contains("--live-ink"), noteID != nil,
                    let note = store.library.notebooks.last(where: { $0.title == "Long canvas regression" }) {
                     LiveCanvasRegressionView(note: note)
                 } else if let noteID { NavigationStack { EditorView(noteID: noteID) } }
@@ -19,7 +21,7 @@ struct NoteMarginApp: App {
                 guard !ran else { return }; ran = true
                 do {
                     let checked = try PDFIntegrationChecks.run(store)
-                    noteID = CommandLine.arguments.contains("--page-swap") ? try PDFIntegrationChecks.pageSwapFixture(store).id : checked
+                    noteID = CommandLine.arguments.contains("--page-swap") || CommandLine.arguments.contains("--eraser") ? try PDFIntegrationChecks.pageSwapFixture(store).id : checked
                 }
                 catch { PDFIntegrationChecks.report("FAIL: \(error)") }
             }
@@ -92,6 +94,41 @@ struct NoteMarginApp: App {
         try check(session.canvas.drawing.strokes.count == 1, "existing destination ink loads without new input")
         open(0)
         try check(session.canvas.drawing.dataRepresentation() == ink, "original ink survives round trip")
+        session.stop()
+    }
+
+    static func checkEraserPersistence(_ store: NoteStore) throws {
+        let note = try pageSwapFixture(store)
+        let original = try store.drawing(noteID: note.id, pageID: note.pages[0].id)
+        let transaction = StrokeEraserTransaction(drawing: original, width: 24)
+        transaction.extend(to: CGPoint(x: 384, y: 250))
+        try check(transaction.erasedIndices.isEmpty, "eraser in empty space must not hit")
+        transaction.extend(to: CGPoint(x: 384, y: 600))
+        try check(transaction.erasedIndices.count == 1 && transaction.remainingDrawing.strokes.isEmpty, "fast swept eraser must hit crossing stroke")
+        try check(transaction.original.dataRepresentation() == original.dataRepresentation(), "eraser preview never mutates original ink")
+        try check(store.drawing(noteID: note.id, pageID: note.pages[0].id).dataRepresentation() == original.dataRepresentation(), "preview does not change stored ink")
+        // A hole in a pixel-erased stroke must stay empty to the vector eraser.
+        var masked = original.strokes[0]
+        masked.mask = UIBezierPath(rect: CGRect(x: 130, y: 300, width: 100, height: 200))
+        let maskedDrawing = PKDrawing(strokes: [masked])
+        let hole = StrokeEraserTransaction(drawing: maskedDrawing, width: 24)
+        hole.extend(to: CGPoint(x: 384, y: 424))
+        try check(hole.erasedIndices.isEmpty, "transparent mask region is not a hit")
+        hole.extend(to: CGPoint(x: 170, y: 368))
+        try check(hole.erasedIndices.count == 1, "visible masked ink is a hit")
+        // Lasso-transformed ink is tested in document coordinates, including deep PDFs.
+        var moved = original.strokes[0]
+        moved.transform = CGAffineTransform(translationX: 20, y: 70_000)
+        let deep = StrokeEraserTransaction(drawing: PKDrawing(strokes: [moved]), width: 24)
+        deep.extend(to: CGPoint(x: 384, y: 424))
+        try check(deep.erasedIndices.isEmpty, "old position must not erase transformed ink")
+        deep.extend(to: CGPoint(x: 404, y: 70_424))
+        try check(deep.erasedIndices.count == 1, "deep transformed ink hit")
+        let session = DrawingSession()
+        session.load(noteID: note.id, pageID: note.pages[0].id, store: store)
+        session.commitStrokeErasing(transaction.remainingDrawing)
+        try check(store.flushDrawings(), "erase commit saved")
+        try check(store.drawing(noteID: note.id, pageID: note.pages[0].id).strokes.isEmpty, "commit persists whole stroke deletion")
         session.stop()
     }
 
@@ -191,6 +228,7 @@ struct NoteMarginApp: App {
         try check(copy.pages == joined.pages && PageRenderer.hasValidPDFBackground(page: copy.pages[0], note: copy, store: reopened), "continuous duplicate assets")
         try checkViewport(store, prepared: prepared)
         try checkPageReplacement(store)
+        try checkEraserPersistence(store)
         report("PASS: page render replacement; blank and existing ink destinations; stale callback rejection; selected pen preservation; bounded native PencilKit viewport; deep scrolling; zoom/background coordinates; repeated update stability; rotated and mixed-size PDF preparation; prepare without commit; both layouts; joined background pixel order; cross-boundary drawing save/reopen; continuous and paged PDF export; PNG export; duplicated assets")
         return joinedID
     }
@@ -292,5 +330,129 @@ private struct LiveCanvasSurface: UIViewRepresentable {
         host.configure(note: note, page: note.pages[0], store: store, fingerDrawing: true,
                        editingObjects: false, toolsVisible: false, onSelect: { _ in },
                        onMove: { _, _, _ in }, onTurnPage: { _ in false })
+    }
+}
+
+@MainActor private final class EraserProbe: NSObject, ObservableObject, PKCanvasViewDelegate {
+    weak var session: DrawingSession?
+    @Published var status = "Ready"
+    private var timer: Timer?
+    private var original = Data()
+    private var previewSamples = 0
+    private var whiteTrailSamples = 0
+    private var failure: String?
+    var cancelWhileHeld = false
+
+    @objc func track(_ gesture: UIGestureRecognizer) {
+        guard let session else { return }
+        if gesture.state == .began {
+            original = session.canvas.drawing.dataRepresentation()
+            previewSamples = 0
+            whiteTrailSamples = 0
+            failure = nil
+            status = "Erasing"
+            timer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in
+                MainActor.assumeIsolated { self?.sample() }
+            }
+        } else if gesture.state == .ended {
+            timer?.invalidate(); timer = nil
+            if previewSamples < 3 { failure = "no held preview samples" }
+            if whiteTrailSamples < 3 { failure = "no white trail after crossing ink" }
+            if cancelWhileHeld {
+                if session.canvas.drawing.dataRepresentation() != original { failure = "cancel deleted ink" }
+            } else if !session.canvas.drawing.strokes.isEmpty { failure = "stroke not deleted on lift" }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+                guard let self else { return }
+                if session.canvas.layer.opacity != 1 { self.failure = "native canvas not restored after erase" }
+                if let preview = session.host?.subviews.compactMap({ $0 as? StrokeEraserPreviewView }).first, !preview.isHidden {
+                    self.failure = "eraser overlay not cleared after lift"
+                }
+                self.status = self.failure.map { "FAIL: \($0)" } ?? (self.cancelWhileHeld ? "PASS: cancelled without deletion" : "PASS: translucent preview until lift")
+            }
+        } else if gesture.state == .cancelled || gesture.state == .failed {
+            timer?.invalidate(); timer = nil
+            status = "Ready"
+        }
+    }
+    private func sample() {
+        guard let session, let host = session.host,
+              let preview = host.subviews.compactMap({ $0 as? StrokeEraserPreviewView }).first,
+              !preview.fadedDrawing.strokes.isEmpty else { return }
+        previewSamples += 1
+        if session.canvas.drawing.dataRepresentation() != original { failure = "drawing mutated before lift" }
+        let image = UIGraphicsImageRenderer(bounds: host.bounds).image { _ in
+            host.drawHierarchy(in: host.bounds, afterScreenUpdates: false)
+        }
+        try? image.pngData()?.write(to: PDFIntegrationChecks.directory.appendingPathComponent("eraser-held.png"))
+        func pixel(at point: CGPoint) -> [UInt8] {
+            let location = point.applying(host.documentToViewport)
+            let crop = image.cgImage!.cropping(to: CGRect(x: location.x * image.scale, y: location.y * image.scale, width: 1, height: 1))!
+            var rgba = [UInt8](repeating: 0, count: 4)
+            rgba.withUnsafeMutableBytes { bytes in
+                let context = CGContext(data: bytes.baseAddress, width: 1, height: 1, bitsPerComponent: 8,
+                                        bytesPerRow: 4, space: CGColorSpaceCreateDeviceRGB(),
+                                        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue)!
+                context.draw(crop, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+            }
+            return rgba
+        }
+        let faded = pixel(at: CGPoint(x: 200, y: 376))
+        if !(faded[0] > 230 && faded[1] > 130 && faded[1] < 210 && faded[2] > 130 && faded[2] < 210) {
+            failure = "held stroke is not translucent: \(faded)"
+        }
+        let white = pixel(at: CGPoint(x: 384, y: 424))
+        // The stroke fades as soon as its edge is touched; its center only turns
+        // white after the eraser reaches it. Require several samples after crossing.
+        if white.prefix(3).allSatisfy({ $0 >= 240 }) { whiteTrailSamples += 1 }
+        if cancelWhileHeld && whiteTrailSamples == 3 { host.cancelStrokeErasing() }
+    }
+    func canvasViewDrawingDidChange(_ canvasView: PKCanvasView) { session?.canvasViewDrawingDidChange(canvasView) }
+    func canvasViewDidFinishRendering(_ canvasView: PKCanvasView) { session?.canvasViewDidFinishRendering(canvasView) }
+    func scrollViewDidScroll(_ scrollView: UIScrollView) { session?.scrollViewDidScroll(scrollView) }
+    func scrollViewDidZoom(_ scrollView: UIScrollView) { session?.scrollViewDidZoom(scrollView) }
+}
+
+private struct EraserRegressionView: View {
+    let note: Notebook
+    @EnvironmentObject private var store: NoteStore
+    @StateObject private var session = DrawingSession()
+    @StateObject private var probe = EraserProbe()
+    var body: some View {
+        VStack {
+            HStack {
+                Button("Undo") { session.undo() }
+                Button("Redo") { session.redo() }
+                Button("Cancel while held") { probe.cancelWhileHeld = true }
+                Button("Fit") { session.fitPage() }
+            }.buttonStyle(.bordered).padding()
+            Text(probe.status).accessibilityIdentifier("eraser-status")
+            EraserSurface(note: note, store: store, session: session, probe: probe)
+        }
+    }
+}
+
+private struct EraserSurface: UIViewRepresentable {
+    let note: Notebook
+    let store: NoteStore
+    @ObservedObject var session: DrawingSession
+    let probe: EraserProbe
+    func makeUIView(context: Context) -> CanvasHostView {
+        let host = CanvasHostView(session: session)
+        session.host = host
+        session.load(noteID: note.id, pageID: note.pages[0].id, store: store)
+        probe.session = session
+        session.canvas.delegate = probe
+        session.canvas.gestureRecognizers?.compactMap { $0 as? StrokeEraserGestureRecognizer }.first?.addTarget(probe, action: #selector(EraserProbe.track(_:)))
+        session.canvas.tool = PKEraserTool(.vector, width: 24)
+        return host
+    }
+    func updateUIView(_ host: CanvasHostView, context: Context) {
+        host.configure(note: note, page: note.pages[0], store: store, fingerDrawing: true,
+                       editingObjects: false, toolsVisible: false, onSelect: { _ in },
+                       onMove: { _, _, _ in }, onTurnPage: { _ in false })
+        // Exercise the production three-finger failure dependencies while keeping
+        // the test-only controls free of the floating tool picker.
+        session.canvas.pageTurningEnabled = true
+        host.gestureRecognizers?.compactMap { $0 as? UISwipeGestureRecognizer }.forEach { $0.isEnabled = true }
     }
 }

@@ -42,6 +42,7 @@ final class DrawingSession: NSObject, ObservableObject, PKCanvasViewDelegate {
 
     func load(noteID: UUID, pageID: UUID, store: NoteStore) {
         guard self.noteID != noteID || self.pageID != pageID else { return }
+        host?.cancelStrokeErasing()
         store.flushDrawings()
         self.store = store
         self.noteID = noteID
@@ -80,9 +81,30 @@ final class DrawingSession: NSObject, ObservableObject, PKCanvasViewDelegate {
 
     func canvasViewDrawingDidChange(_ canvasView: PKCanvasView) {
         guard canvasView === canvas, !loading, loadError == nil, let noteID, let pageID else { return }
+        host?.cancelEraserIfDrawingChanged(canvasView.drawing)
         store?.queueDrawing(canvasView.drawing, noteID: noteID, pageID: pageID)
         // Undo groups close at the end of the current event.
         DispatchQueue.main.async { [weak self] in self?.refreshUndo() }
+    }
+
+    func commitStrokeErasing(_ drawing: PKDrawing) {
+        replaceDrawing(drawing, on: canvas)
+    }
+
+    private func replaceDrawing(_ drawing: PKDrawing, on target: PagingCanvasView) {
+        guard target === canvas else { return }
+        let previous = target.drawing
+        target.undoManager?.registerUndo(withTarget: target) { [weak self] target in
+            self?.replaceDrawing(previous, on: target)
+        }
+        target.undoManager?.setActionName("획 지우기")
+        target.drawing = drawing
+        canvasViewDrawingDidChange(target)
+    }
+
+    func canvasViewDidFinishRendering(_ canvasView: PKCanvasView) {
+        guard canvasView === canvas else { return }
+        host?.finishEraserRendering()
     }
 
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
@@ -98,8 +120,8 @@ final class DrawingSession: NSObject, ObservableObject, PKCanvasViewDelegate {
         if canUndo != undo { canUndo = undo }
         if canRedo != redo { canRedo = redo }
     }
-    func undo() { canvas.undoManager?.undo(); refreshUndo() }
-    func redo() { canvas.undoManager?.redo(); refreshUndo() }
+    func undo() { host?.cancelStrokeErasing(); canvas.undoManager?.undo(); refreshUndo() }
+    func redo() { host?.cancelStrokeErasing(); canvas.undoManager?.redo(); refreshUndo() }
     func fitPage() { host?.fitPage(animated: true) }
 
     func setToolsVisible(_ visible: Bool) {
@@ -114,7 +136,7 @@ final class DrawingSession: NSObject, ObservableObject, PKCanvasViewDelegate {
         else if !shouldShow && canvas.isFirstResponder { canvas.resignFirstResponder() }
     }
 
-    func stop() { store?.flushDrawings(); setToolsVisible(false) }
+    func stop() { host?.cancelStrokeErasing(); store?.flushDrawings(); setToolsVisible(false) }
 }
 
 final class PagingCanvasView: PKCanvasView {
@@ -122,5 +144,76 @@ final class PagingCanvasView: PKCanvasView {
     // The canvas owns three-finger paging; toolbar undo/redo remain available.
     override var editingInteractionConfiguration: UIEditingInteractionConfiguration {
         pageTurningEnabled ? .none : .default
+    }
+}
+
+/// One eraser contact is one transaction. Hit-testing uses rendered alpha, so
+/// lasso transforms, pressure widths and holes from the pixel eraser are respected.
+@MainActor
+final class StrokeEraserTransaction {
+    let original: PKDrawing
+    let width: CGFloat
+    private(set) var erasedIndices = Set<Int>()
+    private var previousPoint: CGPoint?
+
+    init(drawing: PKDrawing, width: CGFloat) {
+        original = drawing
+        self.width = width.isFinite && width > 0 ? width : 12
+    }
+    var remainingDrawing: PKDrawing {
+        PKDrawing(strokes: original.strokes.enumerated().compactMap { erasedIndices.contains($0.offset) ? nil : $0.element })
+    }
+    var erasedDrawing: PKDrawing {
+        PKDrawing(strokes: original.strokes.enumerated().compactMap { erasedIndices.contains($0.offset) ? $0.element : nil })
+    }
+    func extend(to point: CGPoint) {
+        let start = previousPoint ?? point
+        previousPoint = point
+        let radius = width / 2
+        let sweptBounds = CGRect(x: min(start.x, point.x) - radius, y: min(start.y, point.y) - radius,
+                                 width: abs(point.x - start.x) + width, height: abs(point.y - start.y) + width)
+        for (index, stroke) in original.strokes.enumerated() where !erasedIndices.contains(index) {
+            let region = stroke.renderBounds.intersection(sweptBounds).integral
+            guard !region.isNull, region.width > 0, region.height > 0 else { continue }
+            if hits(stroke, region: region, start: start, end: point, radius: radius) {
+                erasedIndices.insert(index)
+            }
+        }
+    }
+    private func hits(_ stroke: PKStroke, region: CGRect, start: CGPoint, end: CGPoint, radius: CGFloat) -> Bool {
+        // Tile the swept area: neither a tall PDF nor a rapid long drag can allocate
+        // a document-sized bitmap. Ignore transparent pixels, including stroke masks.
+        let tileSize: CGFloat = 128
+        var y = region.minY
+        while y < region.maxY {
+            var x = region.minX
+            while x < region.maxX {
+                let tile = CGRect(x: x, y: y, width: min(tileSize, region.maxX - x), height: min(tileSize, region.maxY - y))
+                let image = PKDrawing(strokes: [stroke]).image(from: tile, scale: 1).cgImage!
+                let w = image.width, h = image.height
+                var pixels = [UInt8](repeating: 0, count: w * h * 4)
+                pixels.withUnsafeMutableBytes { bytes in
+                    let context = CGContext(data: bytes.baseAddress, width: w, height: h, bitsPerComponent: 8,
+                                            bytesPerRow: w * 4, space: CGColorSpaceCreateDeviceRGB(),
+                                            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue)!
+                    context.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
+                }
+                let dx = end.x - start.x, dy = end.y - start.y
+                let lengthSquared = dx * dx + dy * dy
+                for row in 0..<h {
+                    for column in 0..<w where pixels[(row * w + column) * 4 + 3] > 2 {
+                        let px = tile.minX + CGFloat(column) + 0.5
+                        let py = tile.minY + CGFloat(row) + 0.5
+                        let fraction = lengthSquared > 0 ? min(1, max(0, ((px - start.x) * dx + (py - start.y) * dy) / lengthSquared)) : 0
+                        if hypot(px - start.x - fraction * dx, py - start.y - fraction * dy) <= radius {
+                            return true
+                        }
+                    }
+                }
+                x += tileSize
+            }
+            y += tileSize
+        }
+        return false
     }
 }
