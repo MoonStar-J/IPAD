@@ -10,7 +10,9 @@ struct NoteMarginApp: App {
     var body: some Scene {
         WindowGroup {
             Group {
-                if CommandLine.arguments.contains("--eraser"), let noteID, let note = store.note(noteID) {
+                if CommandLine.arguments.contains("--ai-connection") {
+                    AIConnectionRegressionView()
+                } else if CommandLine.arguments.contains("--eraser"), let noteID, let note = store.note(noteID) {
                     EraserRegressionView(note: note)
                 } else if CommandLine.arguments.contains("--live-ink"), noteID != nil,
                    let note = store.library.notebooks.last(where: { $0.title == "Long canvas regression" }) {
@@ -19,12 +21,71 @@ struct NoteMarginApp: App {
                 else { ProgressView("PDF integration checks") }
             }.environmentObject(store).task {
                 guard !ran else { return }; ran = true
+                guard !CommandLine.arguments.contains("--ai-connection") else { return }
                 do {
                     let checked = try PDFIntegrationChecks.run(store)
                     noteID = CommandLine.arguments.contains("--page-swap") || CommandLine.arguments.contains("--eraser") ? try PDFIntegrationChecks.pageSwapFixture(store).id : checked
                 }
                 catch { PDFIntegrationChecks.report("FAIL: \(error)") }
             }
+        }
+    }
+}
+
+// This fixture never opens the production Keychain service or sends an API request.
+// Both launches and the explicit cleanup button remove only its disposable key.
+@MainActor private final class AIConnectionFixture: ObservableObject {
+    static let suite = "com.notemargin.integrationcheck.connection-tests"
+    static let fakeKey = "fixture-key-not-valid"
+    let connection: AIConnectionStore
+    @Published var status = "Preparing isolated connection fixture"
+
+    init() {
+        let defaults = UserDefaults(suiteName: Self.suite)!
+        defaults.removePersistentDomain(forName: Self.suite)
+        connection = AIConnectionStore(defaults: defaults, keychainService: Self.suite)
+        cleanup()
+    }
+
+    func cleanup() {
+        do {
+            for provider in AIProvider.allCases { try connection.removeAPIKey(for: provider) }
+            refreshStatus()
+        } catch { status = "FAIL: isolated connection cleanup" }
+    }
+
+    func refreshStatus() {
+        do {
+            // Recreate the store to prove persistence rather than inspecting just
+            // the sheet's in-memory state. Never include a credential in output.
+            let restored = AIConnectionStore(defaults: UserDefaults(suiteName: Self.suite)!, keychainService: Self.suite)
+            let keys = try AIProvider.allCases.compactMap { provider -> AIProvider? in
+                guard let key = try restored.apiKey(for: provider) else { return nil }
+                guard key == Self.fakeKey else { throw NSError(domain: "Unexpected fixture value", code: 1) }
+                return provider
+            }
+            if keys.isEmpty { status = "PASS: no API key saved" }
+            else if keys == [restored.selectedProvider] {
+                status = "PASS: \(restored.selectedProvider.title) / \(restored.model)"
+            } else { status = "FAIL: provider and stored key disagree" }
+        } catch { status = "FAIL: isolated connection persistence" }
+    }
+}
+
+private struct AIConnectionRegressionView: View {
+    @StateObject private var fixture = AIConnectionFixture()
+    @State private var presenting = false
+
+    var body: some View {
+        VStack(spacing: 24) {
+            Text(fixture.status).accessibilityIdentifier("connection-fixture-status")
+            Button("Open isolated AI connection") { presenting = true }
+                .accessibilityIdentifier("open-connection-fixture")
+            Button("Clean up isolated AI connection") { fixture.cleanup() }
+                .accessibilityIdentifier("cleanup-connection-fixture")
+        }
+        .sheet(isPresented: $presenting, onDismiss: { fixture.refreshStatus() }) {
+            AIConnectionSettingsView(connection: fixture.connection)
         }
     }
 }

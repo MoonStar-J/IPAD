@@ -30,7 +30,7 @@ final class AIConnectionStore: ObservableObject {
     @Published var selectedProvider: AIProvider {
         didSet {
             defaults.set(selectedProvider.rawValue, forKey: "ai.selectedProvider")
-            model = defaults.string(forKey: modelKey(selectedProvider)) ?? selectedProvider.defaultModel
+            model = savedModel(for: selectedProvider)
         }
     }
     @Published var model: String {
@@ -38,16 +38,21 @@ final class AIConnectionStore: ObservableObject {
     }
     @Published private(set) var configuredProviders: Set<AIProvider> = []
     private let defaults: UserDefaults
-    private let keychainService = "com.notemargin.ai-api-key"
+    private let keychainService: String
 
-    init(defaults: UserDefaults = .standard) {
+    init(defaults: UserDefaults = .standard, keychainService: String = "com.notemargin.ai-api-key") {
         self.defaults = defaults
+        self.keychainService = keychainService
         let provider = defaults.string(forKey: "ai.selectedProvider").flatMap(AIProvider.init(rawValue:)) ?? .openAI
         selectedProvider = provider
         model = defaults.string(forKey: "ai.model.\(provider.rawValue)") ?? provider.defaultModel
         for provider in AIProvider.allCases {
             if (try? apiKey(for: provider)) != nil { configuredProviders.insert(provider) }
         }
+    }
+
+    func savedModel(for provider: AIProvider) -> String {
+        defaults.string(forKey: modelKey(provider)) ?? provider.defaultModel
     }
 
     func apiKey(for provider: AIProvider) throws -> String? {

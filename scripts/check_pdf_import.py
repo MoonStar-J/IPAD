@@ -2,6 +2,7 @@
 from pathlib import Path
 import argparse
 import json
+import plistlib
 import uuid
 import xml.etree.ElementTree as ET
 import shutil
@@ -39,9 +40,23 @@ with tempfile.TemporaryDirectory(prefix='NoteMarginPDFChecks-') as temporary:
     shutil.copy(ROOT / 'scripts/pdf_integration_app.swift', work / 'NoteMargin/App/NoteMarginApp.swift')
     project = work / 'NoteMargin.xcodeproj/project.pbxproj'
     settings = json.loads(run('plutil', '-convert', 'json', '-o', '-', str(project)))
+    # Let Xcode package Simulator entitlements into the test executable. Hand
+    # signing iOS entitlements after linking makes macOS reject the simulator app.
+    entitlements = work / 'FixtureKeychain.entitlements'
+    if args.live_ui:
+        entitlements.write_bytes(plistlib.dumps({
+            'application-identifier': 'NOTEMARGIN.' + BUNDLE,
+            'keychain-access-groups': ['NOTEMARGIN.' + BUNDLE],
+        }))
     for obj in settings['objects'].values():
         if 'PRODUCT_BUNDLE_IDENTIFIER' in obj.get('buildSettings', {}):
             obj['buildSettings']['PRODUCT_BUNDLE_IDENTIFIER'] = BUNDLE
+            if args.live_ui:
+                obj['buildSettings'].update({
+                    'CODE_SIGNING_ALLOWED': 'YES', 'CODE_SIGN_IDENTITY': '-',
+                    'CODE_SIGN_STYLE': 'Manual', 'DEVELOPMENT_TEAM': '',
+                    'PROVISIONING_PROFILE_SPECIFIER': '', 'CODE_SIGN_ENTITLEMENTS': str(entitlements),
+                })
     if args.live_ui:
         shutil.copy(ROOT / 'scripts/canvas_ui_checks.swift', work / 'CanvasLiveInkTests.swift')
         objects = settings['objects']
@@ -58,6 +73,7 @@ with tempfile.TemporaryDirectory(prefix='NoteMarginPDFChecks-') as temporary:
             objects[ids[mode]] = dict(isa='XCBuildConfiguration', name=mode.title(), buildSettings={
                 'PRODUCT_NAME': '$(TARGET_NAME)', 'PRODUCT_BUNDLE_IDENTIFIER': BUNDLE + '.uitests',
                 'GENERATE_INFOPLIST_FILE': 'YES', 'SWIFT_VERSION': '5.0', 'TARGETED_DEVICE_FAMILY': '2',
+                'CODE_SIGNING_ALLOWED': 'NO',
                 'IPHONEOS_DEPLOYMENT_TARGET': '17.0', 'SDKROOT': 'iphoneos', 'TEST_TARGET_NAME': 'NoteMargin',
                 'LD_RUNPATH_SEARCH_PATHS': ['$(inherited)', '@executable_path/Frameworks', '@loader_path/Frameworks']})
         objects[ids['config']] = dict(isa='XCConfigurationList', buildConfigurations=[ids['debug'], ids['release']], defaultConfigurationIsVisible='0', defaultConfigurationName='Debug')
@@ -81,7 +97,7 @@ with tempfile.TemporaryDirectory(prefix='NoteMarginPDFChecks-') as temporary:
         result = subprocess.run(['xcodebuild', '-quiet', '-project', str(project.parent), '-scheme', 'NoteMargin',
             '-destination', 'id=' + device['udid'], '-derivedDataPath', str(work / 'build'),
             '-parallel-testing-enabled', 'NO', '-resultBundlePath', str(result_bundle),
-            *['-only-testing:' + name for name in args.only_testing], 'CODE_SIGNING_ALLOWED=NO', 'test'])
+            *['-only-testing:' + name for name in args.only_testing], 'test'])
         sys.exit(result.returncode)
     run('xcodebuild', '-quiet', '-project', str(project.parent), '-scheme', 'NoteMargin', '-configuration', 'Debug',
         '-sdk', 'iphonesimulator', '-destination', 'generic/platform=iOS Simulator', '-derivedDataPath', str(work / 'build'), 'CODE_SIGNING_ALLOWED=NO', 'build')
