@@ -9,7 +9,7 @@ let package = Package(
         .executableTarget(name: "CoreChecks", path: ".", exclude: [
             "NoteMargin/App", "NoteMargin/Canvas", "NoteMargin/Views", "NoteMargin/Services",
             "NoteMargin/Assets.xcassets", "NoteMargin/Info.plist", "NoteMargin/PrivacyInfo.xcprivacy",
-            "NoteMargin/ko.lproj", "NoteMargin/en.lproj",
+            "NoteMargin/PersonalResources", "NoteMargin/ko.lproj", "NoteMargin/en.lproj",
             "NoteMargin.xcodeproj", "scripts", "docs", "README.md", "QA.md"
         ], sources: ["NoteMargin/Core", "Tests/CoreChecks"])
     ]

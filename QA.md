@@ -134,3 +134,22 @@ python3 scripts/check_pdf_import.py
 - PDF 내보내기 시 필기 레이어는 래스터 이미지로 합성됨.
 - 파일 I/O, PDF 가져오기·렌더링·내보내기가 주 스레드에서 수행되므로 큰 문서는 성능 측정 후 백그라운드 처리 개선이 필요할 수 있음.
 - 앱 배포용 서명, TestFlight/App Store 제출, 서명된 설치 파일 생성은 미수행.
+
+
+## 2026-09-15 — API / 개인용 ChatGPT 버전 분리
+
+- `NoteMargin`: 기존 API 앱 ID와 화면 유지. Debug 시뮬레이터 빌드 통과.
+- `NoteMarginPersonal`: `PERSONAL_CHATGPT` 조건으로 실제 ChatGPT WKWebView 화면 사용. Debug 및 Release 시뮬레이터 빌드 통과. 같은 iPad 시뮬레이터에 두 앱 설치 확인; 한국어 앱 이름도 별도로 확인.
+- Core 33/33 통과: 기존 노트 호환성, 대화 URL 저장/복원, 인증 주소 거부와 쿼리 제거, 다른 프로젝트 지침 배제 포함.
+- API wire 31/31 통과. 네트워크/API 과금 요청 없음.
+- 개인용 native integration 통과: 실제 WKWebView에 로컬 HTML을 표시하고 SPA 경로 변경 → 여백 대화 URL 저장 확인, 개인용 `send`의 API 호출 차단, 테스트용 비지속 웹 저장소 확인. 실제 ChatGPT에 로그인한 검사는 아님.
+- 개인용 XCUITest 복사 버튼/패널 토글 검사는 추가했으나 이 Mac에서 테스트 러너가 시작되지 않고 LLDB 버전 조회 오류로 대기하여 완료하지 못함. 통과로 계산하지 않음. 위 native integration은 테스트 러너 없이 앱을 직접 실행해 완료함.
+- 기존 `Canvas` 필기/페이지 전환/지우개 파일은 수정하지 않음.
+- 이 Mac의 Xcode 빌드 서비스가 `clang -v -E -dM`의 verbose stderr 파이프에서 멈춰, 검증 시에만 임시 `CC` 어댑터로 해당 탐색 명령의 내부 cc1 진단 출력을 생략함. 실제 버전·매크로와 앱 컴파일러는 유지. 저장소 프로젝트에는 어댑터 경로나 빌드 설정을 넣지 않음.
+- 실제 계정 로그인, 로그인 유지 후 재실행, Google/Apple 계정 로그인, 실제 ChatGPT 입력칸의 이미지 붙여넣기·PNG 첨부·전송은 실기기 수동 확인 필요. 내장 브라우저 로그인 거부 시 Safari 대안은 별도 세션임.
+
+```sh
+swift run CoreChecks
+python3 scripts/check_pdf_import.py --personal
+python3 scripts/check_pdf_import.py --personal --live-ui
+```

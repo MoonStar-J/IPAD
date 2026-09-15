@@ -36,6 +36,11 @@ final class MarginAIStore: ObservableObject {
         } catch { errorMessage = "이 노트의 AI 대화를 불러오지 못했습니다. 원본은 보존됩니다. \(error.localizedDescription)" }
     }
     func conversation(_ id: UUID) -> MarginConversation? { conversations.first { $0.id == id } }
+    @discardableResult func linkWebConversation(_ url: URL, to id: UUID) -> Bool {
+        guard let clean = ChatGPTWebContext.conversationURL(url), var chat = conversation(id) else { return false }
+        chat.webConversationURL = clean; chat.updatedAt = Date()
+        return persist(chat)
+    }
     func setDraft(_ text: String, for id: UUID) {
         guard var chat = conversation(id) else { return }
         chat.draft = text; replace(chat)
@@ -109,6 +114,10 @@ final class MarginAIStore: ObservableObject {
     }
 
     @discardableResult func send(_ question: String, conversationID id: UUID, note: Notebook, project: NoteProject?, retry: Bool = false) -> Bool {
+        #if PERSONAL_CHATGPT
+        failures[id] = "개인용에서는 ChatGPT 웹 화면에서 질문을 보내세요."
+        return false
+        #else
         guard var chat = conversation(id), chat.belongs(to: note), !sending.contains(id), !unsaved.contains(id) else { return false }
         let text = question.trimmingCharacters(in: .whitespacesAndNewlines)
         guard retry ? chat.messages.last?.role == .user : !text.isEmpty else { return false }
@@ -153,5 +162,6 @@ final class MarginAIStore: ObservableObject {
             }
         }
         return true
+        #endif
     }
 }

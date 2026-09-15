@@ -94,10 +94,17 @@ struct AIEditorCanvas: View {
             }
             .overlay(alignment: .topTrailing) {
                 if let id = activeChatID, !selecting, !editingObjects {
+                    #if PERSONAL_CHATGPT
+                    PersonalChatGPTView(conversationID: id, project: note.projectID.flatMap { store.project($0) }, onClose: { activeChatID = nil })
+                        .id(id)
+                        .frame(width: max(180, min(620, geometry.size.width - 72)), height: max(180, geometry.size.height - 68))
+                        .padding(.trailing, 54).padding(.top, 54)
+                    #else
                     MarginChatView(conversationID: id, note: note, project: note.projectID.flatMap { store.project($0) }, onClose: { activeChatID = nil })
                         .id(id)
                         .frame(width: max(180, min(410, geometry.size.width - 72)), height: max(180, min(650, geometry.size.height - 68)))
                         .padding(.trailing, 54).padding(.top, 54)
+                    #endif
                 }
             }
         }

@@ -25,6 +25,7 @@ struct MarginConversation: Codable, Identifiable, Equatable {
     var lastProvider: String?
     var lastModel: String?
     var draft: String?
+    var webConversationURL: URL?
 
     var title: String { messages.first(where: { $0.role == .user })?.text ?? "선택 영역 질문" }
     func belongs(to note: Notebook) -> Bool { note.id == noteID && note.projectID == projectID }

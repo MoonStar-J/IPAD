@@ -358,3 +358,37 @@ final class MarginChatVisualTests: XCTestCase {
         add(attachment)
     }
 }
+
+
+#if PERSONAL_CHATGPT
+final class PersonalChatGPTVisualTests: XCTestCase {
+    func testRegionTransferAndWebConversationSurviveHidingPanel() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["--personal-web"]
+        app.launch()
+        XCTAssertTrue(app.webViews.staticTexts["Offline ChatGPT browser fixture"].waitForExistence(timeout: 15))
+        XCTAssertFalse(app.secureTextFields.element.exists)
+        app.buttons["personal-region"].tap()
+        let question = app.textFields["personal-question"]
+        // The multiline SwiftUI field may be exposed as a text view.
+        let editor = question.exists ? question : app.textViews["personal-question"]
+        editor.tap(); editor.typeText("Explain this")
+        app.buttons["personal-copy-prompt"].tap()
+        app.buttons["Check copied prompt"].tap()
+        XCTAssertTrue(app.staticTexts["PASS: selected prompt copied"].exists)
+        app.buttons["personal-copy-image"].tap()
+        app.buttons["Check copied image"].tap()
+        XCTAssertTrue(app.staticTexts["PASS: region image copied"].exists)
+        app.buttons["personal-region"].tap()
+        app.webViews.buttons["Open fixture conversation"].tap()
+        XCTAssertTrue(app.staticTexts["https://chatgpt.com/c/offline-fixture"].waitForExistence(timeout: 5))
+        app.buttons["ai-chat-close"].tap()
+        app.buttons["Reopen personal chat"].tap()
+        XCTAssertTrue(app.webViews.staticTexts["Fixture conversation opened"].waitForExistence(timeout: 5))
+        app.buttons["personal-region"].tap()
+        XCTAssertEqual((app.textFields["personal-question"].exists ? app.textFields["personal-question"] : app.textViews["personal-question"]).value as? String, "Explain this")
+        let attachment = XCTAttachment(screenshot: app.screenshot()); attachment.lifetime = .keepAlways; add(attachment)
+    }
+}
+
+#endif

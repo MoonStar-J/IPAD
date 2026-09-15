@@ -1,12 +1,36 @@
 # 노트 여백 · note margin
 
-iPad와 Apple Pencil을 위한 설치형 필기앱입니다. SwiftUI, PencilKit, PDFKit을 사용하며, 필기·보관함은 오프라인으로 동작합니다. 여백 AI 대화는 사용자의 OpenAI 또는 Gemini API 키로 연결합니다.
+iPad와 Apple Pencil을 위한 설치형 필기앱입니다. SwiftUI, PencilKit, PDFKit을 사용하며, 필기·보관함은 오프라인으로 동작합니다. AI 연결 방식에 따라 **API 버전**과 **개인용 ChatGPT 웹 버전**을 각각 설치할 수 있습니다.
 
 **노트 여백 · note margin**은 ‘노트의 여백에서 AI와 상호작용하며 학습한다’는 의미를 담고 있습니다. 프로젝트별로 노트를 정리하고, 선택한 PDF와 필기 영역에 대해 AI와 대화할 수 있습니다. 질문은 여백의 원형 아이콘으로 열고 닫습니다.
 
 기기 언어가 한국어이면 앱 이름은 **노트 여백**, 영어이면 **note margin**으로 표시됩니다.
 
-**현재 상태:** 프로젝트 관리·여백 AI 구현, Core 검증 30개 및 과금 없는 API 형식 검사 31개 통과, iPad 시뮬레이터 Debug 빌드 성공. 기존 긴 PDF 필기·페이지 잔상·획 지우개 UI 3개와 새 여백 대화 UI 2개 검사 통과. 실제 API 키를 이용한 응답과 실제 Apple Pencil 입력은 별도 확인이 필요합니다. 서명된 `.ipa`는 포함하지 않습니다.
+**현재 상태:** 프로젝트 관리·여백 AI 구현, Core 검증 33개 및 과금 없는 API 형식 검사 31개 통과, iPad 시뮬레이터 Debug 빌드 성공. 기존 긴 PDF 필기·페이지 잔상·획 지우개 UI 3개와 새 여백 대화 UI 2개 검사 통과. 실제 API 키를 이용한 응답과 실제 Apple Pencil 입력은 별도 확인이 필요합니다. 서명된 `.ipa`는 포함하지 않습니다.
+
+## 두 가지 앱 버전
+
+| Xcode 스킴 | 설치되는 앱 | AI 연결 |
+| --- | --- | --- |
+| `NoteMargin` | 노트 여백 / note margin | OpenAI·Gemini API 키, 앱 자체 여백 채팅 |
+| `NoteMarginPersonal` | 노트 여백 개인용 / note margin personal | 앱 안의 실제 ChatGPT 웹 화면에서 로그인·채팅 |
+
+두 앱은 서로 다른 Bundle Identifier를 사용하여 **같은 iPad에 동시에 설치**할 수 있습니다. API 버전은 기존 `com.yeobaek.notes`를 유지하고 개인용은 `com.yeobaek.notes.personal`을 사용합니다. 노트·프로젝트·설정은 각 앱에 따로 저장되며 자동으로 동기화되지 않습니다. 기존 노트는 PDF로 공유한 뒤 개인용에서 불러올 수 있습니다.
+
+### 개인용에서 ChatGPT 사용하기
+
+1. Xcode 상단 스킴을 **NoteMarginPersonal**로 바꾸고, 해당 타깃의 **Signing & Capabilities → Team**을 선택합니다. 연결한 iPad를 실행 대상으로 선택하고 **⌘R**로 설치합니다.
+2. 보관함의 **ChatGPT 로그인 · 채팅**을 누르고, 실제 ChatGPT 웹 화면에서 기존 가입 방식으로 로그인합니다. 앱이 별도의 로그인 폼이나 API 키를 요구하지 않습니다.
+3. 노트에서 **질문 → 영역 조절 → 이 영역으로 질문**을 누릅니다. 여백에 ChatGPT 웹 화면이 열립니다.
+4. **선택 영역 · 질문 준비**를 펼쳐 질문을 입력합니다. **질문·자료 복사**를 누르고 ChatGPT 입력칸에 붙여넣습니다. 프로젝트 지침과 선택 영역의 추출 텍스트도 함께 복사됩니다.
+5. **이미지 복사** 후 ChatGPT 입력칸에 붙여넣거나, **PNG 저장** 후 ChatGPT의 **+ → 파일 첨부**로 선택합니다. 미리보기 이미지를 웹 입력칸으로 드래그할 수도 있습니다. 붙여넣기·드래그 지원은 ChatGPT 웹 화면에 따라 달라지므로 PNG 첨부를 대안으로 제공합니다. 전송 전 첨부가 표시됐는지 확인하세요.
+6. ChatGPT에서 직접 전송합니다. 대화 주소가 생기면 여백 아이콘에 자동으로 저장합니다. 같은 아이콘을 다시 열면 해당 대화를 이어 볼 수 있습니다. 다른 브라우저에서 사용한 대화는 메뉴의 **대화 링크 직접 연결**로 연결합니다.
+
+개인용에서는 API를 호출하지 않습니다. ChatGPT 계정의 구독·이용 한도가 적용되며, API 요금 체계와는 별개입니다. [OpenAI의 ChatGPT/API 결제 안내](https://help.openai.com/en/articles/9039756-managing-billing-settings-on-the-chatgpt-web-and-api-platform)
+
+**로그인 호환성:** WebKit의 지속 저장소로 이 앱 안의 로그인 세션을 유지합니다. Google·Apple 로그인 또는 ChatGPT의 보안 검증이 내장 브라우저를 거부할 수 있으므로 모든 계정의 로그인을 보장하지 않습니다. 문제 발생 시 메뉴에서 로그인 도움말·새로고침·Safari로 열기를 사용하세요. **Safari의 로그인 세션은 앱 안으로 이전되지 않습니다.** 계정 비밀번호·세션 토큰을 추출하거나 로그인 제한을 우회하지 않습니다. [OpenAI 로그인 문제 안내](https://help.openai.com/en/articles/7426629-why-cant-i-log-in-to-chatgpt)
+
+프로젝트별 노트와 여백 아이콘은 앱에서 관리합니다. ChatGPT의 프로젝트·맞춤 GPT를 사용하려면 웹에서 직접 선택하세요. 앱의 프로젝트와 ChatGPT 프로젝트를 자동 생성·동기화하지 않습니다. 답변 원문은 ChatGPT에 저장되며, 앱은 선택 영역·작성한 질문·대화 주소만 보관합니다. 웹 입력칸의 전송 전 초안은 앱이 저장하지 않습니다. 최근 웹 화면 3개는 유지하고, 그 밖의 화면과 앱 재시작 후에는 저장한 주소로 다시 엽니다. 로그인 리디렉션의 쿼리·토큰은 노트 파일에 저장하지 않습니다.
 
 ## 화면 미리보기
 
@@ -46,7 +70,7 @@ AI 기능 추가 전 SwiftUI 구현을 바탕으로 제작한 **디자인 미리
 
 **획 지우기:** 지우개가 닿은 획은 누르고 있는 동안 반투명하게 유지되고, 지나간 범위는 흰색으로 표시됩니다. 지우개를 떼면 닿았던 획 전체가 삭제되며 실행 취소 한 번으로 복원할 수 있습니다. 흰색 자국은 저장되지 않습니다. 픽셀 지우개는 기존 방식으로 동작합니다.
 
-## 프로젝트와 여백 AI 사용하기
+## API 버전: 프로젝트와 여백 AI 사용하기
 
 1. 보관함 사이드바의 **AI 연결**에서 OpenAI 또는 Gemini를 고릅니다. 제공사 링크에서 발급한 본인의 API 키를 입력하고 상단 **완료**를 누르면 키·제공자·모델이 저장됩니다. 저장에 실패하면 화면이 닫히지 않고 오류가 표시됩니다. **취소**는 입력한 변경을 저장하지 않고 닫습니다. ChatGPT/Gemini 구독 로그인과 별개이며, **API 사용료가 별도**로 발생합니다. 저장됨 표시는 키가 기기에 저장되었다는 의미이며, 실제 권한·잔액은 전송 시 확인됩니다.
 2. **새 프로젝트**를 만들고 프로젝트 에이전트 지침을 입력합니다. 예: “대학 1학년 수준으로, 풀이 과정을 먼저 설명해 줘.” 프로젝트 안에서 새 노트를 만들거나 PDF를 가져옵니다. 기존 노트는 길게 눌러 **프로젝트로 이동**을 선택합니다.
@@ -66,7 +90,7 @@ AI 기능 추가 전 SwiftUI 구현을 바탕으로 제작한 **디자인 미리
 
 1. Mac에 Xcode를 설치하고 최초 실행 설정에서 iOS 플랫폼을 설치합니다.
 2. 이 폴더의 `NoteMargin.xcodeproj`를 엽니다. `Package.swift`는 Core 검증용입니다.
-3. `NoteMargin` 스킴과 사용할 iPad 시뮬레이터를 선택하고 `⌘R`로 빌드·실행합니다.
+3. API용 `NoteMargin` 또는 개인용 `NoteMarginPersonal` 스킴과 사용할 iPad 시뮬레이터를 선택하고 `⌘R`로 빌드·실행합니다.
 4. 실제 iPad에 설치하려면 Xcode 설정에서 Apple 계정에 로그인하고, 앱 타깃의 **Signing & Capabilities → Team**에서 본인 팀을 선택합니다. 기본 Bundle Identifier `com.yeobaek.notes`는 본인 계정의 고유한 값으로 변경하세요.
 5. iPad를 Mac에 연결해 신뢰 설정을 완료하고, 필요한 경우 iPad의 개발자 모드를 활성화합니다. 실행 대상으로 해당 iPad를 선택한 뒤 `⌘R`을 누릅니다.
 
@@ -80,7 +104,7 @@ Xcode가 설치된 환경의 서명 없는 빌드 검사:
 xcodebuild -project NoteMargin.xcodeproj -scheme NoteMargin \
   -configuration Debug -sdk iphonesimulator \
   -destination 'generic/platform=iOS Simulator' \
-  -derivedDataPath /tmp/NoteMarginDerivedData CODE_SIGNING_ALLOWED=NO buil
+  -derivedDataPath /tmp/NoteMarginDerivedData CODE_SIGNING_ALLOWED=NO build
 ```
 
 ## 사용 흐름

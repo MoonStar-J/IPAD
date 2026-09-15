@@ -2,8 +2,15 @@
 from pathlib import Path
 import hashlib
 import json
+import argparse
+
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument("--output", type=Path, help="Write the generated project to a separate directory")
+args = parser.parse_args()
 
 ROOT = Path(__file__).resolve().parents[1]
+OUTPUT = args.output or ROOT
+(OUTPUT / "NoteMargin.xcodeproj/xcshareddata/xcschemes").mkdir(parents=True, exist_ok=True)
 objects = {}
 
 def uid(name):
@@ -22,6 +29,7 @@ def array(items):
 
 sources = []
 resources = []
+personal_name_resources = []
 
 def group(path):
     children = []
@@ -47,15 +55,17 @@ def group(path):
             relative = str(translation.relative_to(path))
             translations.append(add("localized:" + str(translation.relative_to(ROOT)),
                 f'isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = {quote(translation.parent.stem)}; path = {quote(relative)}; sourceTree = "<group>";'))
-        variant = add("variant:" + name,
+        variant_key = name if path == ROOT / "NoteMargin" else str(path.relative_to(ROOT)) + "/" + name
+        variant = add("variant:" + variant_key,
             f'isa = PBXVariantGroup; children = {array(translations)}; name = {quote(name)}; sourceTree = "<group>";')
         children.append(variant)
-        resources.append(add("build:localized:" + name, f"isa = PBXBuildFile; fileRef = {variant};"))
+        (personal_name_resources if path.name == "PersonalResources" else resources).append(add("build:localized:" + variant_key, f"isa = PBXBuildFile; fileRef = {variant};"))
     return add("group:" + str(path.relative_to(ROOT)), f"isa = PBXGroup; children = {array(children)}; path = {quote(path.name)}; sourceTree = \"<group>\";")
 
 app_group = group(ROOT / "NoteMargin")
 product = add("product", 'isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = NoteMargin.app; sourceTree = BUILT_PRODUCTS_DIR;')
-products = add("products", f'isa = PBXGroup; children = ({product}); name = Products; sourceTree = "<group>";')
+personal_product = add("personal-product", 'isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = NoteMarginPersonal.app; sourceTree = BUILT_PRODUCTS_DIR;')
+products = add("products", f'isa = PBXGroup; children = ({product}, {personal_product}); name = Products; sourceTree = "<group>";')
 main_group = add("main", f'isa = PBXGroup; children = ({app_group}, {products}); sourceTree = "<group>";')
 source_phase = add("sources", f"isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = {array(sources)}; runOnlyForDeploymentPostprocessing = 0;")
 resource_phase = add("resources", f"isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = {array(resources)}; runOnlyForDeploymentPostprocessing = 0;")
@@ -67,14 +77,14 @@ def configs(prefix, settings):
         current = dict(settings)
         current.update({"SWIFT_OPTIMIZATION_LEVEL": "-Onone" if mode == "Debug" else "-O", "DEBUG_INFORMATION_FORMAT": "dwarf" if mode == "Debug" else "dwarf-with-dsym"})
         if mode == "Debug":
-            current["SWIFT_ACTIVE_COMPILATION_CONDITIONS"] = "DEBUG $(inherited)"
+            current["SWIFT_ACTIVE_COMPILATION_CONDITIONS"] = "DEBUG " + current.get("SWIFT_ACTIVE_COMPILATION_CONDITIONS", "$(inherited)")
             current["ENABLE_TESTABILITY"] = "YES"
         values = " ".join(f"{key} = {quote(value)};" for key, value in current.items())
         ids.append(add(prefix + mode, f"isa = XCBuildConfiguration; buildSettings = {{ {values} }}; name = {mode};"))
     return add(prefix + "configs", f"isa = XCConfigurationList; buildConfigurations = {array(ids)}; defaultConfigurationIsVisible = 0; defaultConfigurationName = Release;")
 
 project_configs = configs("project", {"CLANG_ENABLE_MODULES": "YES", "CLANG_ENABLE_OBJC_ARC": "YES", "SDKROOT": "iphoneos", "IPHONEOS_DEPLOYMENT_TARGET": "17.0", "SWIFT_VERSION": "5.0", "SWIFT_STRICT_CONCURRENCY": "targeted"})
-target_configs = configs("target", {
+app_settings = {
     # An app's identifier is its upgrade identity, independent of its displayed name.
     "PRODUCT_NAME": "$(TARGET_NAME)", "PRODUCT_BUNDLE_IDENTIFIER": "com.yeobaek.notes",
     "INFOPLIST_FILE": "NoteMargin/Info.plist", "GENERATE_INFOPLIST_FILE": "NO",
@@ -83,14 +93,28 @@ target_configs = configs("target", {
     "SUPPORTS_MACCATALYST": "NO", "SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD": "NO",
     "ASSETCATALOG_COMPILER_APPICON_NAME": "AppIcon", "ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME": "AccentColor",
     "LD_RUNPATH_SEARCH_PATHS": "$(inherited) @executable_path/Frameworks", "SWIFT_EMIT_LOC_STRINGS": "YES"
-})
+}
+target_configs = configs("target", app_settings)
 target = add("target", f'isa = PBXNativeTarget; buildConfigurationList = {target_configs}; buildPhases = ({source_phase}, {framework_phase}, {resource_phase}); buildRules = (); dependencies = (); name = NoteMargin; productName = NoteMargin; productReference = {product}; productType = "com.apple.product-type.application";')
-project = add("project", f'isa = PBXProject; attributes = {{ BuildIndependentTargetsInParallel = YES; LastSwiftUpdateCheck = 1600; LastUpgradeCheck = 1600; TargetAttributes = {{ {target} = {{ CreatedOnToolsVersion = 16.0; }}; }}; }}; buildConfigurationList = {project_configs}; compatibilityVersion = "Xcode 14.0"; developmentRegion = ko; hasScannedForEncodings = 0; knownRegions = (ko, en, Base); mainGroup = {main_group}; productRefGroup = {products}; projectDirPath = ""; projectRoot = ""; targets = ({target});')
+personal_settings = dict(app_settings)
+personal_settings.update({"PRODUCT_BUNDLE_IDENTIFIER": "com.yeobaek.notes.personal", "SWIFT_ACTIVE_COMPILATION_CONDITIONS": "PERSONAL_CHATGPT $(inherited)"})
+personal_configs = configs("personal-target", personal_settings)
+# Build files and phases belong to one target; file references are shared.
+def personal_phase(name, original_files, isa):
+    copied = []
+    for build_id in original_files:
+        copied.append(add("personal-build:" + build_id, objects[build_id]))
+    return add("personal-" + name, f"isa = {isa}; buildActionMask = 2147483647; files = {array(copied)}; runOnlyForDeploymentPostprocessing = 0;")
+personal_sources = personal_phase("sources", sources, "PBXSourcesBuildPhase")
+personal_resources = personal_phase("resources", [r for r in resources if r != uid("build:localized:InfoPlist.strings")] + personal_name_resources, "PBXResourcesBuildPhase")
+personal_frameworks = personal_phase("frameworks", [], "PBXFrameworksBuildPhase")
+personal_target = add("personal-target", f'isa = PBXNativeTarget; buildConfigurationList = {personal_configs}; buildPhases = ({personal_sources}, {personal_frameworks}, {personal_resources}); buildRules = (); dependencies = (); name = NoteMarginPersonal; productName = NoteMarginPersonal; productReference = {personal_product}; productType = "com.apple.product-type.application";')
+project = add("project", f'isa = PBXProject; attributes = {{ BuildIndependentTargetsInParallel = YES; LastSwiftUpdateCheck = 1600; LastUpgradeCheck = 1600; TargetAttributes = {{ {target} = {{ CreatedOnToolsVersion = 16.0; }}; }}; }}; buildConfigurationList = {project_configs}; compatibilityVersion = "Xcode 14.0"; developmentRegion = ko; hasScannedForEncodings = 0; knownRegions = (ko, en, Base); mainGroup = {main_group}; productRefGroup = {products}; projectDirPath = ""; projectRoot = ""; targets = ({target}, {personal_target});')
 
 output = '// !$*UTF8*$!\n{\n archiveVersion = 1;\n classes = {};\n objectVersion = 56;\n objects = {\n'
 output += "\n".join(f"  {key} = {{ {value} }};" for key, value in objects.items())
 output += f"\n }};\n rootObject = {project};\n}}\n"
-(ROOT / "NoteMargin.xcodeproj/project.pbxproj").write_text(output)
+(OUTPUT / "NoteMargin.xcodeproj/project.pbxproj").write_text(output)
 
 ref = f'<BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="{target}" BuildableName="NoteMargin.app" BlueprintName="NoteMargin" ReferencedContainer="container:NoteMargin.xcodeproj"/>'
 scheme = f'''<?xml version="1.0" encoding="UTF-8"?>
@@ -103,5 +127,8 @@ scheme = f'''<?xml version="1.0" encoding="UTF-8"?>
  <ArchiveAction buildConfiguration="Release" revealArchiveInOrganizer="YES"/>
 </Scheme>
 '''
-(ROOT / "NoteMargin.xcodeproj/xcshareddata/xcschemes/NoteMargin.xcscheme").write_text(scheme)
+(OUTPUT / "NoteMargin.xcodeproj/xcshareddata/xcschemes/NoteMargin.xcscheme").write_text(scheme)
 print(f"Generated NoteMargin.xcodeproj: {len(sources)} Swift files, {len(resources)} resources")
+
+personal_scheme = scheme.replace(target, personal_target).replace("NoteMargin.app", "NoteMarginPersonal.app").replace('BlueprintName="NoteMargin"', 'BlueprintName="NoteMarginPersonal"')
+(OUTPUT / "NoteMargin.xcodeproj/xcshareddata/xcschemes/NoteMarginPersonal.xcscheme").write_text(personal_scheme)

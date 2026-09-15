@@ -19,9 +19,13 @@ def run(*args):
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('device', nargs='?', help='Available iPad simulator UUID')
+parser.add_argument('--build-setting', action='append', default=[], help='Optional Xcode setting override for the test build')
+parser.add_argument('--personal', action='store_true', help='Compile the personal ChatGPT flavor in the isolated test app')
 parser.add_argument('--live-ui', action='store_true', help='Exercise real touch strokes with XCUITest')
 parser.add_argument('--only-testing', action='append', default=[], help='UI test class or method, e.g. CanvasLiveInkTests/StrokeEraserVisualTests')
 args = parser.parse_args()
+if args.personal and args.live_ui and not args.only_testing:
+    args.only_testing = ['CanvasLiveInkTests/PersonalChatGPTVisualTests']
 
 available = json.loads(run('xcrun', 'simctl', 'list', 'devices', 'available', '-j'))
 ipads = [d for devices in available['devices'].values() for d in devices if 'iPad' in d['name']]
@@ -51,6 +55,8 @@ with tempfile.TemporaryDirectory(prefix='NoteMarginPDFChecks-') as temporary:
     for obj in settings['objects'].values():
         if 'PRODUCT_BUNDLE_IDENTIFIER' in obj.get('buildSettings', {}):
             obj['buildSettings']['PRODUCT_BUNDLE_IDENTIFIER'] = BUNDLE
+            if args.personal:
+                obj['buildSettings']['SWIFT_ACTIVE_COMPILATION_CONDITIONS'] = 'DEBUG PERSONAL_CHATGPT $(inherited)'
             if args.live_ui:
                 obj['buildSettings'].update({
                     'CODE_SIGNING_ALLOWED': 'YES', 'CODE_SIGN_IDENTITY': '-',
@@ -73,6 +79,7 @@ with tempfile.TemporaryDirectory(prefix='NoteMarginPDFChecks-') as temporary:
             objects[ids[mode]] = dict(isa='XCBuildConfiguration', name=mode.title(), buildSettings={
                 'PRODUCT_NAME': '$(TARGET_NAME)', 'PRODUCT_BUNDLE_IDENTIFIER': BUNDLE + '.uitests',
                 'GENERATE_INFOPLIST_FILE': 'YES', 'SWIFT_VERSION': '5.0', 'TARGETED_DEVICE_FAMILY': '2',
+                'SWIFT_ACTIVE_COMPILATION_CONDITIONS': 'PERSONAL_CHATGPT $(inherited)' if args.personal else '$(inherited)',
                 'CODE_SIGNING_ALLOWED': 'NO',
                 'IPHONEOS_DEPLOYMENT_TARGET': '17.0', 'SDKROOT': 'iphoneos', 'TEST_TARGET_NAME': 'NoteMargin',
                 'LD_RUNPATH_SEARCH_PATHS': ['$(inherited)', '@executable_path/Frameworks', '@loader_path/Frameworks']})
@@ -85,6 +92,8 @@ with tempfile.TemporaryDirectory(prefix='NoteMarginPDFChecks-') as temporary:
         project_object.setdefault('attributes', {}).setdefault('TargetAttributes', {})[ids['target']] = {'TestTargetID': app_target}
         scheme = work / 'NoteMargin.xcodeproj/xcshareddata/xcschemes/NoteMargin.xcscheme'
         tree = ET.parse(scheme)
+        tree.find('TestAction').set('selectedDebuggerIdentifier', '')
+        tree.find('TestAction').set('selectedLauncherIdentifier', 'Xcode.IDEFoundation.Launcher.PosixSpawn')
         testable = ET.SubElement(tree.find('TestAction/Testables'), 'TestableReference', skipped='NO')
         ET.SubElement(testable, 'BuildableReference', BuildableIdentifier='primary', BlueprintIdentifier=ids['target'],
                       BuildableName='CanvasLiveInkTests.xctest', BlueprintName='CanvasLiveInkTests', ReferencedContainer='container:NoteMargin.xcodeproj')
@@ -97,17 +106,17 @@ with tempfile.TemporaryDirectory(prefix='NoteMarginPDFChecks-') as temporary:
         result = subprocess.run(['xcodebuild', '-quiet', '-project', str(project.parent), '-scheme', 'NoteMargin',
             '-destination', 'id=' + device['udid'], '-derivedDataPath', str(work / 'build'),
             '-parallel-testing-enabled', 'NO', '-resultBundlePath', str(result_bundle),
-            *['-only-testing:' + name for name in args.only_testing], 'test'])
+            *['-only-testing:' + name for name in args.only_testing], *args.build_setting, 'test'])
         sys.exit(result.returncode)
     run('xcodebuild', '-quiet', '-project', str(project.parent), '-scheme', 'NoteMargin', '-configuration', 'Debug',
-        '-sdk', 'iphonesimulator', '-destination', 'generic/platform=iOS Simulator', '-derivedDataPath', str(work / 'build'), 'CODE_SIGNING_ALLOWED=NO', 'build')
+        '-sdk', 'iphonesimulator', '-destination', 'generic/platform=iOS Simulator', '-derivedDataPath', str(work / 'build'), 'CODE_SIGNING_ALLOWED=NO', *args.build_setting, 'build')
     subprocess.run(['xcrun', 'simctl', 'terminate', device['udid'], BUNDLE], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     run('xcrun', 'simctl', 'install', device['udid'], str(work / 'build/Build/Products/Debug-iphonesimulator/NoteMargin.app'))
     # Only the disposable test app's data is cleared; the real app uses a different identifier.
     container = Path(run('xcrun', 'simctl', 'get_app_container', device['udid'], BUNDLE, 'data'))
     results = container / 'Documents/results.txt'
     results.unlink(missing_ok=True)
-    run('xcrun', 'simctl', 'launch', device['udid'], BUNDLE)
+    run('xcrun', 'simctl', 'launch', device['udid'], BUNDLE, *(['--personal-self-check'] if args.personal else []))
     for _ in range(60):
         if results.exists():
             message = results.read_text()

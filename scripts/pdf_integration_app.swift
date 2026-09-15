@@ -1,6 +1,9 @@
 import SwiftUI
 import PencilKit
 import PDFKit
+#if PERSONAL_CHATGPT
+import WebKit
+#endif
 
 @main
 struct NoteMarginApp: App {
@@ -10,6 +13,25 @@ struct NoteMarginApp: App {
     var body: some Scene {
         WindowGroup {
             Group {
+                #if PERSONAL_CHATGPT
+                if CommandLine.arguments.contains("--personal-web") || CommandLine.arguments.contains("--personal-self-check") {
+                    PersonalWebFixtureView()
+                } else { ordinaryContent }
+                #else
+                ordinaryContent
+                #endif
+            }.environmentObject(store).task {
+                guard !ran else { return }; ran = true
+                guard !CommandLine.arguments.contains("--ai-connection"), !CommandLine.arguments.contains("--personal-web"), !CommandLine.arguments.contains("--personal-self-check") else { return }
+                do {
+                    let checked = try PDFIntegrationChecks.run(store)
+                    noteID = CommandLine.arguments.contains("--page-swap") || CommandLine.arguments.contains("--eraser") ? try PDFIntegrationChecks.pageSwapFixture(store).id : checked
+                }
+                catch { PDFIntegrationChecks.report("FAIL: \(error)") }
+            }
+        }
+    }
+    @ViewBuilder private var ordinaryContent: some View {
                 if CommandLine.arguments.contains("--ai-connection") {
                     AIConnectionRegressionView()
                 } else if CommandLine.arguments.contains("--eraser"), let noteID, let note = store.note(noteID) {
@@ -19,18 +41,76 @@ struct NoteMarginApp: App {
                     LiveCanvasRegressionView(note: note)
                 } else if let noteID { NavigationStack { EditorView(noteID: noteID) } }
                 else { ProgressView("PDF integration checks") }
-            }.environmentObject(store).task {
-                guard !ran else { return }; ran = true
-                guard !CommandLine.arguments.contains("--ai-connection") else { return }
-                do {
-                    let checked = try PDFIntegrationChecks.run(store)
-                    noteID = CommandLine.arguments.contains("--page-swap") || CommandLine.arguments.contains("--eraser") ? try PDFIntegrationChecks.pageSwapFixture(store).id : checked
-                }
-                catch { PDFIntegrationChecks.report("FAIL: \(error)") }
-            }
-        }
     }
 }
+
+#if PERSONAL_CHATGPT
+@MainActor private final class PersonalWebFixture: ObservableObject {
+    let browser = ChatGPTBrowser(websiteDataStore: .nonPersistent(), loadImmediately: false)
+    let note = Notebook(title: "Personal web fixture")
+    let id: UUID
+    @Published var checkStatus = ""
+    init() {
+        let size = CGSize(width: 300, height: 100)
+        let image = UIGraphicsImageRenderer(size: size).image { context in
+            UIColor.white.setFill(); context.fill(CGRect(origin: .zero, size: size))
+            UIColor.red.setStroke(); let path = UIBezierPath(); path.move(to: CGPoint(x: 10, y: 50)); path.addLine(to: CGPoint(x: 290, y: 50)); path.lineWidth = 5; path.stroke()
+        }
+        let region = CapturedRegion(pageID: note.pages[0].id, rect: CGRect(origin: .zero, size: size), imageData: image.pngData()!, extractedText: "Selected fixture PDF", sourceDescription: "Fixture page 1", pdfPageNumbers: [1])
+        id = MarginAIStore.shared.create(note: note, project: nil, region: region)!
+        browser.webView.loadHTMLString("""
+        <html><meta name="viewport" content="width=device-width, initial-scale=1"><body>
+        <h1>Offline ChatGPT browser fixture</h1>
+        <p>No login and no network request.</p>
+        <button onclick="history.pushState({}, '', '/c/offline-fixture?secret=discard');document.getElementById('status').innerText='Fixture conversation opened'">Open fixture conversation</button>
+        <p id="status">Ready</p><textarea aria-label="Fixture chat composer"></textarea>
+        </body></html>
+        """, baseURL: ChatGPTWebContext.home)
+    }
+    func runChecks() async {
+        guard CommandLine.arguments.contains("--personal-self-check") else { return }
+        do {
+            for _ in 0..<100 {
+                if !browser.webView.isLoading, (try? await browser.webView.evaluateJavaScript("document.querySelector('h1')?.textContent")) as? String == "Offline ChatGPT browser fixture" { break }
+                try await Task.sleep(for: .milliseconds(100))
+            }
+            let heading = try await browser.webView.evaluateJavaScript("document.querySelector('h1').textContent") as? String
+            try PDFIntegrationChecks.check(heading == "Offline ChatGPT browser fixture", "Local WebKit page did not load")
+            _ = try await browser.webView.evaluateJavaScript("document.querySelector('button').click()")
+            for _ in 0..<50 {
+                if MarginAIStore.shared.conversation(id)?.webConversationURL != nil { break }
+                try await Task.sleep(for: .milliseconds(100))
+            }
+            try PDFIntegrationChecks.check(MarginAIStore.shared.conversation(id)?.webConversationURL?.absoluteString == "https://chatgpt.com/c/offline-fixture", "SPA navigation did not save sanitized conversation URL")
+            try PDFIntegrationChecks.check(!MarginAIStore.shared.send("No API request", conversationID: id, note: note, project: nil), "Personal build must block API send")
+            try PDFIntegrationChecks.check(!browser.webView.configuration.websiteDataStore.isPersistent, "Fixture must use isolated cookies")
+            checkStatus = "PASS: personal WebKit load, SPA link persistence, API blocking and isolated website storage"
+            PDFIntegrationChecks.report(checkStatus)
+        } catch { checkStatus = "FAIL: personal web integration: \(error)"; PDFIntegrationChecks.report(checkStatus) }
+    }
+}
+private struct PersonalWebFixtureView: View {
+    @StateObject private var fixture = PersonalWebFixture()
+    @ObservedObject private var ai = MarginAIStore.shared
+    @State private var visible = true
+    @State private var status = ""
+    var body: some View {
+        VStack {
+            HStack {
+                Button("Reopen personal chat") { visible = true }
+                Button("Check copied prompt") { status = UIPasteboard.general.string?.contains("Selected fixture PDF") == true ? "PASS: selected prompt copied" : "FAIL: prompt" }
+                Button("Check copied image") { status = UIPasteboard.general.image != nil ? "PASS: region image copied" : "FAIL: image" }
+                Text(status)
+            }
+            Text(fixture.checkStatus)
+            Text(ai.conversation(fixture.id)?.webConversationURL?.absoluteString ?? "No saved web conversation")
+            if visible {
+                PersonalChatGPTView(conversationID: fixture.id, project: nil, onClose: { visible = false }, browser: fixture.browser)
+            }
+        }.padding().task { await fixture.runChecks() }
+    }
+}
+#endif
 
 // This fixture never opens the production Keychain service or sends an API request.
 // Both launches and the explicit cleanup button remove only its disposable key.

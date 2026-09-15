@@ -29,6 +29,34 @@ func sampleConversation(for note: Notebook) -> MarginConversation {
 }
 
 let checks: [CoreCheck] = [
+    CoreCheck(name: "Personal ChatGPT links exclude credentials and authentication URLs") { _ in
+        let clean = ChatGPTWebContext.conversationURL(URL(string: "https://chatgpt.com/c/abc-123?token=private#secret"))
+        try expect(clean?.absoluteString == "https://chatgpt.com/c/abc-123")
+        try expect(ChatGPTWebContext.conversationURL(URL(string: "https://chatgpt.com/g/g-p-study/c/abc-123")) != nil)
+        for address in ["http://chatgpt.com/c/abc", "https://chatgpt.com.evil.test/c/abc", "https://user:pass@chatgpt.com/c/abc", "https://chatgpt.com:443/c/abc", "https://auth.openai.com/c/abc", "https://chatgpt.com/auth/callback?code=secret", "https://chatgpt.com/share/abc", "https://chatgpt.com/", "https://chatgpt.com/c/", "https://chatgpt.com/c/abc/extra"] {
+            try expect(ChatGPTWebContext.conversationURL(URL(string: address)) == nil, "Unexpected stored URL: " + address)
+        }
+    },
+    CoreCheck(name: "Personal chat links round trip and existing API conversations still decode") { repository in
+        let chatRepository = MarginChatRepository(root: repository.root.appendingPathComponent("Chats"))
+        var chat = sampleConversation(for: Notebook(title: "학습"))
+        chat.webConversationURL = URL(string: "https://chatgpt.com/c/example")
+        try chatRepository.save(chat)
+        try expect(chatRepository.load(noteID: chat.noteID).first == chat)
+        var old = try JSONSerialization.jsonObject(with: JSONEncoder().encode(chat)) as! [String: Any]
+        old.removeValue(forKey: "webConversationURL")
+        let restored = try JSONDecoder().decode(MarginConversation.self, from: JSONSerialization.data(withJSONObject: old))
+        try expect(restored.webConversationURL == nil && restored.imageData == chat.imageData)
+    },
+    CoreCheck(name: "Personal prompt includes only selected context and matching project instructions") { _ in
+        let project = NoteProject(title: "물리", agentInstructions: "차근차근 설명")
+        var note = Notebook(title: "강의"); note.projectID = project.id
+        let chat = sampleConversation(for: note)
+        let prompt = ChatGPTWebContext.prompt(chat: chat, project: project, question: "왜?")
+        try expect(prompt.contains(chat.extractedText) && prompt.contains("차근차근 설명") && prompt.contains("질문: 왜?"))
+        let other = NoteProject(title: "다른 과목", agentInstructions: "다른 프로젝트의 비공개 지침")
+        try expect(!ChatGPTWebContext.prompt(chat: chat, project: other, question: "질문").contains(other.agentInstructions))
+    },
     CoreCheck(name: "Continuous PDF preserves source order and mixed page heights") { repository in
         let pages = [NotePage(height: 1024, pdfPageIndex: 0), NotePage(height: 576, pdfPageIndex: 1), NotePage(height: 1300, pdfPageIndex: 2)]
         let joined = try NotePage.importedPDFPages(pages, layout: .continuous)

@@ -81,7 +81,7 @@ struct LibraryView: View {
                             }
                         }
                         Section { sidebarRow("최근 삭제된 항목", icon: "trash", filter: .trash) }
-                        Section { Button { connectingAI = true } label: { Label("AI 연결", systemImage: "sparkles") } }
+                        Section { Button { connectingAI = true } label: { Label(AppBuild.aiConnectionTitle, systemImage: "sparkles") } }
                     }
                     .navigationTitle(AppIdentity.displayName)
                     .safeAreaInset(edge: .bottom) {
@@ -168,7 +168,13 @@ struct LibraryView: View {
         }) { NotebookForm(folderID: currentFolderID, projectID: currentProjectID, onCreated: { createdNoteID = $0 }) }
         .sheet(isPresented: $creatingProject) { ProjectForm() }
         .sheet(item: $editingProject) { ProjectForm(existing: $0) }
-        .sheet(isPresented: $connectingAI) { AIConnectionSettingsView() }
+        .sheet(isPresented: $connectingAI) {
+            #if PERSONAL_CHATGPT
+            PersonalChatGPTView(conversationID: nil, project: nil)
+            #else
+            AIConnectionSettingsView()
+            #endif
+        }
         .alert("프로젝트를 삭제할까요?", isPresented: Binding(get: { deletingProject != nil }, set: { if !$0 { deletingProject = nil } })) {
             Button("취소", role: .cancel) { deletingProject = nil }
             Button("프로젝트 삭제", role: .destructive) {
