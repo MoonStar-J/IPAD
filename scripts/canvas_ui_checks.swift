@@ -368,7 +368,9 @@ final class PersonalChatGPTVisualTests: XCTestCase {
         app.launch()
         XCTAssertTrue(app.webViews.staticTexts["Offline ChatGPT browser fixture"].waitForExistence(timeout: 15))
         XCTAssertFalse(app.secureTextFields.element.exists)
-        app.buttons["personal-region"].tap()
+        if !app.textFields["personal-question"].exists && !app.textViews["personal-question"].exists {
+            app.buttons["personal-region"].tap()
+        }
         let question = app.textFields["personal-question"]
         // The multiline SwiftUI field may be exposed as a text view.
         let editor = question.exists ? question : app.textViews["personal-question"]
@@ -385,7 +387,9 @@ final class PersonalChatGPTVisualTests: XCTestCase {
         app.buttons["ai-chat-close"].tap()
         app.buttons["Reopen personal chat"].tap()
         XCTAssertTrue(app.webViews.staticTexts["Fixture conversation opened"].waitForExistence(timeout: 5))
-        app.buttons["personal-region"].tap()
+        if !app.textFields["personal-question"].exists && !app.textViews["personal-question"].exists {
+            app.buttons["personal-region"].tap()
+        }
         XCTAssertEqual((app.textFields["personal-question"].exists ? app.textFields["personal-question"] : app.textViews["personal-question"]).value as? String, "Explain this")
         let attachment = XCTAttachment(screenshot: app.screenshot()); attachment.lifetime = .keepAlways; add(attachment)
     }

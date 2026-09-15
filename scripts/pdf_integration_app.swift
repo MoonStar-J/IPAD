@@ -67,6 +67,69 @@ struct NoteMarginApp: App {
         </body></html>
         """, baseURL: ChatGPTWebContext.home)
     }
+    private func loadComposer(mode: String) async throws {
+        browser.webView.loadHTMLString("""
+        <html><meta name="viewport" content="width=device-width, initial-scale=1"><body>
+        <h1>Offline composer fixture</h1>
+        <form data-mobile-composer \(mode == "logged-out" ? "data-logged-out" : "")>
+          <input id="octane-mobile-composer-files-input" type="file" accept="image/png" hidden>
+          <textarea id="mobile-composer-prompt" aria-label="Fixture composer">\(mode == "draft" ? "Keep my draft" : "")</textarea>
+          <div id="attachments">\(mode == "attachment" ? "<button type='button' aria-label='Remove file'>Existing PDF</button>" : "")</div><div id="progress" role="progressbar" hidden>Uploading</div>
+          <div role="alert" \(mode == "upload-error" ? "" : "hidden")>Upload failed</div>
+          <button data-composer-submit data-send-label="Send" aria-label="Send" type="submit">Send</button>
+        </form>
+        <script>
+        window.fixtureSubmissions = 0;
+        const form = document.querySelector('form'), input = document.querySelector('input'), editor = document.querySelector('textarea');
+        input.addEventListener('change', () => {
+          if ('\(mode)' === 'missing-receipt') return;
+          const image = new Image(); image.alt = input.files[0].name; image.src = URL.createObjectURL(input.files[0]);
+          document.getElementById('attachments').append(image, document.createTextNode(input.files[0].name));
+          if ('\(mode)' === 'progress' || '\(mode)' === 'cancel') document.getElementById('progress').hidden = false;
+        });
+        form.addEventListener('submit', event => { event.preventDefault(); window.fixtureSubmissions += 1; });
+        </script></body></html>
+        """, baseURL: ChatGPTWebContext.home)
+        for _ in 0..<100 {
+            if !browser.webView.isLoading, (try? await browser.webView.evaluateJavaScript("document.querySelector('h1')?.textContent")) as? String == "Offline composer fixture" { return }
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        throw NSError(domain: "Composer fixture did not load", code: 1)
+    }
+    private func checkComposerAutomation() async throws {
+        let image = MarginAIStore.shared.conversation(id)!.imageData
+        let prompt = "선택 영역 질문 · quotes \" and newline\nPDF + handwriting"
+        for (mode, expected, sends) in [("ready", "submit_clicked", 1), ("logged-out", "login_required", 0), ("draft", "existing_draft", 0), ("missing-receipt", "attachment_unconfirmed", 0), ("progress", "attachment_unconfirmed", 0), ("upload-error", "attachment_unconfirmed", 0), ("attachment", "existing_attachment", 0)] {
+            try await loadComposer(mode: mode)
+            let status = try await browser.prepareAndSubmit(imageData: image, prompt: prompt, timeoutMS: 1_800)
+            try PDFIntegrationChecks.check(status == expected, "Composer mode \(mode): \(status)")
+            let submitted = try await browser.webView.evaluateJavaScript("window.fixtureSubmissions") as? Int
+            try PDFIntegrationChecks.check(submitted == sends, "Unexpected composer submit count")
+            if mode == "ready" {
+                let actual = try await browser.webView.evaluateJavaScript("document.querySelector('textarea').value") as? String
+                try PDFIntegrationChecks.check(actual == prompt, "Prompt text changed during handoff")
+                let repeated = try await browser.prepareAndSubmit(imageData: image, prompt: prompt, timeoutMS: 1_800)
+                try PDFIntegrationChecks.check(repeated == "existing_draft", "Must not overwrite/re-send prepared content")
+            }
+        }
+        try await loadComposer(mode: "cancel")
+        browser.sendRegion(imageData: image, prompt: prompt)
+        try await Task.sleep(for: .milliseconds(400))
+        browser.cancelAutomation()
+        for _ in 0..<30 {
+            if !browser.automating { break }
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        try PDFIntegrationChecks.check(!browser.automating, "Cancellation must end JavaScript automation")
+        let count = try await browser.webView.evaluateJavaScript("window.fixtureSubmissions") as? Int
+        try PDFIntegrationChecks.check(count == 0, "Cancelled helper must never click Send")
+        try await loadComposer(mode: "ready")
+        browser.sendRegion(imageData: image, prompt: prompt)
+        browser.cancelAutomation()
+        try await Task.sleep(for: .milliseconds(300))
+        let attached = try await browser.webView.evaluateJavaScript("document.querySelector('input').files.length") as? Int
+        try PDFIntegrationChecks.check(!browser.automating && attached == 0, "Immediate cancellation must prevent queued attachment work")
+    }
     func runChecks() async {
         guard CommandLine.arguments.contains("--personal-self-check") else { return }
         do {
@@ -84,7 +147,8 @@ struct NoteMarginApp: App {
             try PDFIntegrationChecks.check(MarginAIStore.shared.conversation(id)?.webConversationURL?.absoluteString == "https://chatgpt.com/c/offline-fixture", "SPA navigation did not save sanitized conversation URL")
             try PDFIntegrationChecks.check(!MarginAIStore.shared.send("No API request", conversationID: id, note: note, project: nil), "Personal build must block API send")
             try PDFIntegrationChecks.check(!browser.webView.configuration.websiteDataStore.isPersistent, "Fixture must use isolated cookies")
-            checkStatus = "PASS: personal WebKit load, SPA link persistence, API blocking and isolated website storage"
+            try await checkComposerAutomation()
+            checkStatus = "PASS: personal WebKit load, SPA link persistence, API blocking, isolated storage and 10 composer automation checks"
             PDFIntegrationChecks.report(checkStatus)
         } catch { checkStatus = "FAIL: personal web integration: \(error)"; PDFIntegrationChecks.report(checkStatus) }
     }

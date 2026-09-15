@@ -16,6 +16,7 @@ struct PersonalChatGPTView: View {
     let project: NoteProject?
     var onClose: (() -> Void)?
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
     @Environment(\.openURL) private var openURL
     @ObservedObject private var ai = MarginAIStore.shared
     @StateObject private var browser: ChatGPTBrowser
@@ -29,6 +30,7 @@ struct PersonalChatGPTView: View {
 
     @MainActor init(conversationID: UUID?, project: NoteProject?, onClose: (() -> Void)? = nil, browser: ChatGPTBrowser? = nil) {
         self.conversationID = conversationID; self.project = project; self.onClose = onClose
+        _showingRegion = State(initialValue: conversationID != nil)
         _browser = StateObject(wrappedValue: browser ?? ChatGPTBrowserTabs.shared.browser(
             for: conversationID, url: conversationID.flatMap { MarginAIStore.shared.conversation($0)?.webConversationURL }))
     }
@@ -46,8 +48,8 @@ struct PersonalChatGPTView: View {
                 }
                 Spacer()
                 Menu {
-                    Button("ChatGPT 홈", systemImage: "house") { browser.webView.load(URLRequest(url: ChatGPTWebContext.home)) }
-                    Button("새로고침", systemImage: "arrow.clockwise") { browser.webView.reload() }
+                    Button("ChatGPT 홈", systemImage: "house") { browser.cancelAutomation(); browser.webView.load(URLRequest(url: ChatGPTWebContext.home)) }
+                    Button("새로고침", systemImage: "arrow.clockwise") { browser.cancelAutomation(); browser.webView.reload() }
                     if chat != nil {
                         Button("대화 링크 직접 연결", systemImage: "link") { linking = true }
                         Button("이 여백 연결 삭제", systemImage: "trash", role: .destructive) { deleting = true }
@@ -62,7 +64,7 @@ struct PersonalChatGPTView: View {
                     .accessibilityLabel("여백 대화 닫기").accessibilityIdentifier("ai-chat-close")
             }.padding(12)
             HStack {
-                Button { browser.webView.goBack() } label: { Image(systemName: "chevron.left") }
+                Button { browser.cancelAutomation(); browser.webView.goBack() } label: { Image(systemName: "chevron.left") }
                     .disabled(!browser.webView.canGoBack).accessibilityLabel("웹 뒤로")
                 Image(systemName: "lock").font(.caption2)
                 Text(browser.url?.host ?? "chatgpt.com").font(.caption).lineLimit(1)
@@ -81,12 +83,28 @@ struct PersonalChatGPTView: View {
                             }
                             Text(chat.sourceDescription).font(.caption).foregroundStyle(.secondary)
                             TextField("이 영역에 대한 질문", text: question, axis: .vertical)
-                                .textFieldStyle(.roundedBorder).lineLimit(1...3).accessibilityIdentifier("personal-question")
+                                .textFieldStyle(.roundedBorder).lineLimit(1...3).accessibilityIdentifier("personal-question").disabled(browser.automating)
+                            HStack {
+                                Button {
+                                    browser.sendRegion(imageData: chat.imageData, prompt: ChatGPTWebContext.prompt(chat: chat, project: project, question: question.wrappedValue))
+                                } label: {
+                                    Label(browser.automating ? "첨부 확인 중…" : "ChatGPT로 보내기", systemImage: "arrow.up.circle.fill")
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .disabled(browser.automating || question.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                                .accessibilityIdentifier("personal-auto-send")
+                                if browser.automating { Button("중단") { browser.cancelAutomation() } }
+                            }
+                            Text("자동 첨부 · 전송은 실험 기능입니다. ChatGPT 화면이 바뀌면 직접 전송이 필요할 수 있습니다.")
+                                .font(.caption2).foregroundStyle(.secondary)
+                            if let message = browser.automationMessage {
+                                Text(message).font(.caption).accessibilityIdentifier("personal-automation-status")
+                            }
                             ViewThatFits {
                                 HStack { transferButtons(chat) }
                                 VStack(alignment: .leading) { transferButtons(chat) }
                             }
-                            Text("① 질문·자료 복사 → 아래 채팅에 붙여넣기  ② 이미지 복사 후 붙여넣기, 또는 PNG를 저장하고 ChatGPT의 +에서 첨부  ③ ChatGPT에서 전송")
+                            Text("직접 보내려면: ① 질문·자료 복사 → 아래 채팅에 붙여넣기  ② 이미지 복사 후 붙여넣기, 또는 PNG를 저장하고 ChatGPT의 +에서 첨부  ③ ChatGPT에서 전송")
                                 .font(.caption).foregroundStyle(.secondary)
                             if let notice { Text(notice).font(.caption).foregroundStyle(.tint).accessibilityIdentifier("personal-notice") }
                         }.padding(.vertical, 8)
@@ -98,7 +116,7 @@ struct PersonalChatGPTView: View {
             if let error = browser.failure {
                 HStack {
                     Text(error).font(.caption)
-                    Button("새로고침") { browser.webView.reload() }
+                    Button("새로고침") { browser.cancelAutomation(); browser.webView.reload() }
                 }.padding(12).background(Color.orange.opacity(0.1))
             }
             Divider()
@@ -114,7 +132,9 @@ struct PersonalChatGPTView: View {
                   chat?.webConversationURL != clean else { return }
             ai.linkWebConversation(clean, to: id)
         }
-        .onDisappear { if let id = conversationID { ai.flushDraft(id) } }
+        .onDisappear { browser.cancelAutomation(); if let id = conversationID { ai.flushDraft(id) } }
+        .onChange(of: scenePhase) { _, phase in if phase != .active { browser.cancelAutomation() } }
+        .onChange(of: browser.automating) { _, active in if active { showingRegion = true } }
         .fileExporter(isPresented: $exporting, document: RegionPNG(data: chat?.imageData ?? Data()), contentType: .png, defaultFilename: "note-margin-region") { result in
             switch result {
             case .success: notice = "PNG를 저장했습니다. ChatGPT의 +에서 파일을 첨부하세요."
@@ -127,7 +147,7 @@ struct PersonalChatGPTView: View {
         .alert("ChatGPT 사용 안내", isPresented: $help) {
             Button("확인", role: .cancel) {}
         } message: {
-            Text("실제 ChatGPT 웹 화면입니다. 기존에 가입한 로그인 방식으로 로그인하세요. 로그인 정보는 이 앱의 WebKit에 유지됩니다. Google·Apple 등의 로그인이나 보안 검증은 내장 브라우저를 거부할 수 있습니다. 이 경우 Safari에서 이용하세요. Safari 로그인은 이 앱으로 옮겨지지 않습니다.\n\nAPI 키와 API 요금은 사용하지 않습니다. ChatGPT 계정의 이용 한도가 적용됩니다. 질문·이미지는 직접 첨부하고 전송하세요. 프로젝트 지침은 ‘질문·자료 복사’에 포함됩니다. ChatGPT 프로젝트는 웹에서 직접 선택해야 하며 앱 프로젝트와 자동 동기화되지 않습니다. 답변 원문은 ChatGPT에, 대화 링크와 선택 영역은 이 앱에 저장됩니다.")
+            Text("실제 ChatGPT 웹 화면입니다. 기존에 가입한 로그인 방식으로 로그인하세요. 로그인 정보는 이 앱의 WebKit에 유지됩니다. Google·Apple 등의 로그인이나 보안 검증은 내장 브라우저를 거부할 수 있습니다. 이 경우 Safari에서 이용하세요. Safari 로그인은 이 앱으로 옮겨지지 않습니다.\n\nAPI 키와 API 요금은 사용하지 않습니다. ChatGPT 계정의 이용 한도가 적용됩니다. ‘ChatGPT로 보내기’는 웹 입력창에 이미지와 질문을 자동으로 넣고 첨부 상태를 확인한 뒤 한 번 전송합니다. 화면을 인식하지 못하면 중단하므로 직접 첨부·전송할 수도 있습니다. 프로젝트 지침은 ‘질문·자료 복사’에 포함됩니다. ChatGPT 프로젝트는 웹에서 직접 선택해야 하며 앱 프로젝트와 자동 동기화되지 않습니다. 답변 원문은 ChatGPT에, 대화 링크와 선택 영역은 이 앱에 저장됩니다.")
         }
         .confirmationDialog("이 여백의 선택 영역과 대화 연결을 삭제할까요? ChatGPT의 대화는 유지됩니다.", isPresented: $deleting, titleVisibility: .visible) {
             Button("여백 연결 삭제", role: .destructive) {
@@ -160,6 +180,7 @@ struct PersonalChatGPTView: View {
         Button("PNG 저장") { exporting = true }
     }
     private func close() {
+        browser.cancelAutomation()
         if let id = conversationID { ai.flushDraft(id) }
         if let onClose { onClose() } else { dismiss() }
     }
