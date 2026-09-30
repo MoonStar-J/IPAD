@@ -139,3 +139,22 @@ python3 scripts/check_pdf_import.py --personal
 - Xcode가 사용하던 `Documents/IPAD` 체크아웃은 초기 `ff01844`에서 통합 커밋으로 fast-forward했다. 앱 소스/리소스가 작업 폴더와 같은지 파일별 비교했으며, 로컬 서명 설정은 유지했다.
 - 해당 IPAD 폴더에서 `xcodebuild -quiet -project NoteMargin.xcodeproj -scheme NoteMargin -configuration Debug -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath /private/tmp/NoteMarginUnifiedXcode CODE_SIGNING_ALLOWED=NO build`: exit 0. 실제 iPad 설치나 실계정 추론은 수행하지 않았다.
 - Xcode 프로젝트 열기 UI는 마지막 단계에서 macOS 화면 제어 도구의 시간 초과로 완료 여부를 확인하지 못했다. `Documents/IPAD/NoteMargin.xcodeproj`를 열고 `NoteMargin` 스킴을 선택한다. `Package.swift`의 Mac 검증 스킴은 앱 실행용이 아니다.
+
+## 2026-09-30 — 실기기 `not_sse` 연결 오류 수정
+
+연결된 iPad의 실패한 대화에서 `diagnosticCode: not_sse`를 확인했다. 이전 구현은 성공 HTTP 응답에서도 MIME이 `text/event-stream`과 다르면 본문을 읽기 전에 종료했다. 기존 진단에는 실제 MIME/HTTP 상태/본문이 없어 당시 서버가 보낸 본문의 종류는 확정할 수 없다. 실기기 질문·이미지·이메일·토큰은 이 기록이나 테스트 fixture에 포함하지 않았다.
+
+- Content-Type만으로 거부하지 않고 실제 SSE 시작 필드를 확인한다. 일반 JSON/바이너리/텍스트 MIME 또는 누락 헤더에서도 유효한 SSE를 처리한다. BOM, keepalive와 임의 청크 경계를 처리한다.
+- 실제 JSON 오류는 서버 코드에 따라 분류한다. HTML·완료 이벤트가 없는 JSON을 정상 답변으로 간주하지 않으며, POST를 자동 재전송하지 않는다. 완료 기준은 [공식 모델·추론 문서](https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference)의 `response.completed`를 유지한다.
+- 개별 질문의 전송/형식 오류는 사용 가능한 계정 전체를 오류 상태로 바꾸지 않는다. 인증·권한·한도 오류는 기존대로 차단한다. [공식 오류·복구 문서](https://developers.openai.com/siwc/token-sharing-open-source/errors-and-recovery)를 대조했다.
+- 실패 메시지에 안전하게 제한한 오류 코드·HTTP 상태·MIME·요청 ID를 표시한다. 본문이나 인증 정보를 저장/출력하지 않는다. 기존 진단 JSON은 그대로 호환된다.
+- 실패한 질문은 ‘질문 다시 입력’으로 입력창에 복원한다. 실제 전송은 사용자가 전송 버튼을 눌렀을 때만 수행한다. 다크/라이트 모드의 로그인 버튼 전경색과 배경색을 명시했다.
+
+검증:
+
+- 이전 커밋의 transport로 `application/json` 헤더 + 정상 SSE 본문을 주면 `not_sse`가 발생함을 재현했다. 실제 서버 응답을 캡처한 fixture는 아니다.
+- `swift run --scratch-path /private/tmp/note-margin-siwc-core CoreChecks`: **42/42** 통과.
+- `scripts/plan_session_checks.swift`를 위 명령으로 컴파일/실행: **20/20** 통과. MIME 변형 4종, HTTP 200 JSON 오류, HTML 거부, 비스트리밍 JSON 거부, BOM 포함. 외부 계정/추론 사용 없음.
+- `NoteMargin` Debug 시뮬레이터 빌드: 통과.
+- `python3 scripts/check_pdf_import.py --plan`: 네이티브 패널·Keychain·수식·답변 카드 Undo/Redo·PDF 필기 캡처 통과.
+- Canvas 필기·지우개·페이지 전환 코드는 수정하지 않았다. 수정 빌드의 실제 이미지 질문 완료는 사용자가 iPad에서 재확인해야 한다.

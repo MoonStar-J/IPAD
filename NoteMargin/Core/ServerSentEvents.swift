@@ -8,11 +8,16 @@ struct SSEDecoder {
     private var name = ""
     private var afterCR = false
     private var hasData = false
+    private var firstLine = true
     mutating func feed(_ byte: UInt8) throws -> Event? {
         if afterCR { afterCR = false; if byte == 10 { return nil } }
         if byte == 10 || byte == 13 {
             afterCR = byte == 13
             defer { line.removeAll(keepingCapacity: true) }
+            if firstLine {
+                firstLine = false
+                if line.starts(with: [0xef, 0xbb, 0xbf]) { line.removeFirst(3) }
+            }
             guard let text = String(data: line, encoding: .utf8) else { throw PlanFailure(kind: .protocolError, code: "invalid_utf8") }
             if text.isEmpty {
                 guard hasData else { name = ""; return nil }
@@ -43,7 +48,10 @@ struct PlanStreamAccumulator {
     private var seenSequences = Set<Int>()
     mutating func consume(_ event: SSEDecoder.Event) throws {
         guard status == .streaming else { return }
-        guard let object = try JSONSerialization.jsonObject(with: event.data) as? [String: Any] else { throw PlanFailure(kind: .protocolError, code: "invalid_event") }
+        let payload = String(data: event.data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if payload == "" { return }
+        if payload == "[DONE]" { end(); return }
+        guard let object = (try? JSONSerialization.jsonObject(with: event.data)) as? [String: Any] else { throw PlanFailure(kind: .protocolError, code: "invalid_event") }
         if let sequence = object["sequence_number"] as? Int, !seenSequences.insert(sequence).inserted { return }
         let type = object["type"] as? String ?? event.name
         switch type {
@@ -64,6 +72,7 @@ struct PlanStreamAccumulator {
         }
         guard text.utf8.count <= 2_000_000 else { throw PlanFailure(kind: .protocolError, code: "answer_too_large") }
     }
+    mutating func setFailure(_ failure: PlanFailure) { self.failure = failure }
     mutating func end(cancelled: Bool = false) {
         if status == .streaming { status = cancelled ? .cancelled : .interrupted }
     }

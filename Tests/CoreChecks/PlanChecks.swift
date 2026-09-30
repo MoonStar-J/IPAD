@@ -83,6 +83,28 @@ let planChecks: [CoreCheck] = [
         try expect(PlanFailure.decode(Data(#"{"error":"invalid_grant"}"#.utf8)).kind == .authentication)
         try expect(PlanFailure.decode(Data("gateway non-JSON".utf8), status: 429).kind == .limit)
     },
+    CoreCheck(name: "Request failures preserve account readiness but authentication and quota still block") { _ in
+        for kind in [PlanFailure.Kind.protocolError, .network, .unsupported, .context, .cancelled] {
+            let failure = PlanFailure(kind: kind, code: "fixture")
+            try expect(failure.connectionState(after: .ready, duringInference: true) == .ready)
+            try expect(failure.connectionState(after: .ready, duringInference: false) == .error)
+            try expect(failure.connectionState(after: .disconnected, duringInference: true) == .error)
+        }
+        for (kind, state) in [(PlanFailure.Kind.authentication, PlanConnectionState.reauthenticationRequired), (.permission, .permissionRequired), (.ineligible, .permissionRequired), (.limit, .rateLimited)] {
+            try expect(PlanFailure(kind: kind, code: "fixture").connectionState(after: .ready, duringInference: true) == state)
+        }
+        let old = try JSONDecoder().decode(PlanDiagnostic.self, from: Data(#"{"code":"not_sse"}"#.utf8))
+        try expect(old.contentType == nil && old.summary == "not_sse")
+    },
+    CoreCheck(name: "SSE BOM empty keepalive malformed event and DONE without completion") { _ in
+        var parser = SSEDecoder(), result = PlanStreamAccumulator()
+        let wire = "\u{feff}data: {\"type\":\"response.output_text.delta\",\"delta\":\"보존\"}\n\ndata:\n\ndata: [DONE]\n\n"
+        for byte in wire.utf8 { if let event = try parser.feed(byte) { try result.consume(event) } }
+        try expect(result.text == "보존" && result.status == .interrupted)
+        var malformed = PlanStreamAccumulator()
+        do { try malformed.consume(.init(name: "", data: Data("{broken".utf8))); throw CocoaError(.fileReadCorruptFile) }
+        catch let failure as PlanFailure { try expect(failure.code == "invalid_event") }
+    },
     CoreCheck(name: "Plan catalog uses models visibility and preserves server order") { _ in
         let catalog = try JSONDecoder().decode(ChatGPTModelCatalog.self, from: Data(#"{"models":[{"slug":"b","display_name":"Beta","visibility":"list"},{"slug":"hidden","display_name":"Hidden","visibility":"hide"},{"slug":"a","display_name":"Alpha","visibility":"list"}]}"#.utf8))
         try expect(catalog.visible.map(\.slug) == ["b", "a"])

@@ -58,6 +58,9 @@ struct ChatGPTMarginView: View {
                                             if let onSave { Button("노트에 저장") { onSave(message.text) }.disabled(message.text.isEmpty || message.status == .streaming) }
                                         }.font(.caption)
                                     } else { Text(message.text).textSelection(.enabled) }
+                                    if let diagnostic = message.diagnostic {
+                                        Text(diagnostic.summary).font(.caption2).foregroundStyle(.secondary).textSelection(.enabled)
+                                    }
                                     if let model = message.model { Text(model + " · " + (message.mode ?? .free).title).font(.caption2).foregroundStyle(.secondary) }
                                 }.frame(maxWidth: .infinity, alignment: .leading).padding(12)
                                     .background(message.role == .user ? Color.accentColor.opacity(0.08) : Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
@@ -65,6 +68,12 @@ struct ChatGPTMarginView: View {
                             if let error = ai.failures[chat.id] {
                                 Text(error).font(.caption).foregroundStyle(.secondary)
                                 if ai.needsSaving(chat.id) { Button("저장 다시 시도") { ai.retrySave(chat.id) } }
+                            }
+                            if !sending, chat.draft?.isEmpty != false,
+                               let last = chat.messages.last, last.role == .assistant,
+                               let status = last.status, status != .completed && status != .streaming,
+                               let question = chat.messages.last(where: { $0.role == .user })?.text {
+                                Button("질문 다시 입력") { ai.setDraft(question, for: chat.id) }.disabled(readOnly)
                             }
                         }.padding()
                     }
@@ -126,7 +135,7 @@ struct ChatGPTPlanSettings: View {
                     Text("이 앱의 질문은 연결된 ChatGPT 플랜의 사용량과 허용된 크레딧 설정에 영향을 받습니다. 선택 이미지와 질문·대화 맥락이 OpenAI로 전송됩니다.")
                     Text("현재 iPad 직접 로그인은 실기기 검증이 필요합니다. 시스템 로그인 중 취소하거나 3분 안에 콜백을 받지 못하면 안전하게 중단합니다.").font(.caption).foregroundStyle(.secondary)
                     if connection.state == .signingIn { ProgressView("시스템 인증 화면에서 진행하세요"); Button("로그인 취소") { connection.cancelSignIn() } }
-                    else { Button("Continue with ChatGPT") { connection.connect() }.buttonStyle(.borderedProminent).tint(.primary).disabled(connection.signingOut) }
+                    else { Button("Continue with ChatGPT") { connection.connect() }.buttonStyle(.borderedProminent).tint(Color(uiColor: .label)).foregroundStyle(Color(uiColor: .systemBackground)).disabled(connection.signingOut) }
                     if connection.state == .permissionRequired {
                         Button("구독 사용 권한 다시 요청") { connection.connect(requestConsent: true) }
                     }

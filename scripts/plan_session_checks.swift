@@ -64,6 +64,29 @@ final class PlanMockProtocol: URLProtocol, @unchecked Sendable {
         let before = PlanMockProtocol.count
         let completed = try await ChatGPTPlanTransport.stream(request: body, token: "fixture-only", http: transport) { _ in }
         try check(completed.status == .completed && completed.text == "한글" && PlanMockProtocol.count == before + 1, "real transport consumes completed SSE without replay")
+        for mime in ["application/json", "application/octet-stream", "text/plain", ""] {
+            PlanMockProtocol.contentType = mime
+            let calls = PlanMockProtocol.count
+            let streamed = try await ChatGPTPlanTransport.stream(request: body, token: "fixture-only", http: transport) { _ in }
+            try check(streamed.status == .completed && streamed.text == "한글" && PlanMockProtocol.count == calls + 1, "valid SSE works with generic/missing Content-Type: " + mime)
+        }
+        PlanMockProtocol.contentType = "application/json"
+        PlanMockProtocol.data = Data(#"{"error":{"code":"subscription_sharing_usage_limit_exceeded"}}"#.utf8)
+        let jsonErrorBefore = PlanMockProtocol.count
+        do { _ = try await ChatGPTPlanTransport.stream(request: body, token: "fixture-only", http: transport) { _ in }; throw NSError(domain: "JSON error must fail", code: 1) }
+        catch let error as PlanFailure { try check(error.kind == .limit && error.httpStatus == 200 && error.contentType == "application/json" && PlanMockProtocol.count == jsonErrorBefore + 1, "HTTP 200 JSON error retains its real code and never retries") }
+        PlanMockProtocol.data = Data(#"{"object":"response","status":"completed","output":[]}"#.utf8)
+        do { _ = try await ChatGPTPlanTransport.stream(request: body, token: "fixture-only", http: transport) { _ in }; throw NSError(domain: "JSON is not completed SSE", code: 1) }
+        catch let error as PlanFailure { try check(error.code == "non_streaming_json" && error.httpStatus == 200, "non-streaming JSON cannot fake response.completed") }
+        PlanMockProtocol.contentType = "text/html"
+        PlanMockProtocol.data = Data("<html>Gateway page containing private text</html>".utf8)
+        do { _ = try await ChatGPTPlanTransport.stream(request: body, token: "fixture-only", http: transport) { _ in }; throw NSError(domain: "HTML must fail", code: 1) }
+        catch let error as PlanFailure { try check(error.code == "not_sse" && error.contentType == "text/html" && !error.localizedDescription.contains("private text"), "HTML fails safely with metadata, never body text") }
+        PlanMockProtocol.contentType = "application/octet-stream"
+        PlanMockProtocol.data = Data("\u{feff}: keepalive\r\nevent: response.output_text.delta\r\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"한글\"}\r\n\r\ndata: {\"type\":\"response.completed\"}\n\n".utf8)
+        let bom = try await ChatGPTPlanTransport.stream(request: body, token: "fixture-only", http: transport) { _ in }
+        try check(bom.status == .completed && bom.text == "한글", "BOM and keepalive stream survives generic MIME")
+        PlanMockProtocol.contentType = "text/event-stream"
         PlanMockProtocol.data = Data("data: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\n".utf8)
         let interrupted = try await ChatGPTPlanTransport.stream(request: body, token: "fixture-only", http: transport) { _ in }
         try check(interrupted.status == .interrupted && interrupted.text == "partial", "HTTP EOF preserves partial and never claims completion")

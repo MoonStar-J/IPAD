@@ -68,6 +68,7 @@ struct PlanFailure: Error, LocalizedError, Equatable {
     var requestID: String?
     var parameter: String?
     var bodyShape: String?
+    var contentType: String?
     var errorDescription: String? {
         switch kind {
         case .permission: return "이 연결에 구독 사용 권한이 없습니다. ChatGPT 설정에서 이 앱의 권한을 확인하세요."
@@ -80,6 +81,23 @@ struct PlanFailure: Error, LocalizedError, Equatable {
         case .context: return "대화가 전송 크기 한도를 넘었습니다. 조건을 임의로 제외하지 않았습니다. 새 영역 대화를 만들거나 질문을 줄여 주세요."
         case .cancelled: return "요청을 취소했습니다. 이미 처리된 사용량이 있을 수 있습니다."
         }
+    }
+    // An individual request failure does not invalidate a verified account.
+    func connectionState(after current: PlanConnectionState, duringInference: Bool) -> PlanConnectionState {
+        switch kind {
+        case .limit: return .rateLimited
+        case .permission, .ineligible: return .permissionRequired
+        case .authentication: return .reauthenticationRequired
+        default: return duringInference && current == .ready ? .ready : .error
+        }
+    }
+    func withResponse(status: Int, requestID: String?, contentType: String?) -> PlanFailure {
+        var result = self
+        result.httpStatus = status
+        result.requestID = Self.safeField(requestID)
+        let mime = contentType?.lowercased().split(separator: ";").first.map(String.init)
+        if let mime, mime.count <= 100, mime.unicodeScalars.allSatisfy({ CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyz0123456789.+-/").contains($0) }) { result.contentType = mime }
+        return result
     }
     static func decode(_ data: Data, status: Int = 0, requestID: String? = nil) -> PlanFailure {
         let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
@@ -158,8 +176,12 @@ struct PlanDiagnostic: Codable, Equatable {
     let requestID: String?
     let parameter: String?
     let bodyShape: String?
+    var contentType: String?
+    var summary: String {
+        [Optional(code), httpStatus.map { "HTTP \($0)" }, contentType, parameter.map { "항목: " + $0 }, requestID.map { "요청: " + $0 }].compactMap { $0 }.joined(separator: " · ")
+    }
     init(_ failure: PlanFailure) {
         code = failure.code; httpStatus = failure.httpStatus; requestID = failure.requestID
-        parameter = failure.parameter; bodyShape = failure.bodyShape
+        parameter = failure.parameter; bodyShape = failure.bodyShape; contentType = failure.contentType
     }
 }

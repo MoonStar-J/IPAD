@@ -102,7 +102,7 @@ import SwiftUI
             guard expected == generation, client == selected else { return }
             models = catalog.visible.filter { !$0.slug.isEmpty && !$0.display_name.isEmpty }
             if !models.contains(where: { $0.slug == model }) { model = models.first?.slug ?? "" }
-            state = .ready
+            state = .ready; notice = nil
         } catch { if expected == generation { handle(error) } }
     }
     func logout() {
@@ -131,14 +131,9 @@ import SwiftUI
             } catch { state = .error; notice = "보안 저장소에서 자격 증명을 지우지 못했습니다. 다시 로그아웃해 주세요." }
         }
     }
-    func handle(_ error: Error) {
+    func handle(_ error: Error, duringInference: Bool = false) {
         let failure = error as? PlanFailure ?? PlanFailure(kind: .network, code: "network_error")
         notice = failure.localizedDescription
-        switch failure.kind {
-        case .limit: state = .rateLimited
-        case .permission: state = .permissionRequired
-        case .authentication: state = .reauthenticationRequired
-        default: state = .error
-        }
+        state = failure.connectionState(after: state, duringInference: duringInference)
     }
 }

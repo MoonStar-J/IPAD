@@ -189,7 +189,7 @@ final class MarginAIStore: ObservableObject {
                     apply(update)
                 }
                 apply(result)
-                if let failure = result.failure { self.failures[id] = failure.localizedDescription; connection.handle(failure) }
+                if let failure = result.failure { self.failures[id] = failure.localizedDescription; connection.handle(failure, duringInference: true) }
                 else if result.status != .completed { self.failures[id] = "답변이 완료되지 않았습니다. 부분 답변을 보존했으며 자동으로 재전송하지 않습니다." }
             } catch {
                 guard self.planRequestIDs[id] == requestID, generation == connection.generation,
@@ -200,7 +200,7 @@ final class MarginAIStore: ObservableObject {
                 current.messages[j].diagnosticCode = failure.code
                 current.messages[j].diagnostic = PlanDiagnostic(failure)
                 self.persist(current, retainOnFailure: true); self.failures[id] = failure.localizedDescription
-                if !cancelled { connection.handle(failure) }
+                if !cancelled { connection.handle(failure, duringInference: true) }
             }
         }
         return true
