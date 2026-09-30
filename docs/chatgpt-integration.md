@@ -123,7 +123,7 @@ python3 scripts/check_pdf_import.py --personal
 # offline math renderer, answer card Undo/Redo, PDF capture checks
 ```
 
-시뮬레이터에서 Keychain 저장/복원, 오프라인 KaTeX 렌더링, 외부 링크/HTML 차단, 닫히지 않은 수식 텍스트 유지, 답변 카드 삽입 Undo/Redo를 추가 검증했다. 실제 Pencil 입력과 장시간 필기 회귀, 실계정 SSO/동의·모델별 이미지 입력·사용량 오류·토큰 갱신/해제는 추가 기기 검증 대상이다. 과거 필기 회귀 테스트 통과 기록을 이번 변경의 실행 결과로 재사용하지 않는다. 앱 배포, 가입, 결제는 수행하지 않았다. GitHub 반영은 이후 사용자의 명시적 요청에 따라 진행한다.
+시뮬레이터에서 Keychain 저장/복원, 오프라인 KaTeX 렌더링, 외부 링크/HTML 차단, 닫히지 않은 수식 텍스트 유지, 답변 카드 삽입 Undo/Redo를 추가 검증했다. 실제 Pencil 입력과 장시간 필기 회귀, 실계정 SSO/동의·모델별 이미지 입력·사용량 오류·토큰 갱신/해제는 추가 기기 검증 대상이다. 과거 필기 회귀 테스트 통과 기록을 이번 변경의 실행 결과로 재사용하지 않는다. 앱 배포, 가입, 결제는 수행하지 않았다. 이후 사용자의 명시적 요청으로 통합 변경 `b660ed9`를 GitHub main에 push하고 원격 SHA를 확인했다.
 
 
 ## 2026-09-30 통합 후 검증
@@ -135,3 +135,7 @@ python3 scripts/check_pdf_import.py --personal
 - 호환 `NoteMarginPersonal` Release 시뮬레이터 빌드: 통과. 동일한 OAuth/대화 코드와 표시 이름을 사용한다.
 - 기존 Canvas 필기/페이지 전환/지우개 소스는 변경하지 않았다.
 - 실계정 로그인과 실제 이미지 질문 응답 완료는 여전히 미검증이다.
+
+- Xcode가 사용하던 `Documents/IPAD` 체크아웃은 초기 `ff01844`에서 통합 커밋으로 fast-forward했다. 앱 소스/리소스가 작업 폴더와 같은지 파일별 비교했으며, 로컬 서명 설정은 유지했다.
+- 해당 IPAD 폴더에서 `xcodebuild -quiet -project NoteMargin.xcodeproj -scheme NoteMargin -configuration Debug -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath /private/tmp/NoteMarginUnifiedXcode CODE_SIGNING_ALLOWED=NO build`: exit 0. 실제 iPad 설치나 실계정 추론은 수행하지 않았다.
+- Xcode 프로젝트 열기 UI는 마지막 단계에서 macOS 화면 제어 도구의 시간 초과로 완료 여부를 확인하지 못했다. `Documents/IPAD/NoteMargin.xcodeproj`를 열고 `NoteMargin` 스킴을 선택한다. `Package.swift`의 Mac 검증 스킴은 앱 실행용이 아니다.
