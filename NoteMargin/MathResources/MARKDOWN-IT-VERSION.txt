@@ -1,0 +1,3 @@
+markdown-it 15.0.2
+https://registry.npmjs.org/markdown-it/-/markdown-it-15.0.2.tgz
+sha512-q4IGxMv56jCqT4OCRCADBoDP3LO4MhmTXjFbphHPXs4g3j9Xg5RDnxqN8IF/3vIWEU+VCnUq+7JUg/cfy2E6Qw==

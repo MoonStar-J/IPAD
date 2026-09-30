@@ -6,6 +6,19 @@ enum TutorMode: String, Codable, CaseIterable, Identifiable {
     var title: String {
         switch self { case .free: return "자유 질문"; case .concept: return "개념 설명"; case .proof: return "엄밀한 증명"; case .check: return "내 풀이 검증"; case .hints: return "힌트만" }
     }
+    var defaultQuestion: String {
+        switch self {
+        case .free: return "선택한 영역의 핵심 내용을 설명하고 이해에 필요한 배경을 알려줘."
+        case .concept: return "선택한 영역의 핵심 개념을 정의, 직관, 간단한 예시 순서로 설명해줘."
+        case .proof: return "선택한 영역의 명제를 가정과 결론으로 정리하고, 필요한 논리를 생략하지 않고 엄밀하게 증명해줘."
+        case .check: return "선택한 영역에 있는 내 풀이를 검토하고, 처음으로 잘못되었거나 정당화가 부족한 단계를 짚어줘. 풀이가 보이지 않으면 필요한 내용을 물어봐줘."
+        case .hints: return "선택한 영역의 문제를 스스로 풀 수 있도록 작은 힌트 하나만 줘. 정답이나 전체 풀이는 아직 알려주지 마."
+        }
+    }
+    func question(for draft: String) -> String {
+        let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? defaultQuestion : trimmed
+    }
     var instruction: String {
         switch self {
         case .free: return "사용자의 질문에 집중하세요."

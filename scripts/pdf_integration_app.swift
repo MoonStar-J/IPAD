@@ -100,6 +100,49 @@ private struct ChatGPTPlanFixtureView: View {
     _ = try await web.callAsyncJavaScript("window.drawMath(expression)", arguments: ["expression": #"\href{https://example.invalid/secret}{click} + <script>alert(1)</script>"#], in: nil, contentWorld: .page)
     let links = try await web.evaluateJavaScript("document.querySelectorAll('a,img,iframe').length") as? Int
     try PDFIntegrationChecks.check(links == 0, "untrusted math cannot create links or external resources")
+    // Render the entire paragraph so bold emphasis can span inline equations.
+    let readable = #"**Precision about the slide.** The integers \(a,2a,\ldots,(p-1)a\) need not be a permutation. It is their **remainders modulo \(p\)** that matter."#
+    _ = try await web.callAsyncJavaScript("window.drawAnswer(source)", arguments: ["source": readable], in: nil, contentWorld: .page)
+    let paragraphOK = try await web.evaluateJavaScript("document.querySelectorAll('#answer > p').length === 1 && document.querySelectorAll('.math-inline').length === 2 && document.querySelectorAll('.math-display').length === 0 && document.querySelectorAll('strong .math-inline').length === 1 && document.querySelectorAll('button').length === 0") as? Bool
+    try PDFIntegrationChecks.check(paragraphOK == true, "inline math and bold stay inside one paragraph without copy buttons")
+    _ = try await web.callAsyncJavaScript("window.drawAnswer(source)", arguments: ["source": #"Before \(x^2\) unfinished \(x"#], in: nil, contentWorld: .page)
+    let incompleteOK = try await web.evaluateJavaScript("document.querySelectorAll('.katex').length === 1 && document.getElementById('answer').textContent.includes('unfinished')") as? Bool
+    try PDFIntegrationChecks.check(incompleteOK == true, "unfinished streamed math stays readable until closed")
+    let hostile = #"<img src='https://example.invalid/secret' onerror='alert(1)'> [link](https://example.invalid) ![alt](https://example.invalid/a.png) \(\href{https://example.invalid}{bad}\)"#
+    _ = try await web.callAsyncJavaScript("window.drawAnswer(source)", arguments: ["source": hostile], in: nil, contentWorld: .page)
+    let safe = try await web.evaluateJavaScript("document.querySelectorAll('#answer a,#answer img,#answer script,#answer iframe').length === 0") as? Bool
+    try PDFIntegrationChecks.check(safe == true, "whole answer Markdown cannot create active HTML or external links/images")
+    let sample = #"""
+    ## Fermat’s little theorem
+
+    **Precision about the slide.** The integers \(a,2a,\ldots,(p-1)a\) themselves need not be a permutation of \(1,2,\ldots,p-1\). It is their **remainders modulo \(p\)** that form such a permutation.
+
+    Therefore,
+
+    \[
+    a^{p-1} \equiv 1 \pmod p.
+    \]
+
+    - 가정: \(p\)는 소수이고 \(p \nmid a\)입니다.
+    - 결론: 나머지의 순열을 이용해 곱을 비교합니다.
+
+    `\(code stays literal\)`
+    """#
+    _ = try await web.callAsyncJavaScript("window.drawAnswer(source, 7, 17, 'dark')", arguments: ["source": sample], in: nil, contentWorld: .page)
+    let blockOK = try await web.evaluateJavaScript("document.querySelectorAll('.math-display').length === 1 && document.querySelectorAll('li').length === 2 && document.querySelectorAll('code .katex').length === 0 && document.querySelectorAll('strong .math-inline').length === 1") as? Bool
+    try PDFIntegrationChecks.check(blockOK == true, "block math lists code and emphasis preserve document structure")
+    web.frame = CGRect(x: 0, y: 0, width: 620, height: 900)
+    // Native WebKit snapshots are synthetic layout fixtures, never live account responses.
+    try await Task.sleep(for: .milliseconds(200))
+    let renderedHeight = try await web.evaluateJavaScript("document.getElementById('answer').getBoundingClientRect().height") as? Double ?? 0
+    try PDFIntegrationChecks.check(renderedHeight > 100 && renderedHeight < 700, "answer height follows its document rather than per-equation fixed frames")
+    let snapshot = try await web.takeSnapshot(configuration: nil)
+    try snapshot.pngData()?.write(to: PDFIntegrationChecks.directory.appendingPathComponent("math-readable-dark.png"))
+    web.frame = CGRect(x: 0, y: 0, width: 320, height: 900)
+    _ = try await web.callAsyncJavaScript("window.drawAnswer(source, 8, 17, 'light')", arguments: ["source": sample], in: nil, contentWorld: .page)
+    try await Task.sleep(for: .milliseconds(100))
+    let narrow = try await web.takeSnapshot(configuration: nil)
+    try narrow.pngData()?.write(to: PDFIntegrationChecks.directory.appendingPathComponent("math-readable-narrow.png"))
     let parts = AnswerPart.parse(#"**Proof** \(x^2\) unfinished \(x"#)
     try PDFIntegrationChecks.check(parts.filter(\.math).count == 1 && parts.last?.math == false, "streaming unfinished math stays text")
 }

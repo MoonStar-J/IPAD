@@ -54,7 +54,11 @@ struct ChatGPTMarginView: View {
                                     if message.role == .assistant {
                                         MathAnswerView(text: message.text.isEmpty ? (message.status == .streaming ? "답변을 기다리는 중…" : "저장된 텍스트 답변이 없습니다.") : message.text)
                                         HStack {
-                                            Button("원문 복사") { UIPasteboard.general.string = message.text }
+                                            Menu("복사") {
+                                                Button("답변 원문 복사") { UIPasteboard.general.string = message.text }
+                                                Button("수식 모아 복사") { UIPasteboard.general.string = AnswerPart.parse(message.text).filter(\.math).map(\.text).joined(separator: "\n\n") }
+                                                    .disabled(!AnswerPart.parse(message.text).contains(where: \.math))
+                                            }
                                             if let onSave { Button("노트에 저장") { onSave(message.text) }.disabled(message.text.isEmpty || message.status == .streaming) }
                                         }.font(.caption)
                                     } else { Text(message.text).textSelection(.enabled) }
@@ -93,8 +97,14 @@ struct ChatGPTMarginView: View {
                         }.disabled(sending)
                         if readOnly { Text("이전 프로젝트의 대화입니다. 현재 프로젝트에서 새 영역 대화를 만들어 주세요.").font(.caption) }
                         if connection.state != .ready { Button("ChatGPT 구독 연결 확인") { settings = true } }
+                        if (chat.draft ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("기본 질문 · " + (chat.mode ?? .free).title).font(.caption.bold())
+                                Text((chat.mode ?? .free).defaultQuestion).font(.caption).foregroundStyle(.secondary)
+                            }.accessibilityIdentifier("ai-default-question-preview")
+                        }
                         HStack(alignment: .bottom) {
-                            TextField("이 영역에 대해 질문하세요", text: Binding(get: { chat.draft ?? "" }, set: { ai.setDraft($0, for: chat.id) }), axis: .vertical)
+                            TextField("직접 질문 입력 (선택)", text: Binding(get: { chat.draft ?? "" }, set: { ai.setDraft($0, for: chat.id) }), axis: .vertical)
                                 .accessibilityIdentifier("ai-question-input").disabled(readOnly || sending)
                                 .lineLimit(1...5).padding(10).background(.quaternary, in: RoundedRectangle(cornerRadius: 10))
                             if sending { Button { ai.cancel(chat.id) } label: { Image(systemName: "stop.circle.fill").font(.title) }.accessibilityLabel("답변 중단") }
@@ -102,7 +112,7 @@ struct ChatGPTMarginView: View {
                                 Button { if ai.sendPlan(chat.draft ?? "", conversationID: chat.id, project: project) { preview = false } }
                                 label: { Image(systemName: "arrow.up.circle.fill").font(.title) }
                                 .accessibilityLabel("확인한 영역과 질문 보내기")
-                                .disabled(readOnly || connection.state != .ready || connection.model.isEmpty || (chat.includeImage != false && !PlanModelSupport.acceptsImage(connection.model)) || (chat.draft ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || ai.needsSaving(chat.id))
+                                .disabled(readOnly || connection.state != .ready || connection.model.isEmpty || (chat.includeImage != false && !PlanModelSupport.acceptsImage(connection.model)) || ai.needsSaving(chat.id))
                             }
                         }
                     }.padding(12)

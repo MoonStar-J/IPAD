@@ -71,7 +71,7 @@ Apple 참고: [시스템 인증 세션](https://developer.apple.com/documentatio
 
 `PersonalChatGPTView`는 기존 사각형 선택과 여백 원형 아이콘에서 열린다. 캡처는 기존 `RegionContextService`/`PageRenderer`의 PDF 회전·연속 페이지 좌표 변환을 재사용한다. 프로젝트별 대화 범위도 유지한다. 전송 버튼 전에는 요청이 없다.
 
-Markdown은 SwiftUI, LaTeX는 번들에 포함한 KaTeX 0.18.9로 표시한다. 수식은 개별 가로 스크롤 영역이며 원문·수식을 복사할 수 있다. 닫히지 않은 수식은 텍스트로 남긴다. inline 수식도 현재 별도 행으로 표시되는 제한이 있다. 렌더러는 nonpersistent WKWebView, local resource 전용 CSP, `trust:false`, 크기/확장 상한을 사용한다. 답변 문자열은 JS 코드가 아닌 structured argument로만 전달한다. 토큰은 전달하지 않는다. 외부 리소스/탐색/임의 HTML 실행을 차단한다. [KaTeX 보안](https://katex.org/docs/security), [옵션](https://katex.org/docs/options). 배포 파일 integrity 확인값과 MIT 라이선스는 MathResources에 포함했다.
+Markdown은 번들 markdown-it 15.0.2, LaTeX는 KaTeX 0.18.9로 하나의 문서 안에 표시한다. 문장 속 수식은 인라인으로, 독립 수식은 가로 스크롤 가능한 블록으로 표시한다. 복사는 답변 아래 메뉴에서 원문 또는 수식 모음을 선택한다. 닫히지 않은 수식은 텍스트로 남긴다. 렌더러는 nonpersistent WKWebView, local resource 전용 CSP, `trust:false`, 크기/확장 상한을 사용한다. 답변 문자열은 JS 코드가 아닌 structured argument로만 전달한다. 토큰은 전달하지 않는다. 외부 리소스/탐색/임의 HTML 실행을 차단한다. [KaTeX 보안](https://katex.org/docs/security), [옵션](https://katex.org/docs/options). 배포 파일 integrity 확인값과 MIT 라이선스는 MathResources에 포함했다.
 
 ‘노트에 저장’은 기존 편집 가능한 text element에 Markdown/LaTeX 원문을 삽입한다. 원본 필기는 덮어쓰지 않으며 같은 PencilKit undo manager에 카드 삽입/제거를 등록한다. 노트 카드 자체는 기존 일반 텍스트 렌더링이므로 수식 원문이 보인다. 대화 패널의 ‘원본 선택 영역으로’는 해당 페이지의 원래 사각형으로 확대한다.
 
@@ -158,3 +158,14 @@ python3 scripts/check_pdf_import.py --personal
 - `NoteMargin` Debug 시뮬레이터 빌드: 통과.
 - `python3 scripts/check_pdf_import.py --plan`: 네이티브 패널·Keychain·수식·답변 카드 Undo/Redo·PDF 필기 캡처 통과.
 - Canvas 필기·지우개·페이지 전환 코드는 수정하지 않았다. 수정 빌드의 실제 이미지 질문 완료는 사용자가 iPad에서 재확인해야 한다.
+
+
+## 답변 가독성 및 유형별 기본 질문
+
+- 수식마다 WKWebView와 복사 버튼을 만들던 구성을 답변당 하나의 로컬 Markdown/LaTeX 문서로 교체했다. 문장·수식·강조·목록이 같은 문서 흐름을 유지하고, 문서 실제 높이를 측정해 수식마다 생기던 빈 공간을 없앤다. 스트리밍 렌더링은 직렬화해 늦은 업데이트가 최신 답변을 덮지 않게 한다.
+- 원문 복사·수식 모아 복사는 답변 아래 ‘복사’ 메뉴에서 제공한다. 수식 아래 반복 버튼은 없다.
+- 자유 질문, 개념 설명, 엄밀한 증명, 내 풀이 검증, 힌트만 각각 기본 질문을 제공한다. 입력이 비어 있거나 공백뿐일 때 기본 질문을 미리 보여주며, 사용자가 전송을 누르면 그 문장을 실제 사용자 메시지로 저장·전송한다. 직접 입력한 질문이 있으면 그대로 우선한다. 유형 변경만으로 AI를 호출하지 않는다.
+- markdown-it 공식 npm 15.0.2 배포본의 SHA-512 무결성을 확인해 번들에 넣었다. 실행 중 다운로드나 외부 리소스 요청은 없다. raw HTML, 외부 이미지·링크 생성과 임의 스크립트 실행은 차단한다. 출처: [공식 사용 문서](https://github.com/markdown-it/markdown-it/blob/master/docs/usage.md), 버전·라이선스는 `MathResources/MARKDOWN-IT-*` 참조.
+- Core **43/43** 통과. 기본 질문의 빈 입력·공백·직접 입력 우선·유형별 저장/요청 내용을 검사했다.
+- `python3 scripts/check_pdf_import.py --plan` 통과. 실제 iPad 시뮬레이터 WKWebView에서 인라인 문단, 수식을 포함한 굵은 글씨, 블록 수식·목록·코드, 미완성 수식, 외부 콘텐츠 차단을 검사했다. 밝은/어두운 화면 및 폭 320/620의 합성 예제 스냅샷을 직접 확인했다. 기존 PDF/필기 캡처·Keychain·답변 카드 Undo/Redo도 통과했다.
+- `NoteMargin` Debug iPad 기기 SDK 빌드 통과. 실제 계정 추가 요청이나 필기 Canvas 변경은 없다.

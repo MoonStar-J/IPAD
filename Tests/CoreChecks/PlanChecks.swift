@@ -105,6 +105,22 @@ let planChecks: [CoreCheck] = [
         do { try malformed.consume(.init(name: "", data: Data("{broken".utf8))); throw CocoaError(.fileReadCorruptFile) }
         catch let failure as PlanFailure { try expect(failure.code == "invalid_event") }
     },
+    CoreCheck(name: "Each question mode sends its visible template when the draft is empty") { _ in
+        try expect(Set(TutorMode.allCases.map(\.defaultQuestion)).count == TutorMode.allCases.count)
+        for mode in TutorMode.allCases {
+            try expect(!mode.defaultQuestion.isEmpty)
+            try expect(mode.question(for: " \n\t") == mode.defaultQuestion)
+            try expect(mode.question(for: "  내가 쓴 질문  ") == "내가 쓴 질문")
+            var chat = sampleConversation(for: Notebook(title: "Template"))
+            chat.mode = mode; chat.includeImage = false
+            chat.messages = [.init(role: .user, text: mode.question(for: ""), mode: mode)]
+            let request = try PlanRequest.build(chat: chat, model: "fixture", projectInstructions: "")
+            try expect(request.input.last?.content.first?.text == mode.defaultQuestion)
+            try expect(request.instructions.contains(mode.instruction))
+        }
+        try expect(TutorMode.hints.defaultQuestion.contains("힌트 하나"))
+        try expect(TutorMode.check.defaultQuestion.contains("풀이가 보이지 않으면"))
+    },
     CoreCheck(name: "Plan catalog uses models visibility and preserves server order") { _ in
         let catalog = try JSONDecoder().decode(ChatGPTModelCatalog.self, from: Data(#"{"models":[{"slug":"b","display_name":"Beta","visibility":"list"},{"slug":"hidden","display_name":"Hidden","visibility":"hide"},{"slug":"a","display_name":"Alpha","visibility":"list"}]}"#.utf8))
         try expect(catalog.visible.map(\.slug) == ["b", "a"])

@@ -146,8 +146,7 @@ final class MarginAIStore: ObservableObject {
         if let previous = chat.accountRegistrationID, previous != account {
             failures[id] = "다른 계정에서 만든 대화입니다. 원래 계정을 선택하거나 새 영역 대화를 만들어 주세요."; return false
         }
-        let question = question.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !question.isEmpty else { return false }
+        let question = (chat.mode ?? .free).question(for: question)
         let model = connection.model, generation = connection.generation, requestID = UUID()
         chat.messages.append(MarginMessage(role: .user, text: question, mode: chat.mode ?? .free, model: model))
         let body: PlanRequest
