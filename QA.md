@@ -1,3 +1,9 @@
+## 2026-09-30 — ChatGPT 구독 연결 통합
+
+현재 기능과 검증 수준은 [ChatGPT 연동 기록](docs/chatgpt-integration.md)을 참고하세요. `NoteMargin`과 데이터 보존용 `NoteMarginPersonal` 모두 같은 공식 OAuth 연결을 사용합니다. 아래 API 키·웹 자동화 항목은 제거된 이전 구현의 검사 기록입니다. 과거 결과를 현재 기능의 통과 근거로 사용하지 않습니다.
+
+현재 오프라인 통합 검사: `python3 scripts/check_pdf_import.py --plan`.
+
 ## AI 연결 완료 버튼 수정 (2026-09-12)
 
 - 상단 **완료**와 키보드 **완료**가 입력한 API 키·제공자·모델을 저장한 후 설정 화면을 닫습니다. 저장 오류는 화면을 유지한 채 표시하며, **취소**는 미저장 입력을 폐기합니다.
@@ -8,7 +14,7 @@
 재실행:
 
 ```sh
-python3 scripts/check_pdf_import.py --live-ui --only-testing CanvasLiveInkTests/AIConnectionVisualTests
+# 이전 API 연결 UI 검사는 제거됨. 현재 명령은 위 --plan 참고.
 ```
 
 ## 프로젝트 및 여백 AI (2026-09-10)

@@ -81,8 +81,19 @@ final class NoteStore: ObservableObject {
         }
     }
 
-    @discardableResult
-    func updatePage(noteID: UUID, pageID: UUID, _ change: (inout NotePage) -> Void) -> Bool {
+    /// Registers a non-destructive answer card with the same undo manager as ink.
+    func setAIElement(noteID: UUID, pageID: UUID, element: PageElement, present: Bool, undoManager: UndoManager?) {
+        guard updatePage(noteID: noteID, pageID: pageID, { page in
+            page.elements.removeAll { $0.id == element.id }
+            if present { page.elements.append(element) }
+        }) else { return }
+        undoManager?.registerUndo(withTarget: self) { [weak undoManager] target in
+            target.setAIElement(noteID: noteID, pageID: pageID, element: element, present: !present, undoManager: undoManager)
+        }
+        undoManager?.setActionName("AI 답변 카드")
+    }
+
+    @discardableResult func updatePage(noteID: UUID, pageID: UUID, _ change: (inout NotePage) -> Void) -> Bool {
         updateNote(noteID) { note in
             guard let index = note.pages.firstIndex(where: { $0.id == pageID }) else { return }
             change(&note.pages[index])

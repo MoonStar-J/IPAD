@@ -1,9 +1,7 @@
 import SwiftUI
 import PencilKit
 import PDFKit
-#if PERSONAL_CHATGPT
 import WebKit
-#endif
 
 @main
 struct NoteMarginApp: App {
@@ -13,16 +11,12 @@ struct NoteMarginApp: App {
     var body: some Scene {
         WindowGroup {
             Group {
-                #if PERSONAL_CHATGPT
-                if CommandLine.arguments.contains("--personal-web") || CommandLine.arguments.contains("--personal-self-check") {
-                    PersonalWebFixtureView()
+                if CommandLine.arguments.contains("--auth-probe") || CommandLine.arguments.contains("--plan-ui") || CommandLine.arguments.contains("--plan-self-check") {
+                    ChatGPTPlanFixtureView()
                 } else { ordinaryContent }
-                #else
-                ordinaryContent
-                #endif
             }.environmentObject(store).task {
                 guard !ran else { return }; ran = true
-                guard !CommandLine.arguments.contains("--ai-connection"), !CommandLine.arguments.contains("--personal-web"), !CommandLine.arguments.contains("--personal-self-check") else { return }
+                guard !CommandLine.arguments.contains("--auth-probe"), !CommandLine.arguments.contains("--plan-ui"), !CommandLine.arguments.contains("--plan-self-check") else { return }
                 do {
                     let checked = try PDFIntegrationChecks.run(store)
                     noteID = CommandLine.arguments.contains("--page-swap") || CommandLine.arguments.contains("--eraser") ? try PDFIntegrationChecks.pageSwapFixture(store).id : checked
@@ -32,9 +26,7 @@ struct NoteMarginApp: App {
         }
     }
     @ViewBuilder private var ordinaryContent: some View {
-                if CommandLine.arguments.contains("--ai-connection") {
-                    AIConnectionRegressionView()
-                } else if CommandLine.arguments.contains("--eraser"), let noteID, let note = store.note(noteID) {
+                if CommandLine.arguments.contains("--eraser"), let noteID, let note = store.note(noteID) {
                     EraserRegressionView(note: note)
                 } else if CommandLine.arguments.contains("--live-ink"), noteID != nil,
                    let note = store.library.notebooks.last(where: { $0.title == "Long canvas regression" }) {
@@ -44,196 +36,73 @@ struct NoteMarginApp: App {
     }
 }
 
-#if PERSONAL_CHATGPT
-@MainActor private final class PersonalWebFixture: ObservableObject {
-    let browser = ChatGPTBrowser(websiteDataStore: .nonPersistent(), loadImmediately: false)
-    let note = Notebook(title: "Personal web fixture")
-    let id: UUID
-    @Published var checkStatus = ""
-    init() {
-        let size = CGSize(width: 300, height: 100)
-        let image = UIGraphicsImageRenderer(size: size).image { context in
-            UIColor.white.setFill(); context.fill(CGRect(origin: .zero, size: size))
-            UIColor.red.setStroke(); let path = UIBezierPath(); path.move(to: CGPoint(x: 10, y: 50)); path.addLine(to: CGPoint(x: 290, y: 50)); path.lineWidth = 5; path.stroke()
-        }
-        let region = CapturedRegion(pageID: note.pages[0].id, rect: CGRect(origin: .zero, size: size), imageData: image.pngData()!, extractedText: "Selected fixture PDF", sourceDescription: "Fixture page 1", pdfPageNumbers: [1])
-        id = MarginAIStore.shared.create(note: note, project: nil, region: region)!
-        browser.webView.loadHTMLString("""
-        <html><meta name="viewport" content="width=device-width, initial-scale=1"><body>
-        <h1>Offline ChatGPT browser fixture</h1>
-        <p>No login and no network request.</p>
-        <button onclick="history.pushState({}, '', '/c/offline-fixture?secret=discard');document.getElementById('status').innerText='Fixture conversation opened'">Open fixture conversation</button>
-        <p id="status">Ready</p><textarea aria-label="Fixture chat composer"></textarea>
-        </body></html>
-        """, baseURL: ChatGPTWebContext.home)
-    }
-    private func loadComposer(mode: String) async throws {
-        browser.webView.loadHTMLString("""
-        <html><meta name="viewport" content="width=device-width, initial-scale=1"><body>
-        <h1>Offline composer fixture</h1>
-        <form data-mobile-composer \(mode == "logged-out" ? "data-logged-out" : "")>
-          <input id="octane-mobile-composer-files-input" type="file" accept="image/png" hidden>
-          <textarea id="mobile-composer-prompt" aria-label="Fixture composer">\(mode == "draft" ? "Keep my draft" : "")</textarea>
-          <div id="attachments">\(mode == "attachment" ? "<button type='button' aria-label='Remove file'>Existing PDF</button>" : "")</div><div id="progress" role="progressbar" hidden>Uploading</div>
-          <div role="alert" \(mode == "upload-error" ? "" : "hidden")>Upload failed</div>
-          <button data-composer-submit data-send-label="Send" aria-label="Send" type="submit">Send</button>
-        </form>
-        <script>
-        window.fixtureSubmissions = 0;
-        const form = document.querySelector('form'), input = document.querySelector('input'), editor = document.querySelector('textarea');
-        input.addEventListener('change', () => {
-          if ('\(mode)' === 'missing-receipt') return;
-          const image = new Image(); image.alt = input.files[0].name; image.src = URL.createObjectURL(input.files[0]);
-          document.getElementById('attachments').append(image, document.createTextNode(input.files[0].name));
-          if ('\(mode)' === 'progress' || '\(mode)' === 'cancel') document.getElementById('progress').hidden = false;
-        });
-        form.addEventListener('submit', event => { event.preventDefault(); window.fixtureSubmissions += 1; });
-        </script></body></html>
-        """, baseURL: ChatGPTWebContext.home)
-        for _ in 0..<100 {
-            if !browser.webView.isLoading, (try? await browser.webView.evaluateJavaScript("document.querySelector('h1')?.textContent")) as? String == "Offline composer fixture" { return }
-            try await Task.sleep(for: .milliseconds(100))
-        }
-        throw NSError(domain: "Composer fixture did not load", code: 1)
-    }
-    private func checkComposerAutomation() async throws {
-        let image = MarginAIStore.shared.conversation(id)!.imageData
-        let prompt = "선택 영역 질문 · quotes \" and newline\nPDF + handwriting"
-        for (mode, expected, sends) in [("ready", "submit_clicked", 1), ("logged-out", "login_required", 0), ("draft", "existing_draft", 0), ("missing-receipt", "attachment_unconfirmed", 0), ("progress", "attachment_unconfirmed", 0), ("upload-error", "attachment_unconfirmed", 0), ("attachment", "existing_attachment", 0)] {
-            try await loadComposer(mode: mode)
-            let status = try await browser.prepareAndSubmit(imageData: image, prompt: prompt, timeoutMS: 1_800)
-            try PDFIntegrationChecks.check(status == expected, "Composer mode \(mode): \(status)")
-            let submitted = try await browser.webView.evaluateJavaScript("window.fixtureSubmissions") as? Int
-            try PDFIntegrationChecks.check(submitted == sends, "Unexpected composer submit count")
-            if mode == "ready" {
-                let actual = try await browser.webView.evaluateJavaScript("document.querySelector('textarea').value") as? String
-                try PDFIntegrationChecks.check(actual == prompt, "Prompt text changed during handoff")
-                let repeated = try await browser.prepareAndSubmit(imageData: image, prompt: prompt, timeoutMS: 1_800)
-                try PDFIntegrationChecks.check(repeated == "existing_draft", "Must not overwrite/re-send prepared content")
-            }
-        }
-        try await loadComposer(mode: "cancel")
-        browser.sendRegion(imageData: image, prompt: prompt)
-        try await Task.sleep(for: .milliseconds(400))
-        browser.cancelAutomation()
-        for _ in 0..<30 {
-            if !browser.automating { break }
-            try await Task.sleep(for: .milliseconds(100))
-        }
-        try PDFIntegrationChecks.check(!browser.automating, "Cancellation must end JavaScript automation")
-        let count = try await browser.webView.evaluateJavaScript("window.fixtureSubmissions") as? Int
-        try PDFIntegrationChecks.check(count == 0, "Cancelled helper must never click Send")
-        try await loadComposer(mode: "ready")
-        browser.sendRegion(imageData: image, prompt: prompt)
-        browser.cancelAutomation()
-        try await Task.sleep(for: .milliseconds(300))
-        let attached = try await browser.webView.evaluateJavaScript("document.querySelector('input').files.length") as? Int
-        try PDFIntegrationChecks.check(!browser.automating && attached == 0, "Immediate cancellation must prevent queued attachment work")
-    }
-    func runChecks() async {
-        guard CommandLine.arguments.contains("--personal-self-check") else { return }
-        do {
-            for _ in 0..<100 {
-                if !browser.webView.isLoading, (try? await browser.webView.evaluateJavaScript("document.querySelector('h1')?.textContent")) as? String == "Offline ChatGPT browser fixture" { break }
-                try await Task.sleep(for: .milliseconds(100))
-            }
-            let heading = try await browser.webView.evaluateJavaScript("document.querySelector('h1').textContent") as? String
-            try PDFIntegrationChecks.check(heading == "Offline ChatGPT browser fixture", "Local WebKit page did not load")
-            _ = try await browser.webView.evaluateJavaScript("document.querySelector('button').click()")
-            for _ in 0..<50 {
-                if MarginAIStore.shared.conversation(id)?.webConversationURL != nil { break }
-                try await Task.sleep(for: .milliseconds(100))
-            }
-            try PDFIntegrationChecks.check(MarginAIStore.shared.conversation(id)?.webConversationURL?.absoluteString == "https://chatgpt.com/c/offline-fixture", "SPA navigation did not save sanitized conversation URL")
-            try PDFIntegrationChecks.check(!MarginAIStore.shared.send("No API request", conversationID: id, note: note, project: nil), "Personal build must block API send")
-            try PDFIntegrationChecks.check(!browser.webView.configuration.websiteDataStore.isPersistent, "Fixture must use isolated cookies")
-            try await checkComposerAutomation()
-            checkStatus = "PASS: personal WebKit load, SPA link persistence, API blocking, isolated storage and 10 composer automation checks"
-            PDFIntegrationChecks.report(checkStatus)
-        } catch { checkStatus = "FAIL: personal web integration: \(error)"; PDFIntegrationChecks.report(checkStatus) }
-    }
-}
-private struct PersonalWebFixtureView: View {
-    @StateObject private var fixture = PersonalWebFixture()
-    @ObservedObject private var ai = MarginAIStore.shared
-    @State private var visible = true
-    @State private var status = ""
+private struct ChatGPTPlanFixtureView: View {
+    @State private var id: UUID?
     var body: some View {
-        VStack {
-            HStack {
-                Button("Reopen personal chat") { visible = true }
-                Button("Check copied prompt") { status = UIPasteboard.general.string?.contains("Selected fixture PDF") == true ? "PASS: selected prompt copied" : "FAIL: prompt" }
-                Button("Check copied image") { status = UIPasteboard.general.image != nil ? "PASS: region image copied" : "FAIL: image" }
-                Text(status)
+        Group {
+            if let id { ChatGPTMarginView(conversationID: id, project: nil) }
+            else { ProgressView("Preparing offline fixture") }
+        }.task {
+            if CommandLine.arguments.contains("--auth-probe") {
+                for _ in 0..<100 {
+                    if UIApplication.shared.connectedScenes.contains(where: { $0.activationState == .foregroundActive }) { break }
+                    try? await Task.sleep(for: .milliseconds(50))
+                }
+                let flow = ChatGPTSignIn(); flow.localCallbackProbe = true
+                do {
+                    let result = try await flow.run(hostID: "urn:uuid:" + UUID().uuidString, profile: nil)
+                    PDFIntegrationChecks.report(result.1 == "local-probe-no-token" ? "PASS: system authentication session + IPv4 loopback callback; no OpenAI sign-in or inference" : "FAIL: wrong callback")
+                } catch { PDFIntegrationChecks.report("FAIL: system authentication loopback probe: \(error)") }
+                return
             }
-            Text(fixture.checkStatus)
-            Text(ai.conversation(fixture.id)?.webConversationURL?.absoluteString ?? "No saved web conversation")
-            if visible {
-                PersonalChatGPTView(conversationID: fixture.id, project: nil, onClose: { visible = false }, browser: fixture.browser)
+            let note = Notebook(title: "Offline plan fixture")
+            let image = UIGraphicsImageRenderer(size: CGSize(width: 120, height: 80)).image { c in
+                UIColor.white.setFill(); c.fill(CGRect(x: 0, y: 0, width: 120, height: 80))
             }
-        }.padding().task { await fixture.runChecks() }
-    }
-}
-#endif
-
-// This fixture never opens the production Keychain service or sends an API request.
-// Both launches and the explicit cleanup button remove only its disposable key.
-@MainActor private final class AIConnectionFixture: ObservableObject {
-    static let suite = "com.notemargin.integrationcheck.connection-tests"
-    static let fakeKey = "fixture-key-not-valid"
-    let connection: AIConnectionStore
-    @Published var status = "Preparing isolated connection fixture"
-
-    init() {
-        let defaults = UserDefaults(suiteName: Self.suite)!
-        defaults.removePersistentDomain(forName: Self.suite)
-        connection = AIConnectionStore(defaults: defaults, keychainService: Self.suite)
-        cleanup()
-    }
-
-    func cleanup() {
-        do {
-            for provider in AIProvider.allCases { try connection.removeAPIKey(for: provider) }
-            refreshStatus()
-        } catch { status = "FAIL: isolated connection cleanup" }
-    }
-
-    func refreshStatus() {
-        do {
-            // Recreate the store to prove persistence rather than inspecting just
-            // the sheet's in-memory state. Never include a credential in output.
-            let restored = AIConnectionStore(defaults: UserDefaults(suiteName: Self.suite)!, keychainService: Self.suite)
-            let keys = try AIProvider.allCases.compactMap { provider -> AIProvider? in
-                guard let key = try restored.apiKey(for: provider) else { return nil }
-                guard key == Self.fakeKey else { throw NSError(domain: "Unexpected fixture value", code: 1) }
-                return provider
+            let region = CapturedRegion(pageID: note.pages[0].id, rect: CGRect(x: 0, y: 0, width: 120, height: 80), imageData: image.pngData()!, extractedText: "x² + 1", sourceDescription: "Offline PDF fixture", pdfPageNumbers: [1])
+            id = MarginAIStore.shared.create(note: note, project: nil, region: region)
+            if CommandLine.arguments.contains("--plan-self-check") {
+                do {
+                    guard let id else { throw CocoaError(.fileWriteUnknown) }
+                    try PDFIntegrationChecks.check(!MarginAIStore.shared.sendPlan("No credentials", conversationID: id, project: nil), "Disconnected plan must block inference")
+                    try PDFIntegrationChecks.check(Bundle.main.bundleIdentifier == "com.notemargin.integrationcheck", "only isolated fixture may test Keychain")
+                    let vault = KeychainPlanVault(), prior = try vault.read()
+                    var fixtureVault = prior
+                    fixtureVault.registrations = [.init(id: "fixture-keychain", identity: .init(subject: "fixture", email: nil), tokens: PlanTokens(access_token: "fixture-not-real", refresh_token: "fixture-refresh", token_type: "Bearer", expires_in: 1, scope: "openid"), receivedAt: Date())]
+                    try vault.write(fixtureVault)
+                    let restored = try vault.read()
+                    try vault.write(prior)
+                    try PDFIntegrationChecks.check(restored.registrations.first?.tokens?.access_token == "fixture-not-real", "protected Keychain roundtrip")
+                    try await checkMathRenderer()
+                    _ = try PDFIntegrationChecks.run(NoteStore())
+                    PDFIntegrationChecks.report("PASS: unified native ChatGPT panel, disconnected inference blocked, offline math renderer, answer card Undo/Redo, PDF capture checks")
+                } catch { PDFIntegrationChecks.report("FAIL: plan fixture: \(error)") }
             }
-            if keys.isEmpty { status = "PASS: no API key saved" }
-            else if keys == [restored.selectedProvider] {
-                status = "PASS: \(restored.selectedProvider.title) / \(restored.model)"
-            } else { status = "FAIL: provider and stored key disagree" }
-        } catch { status = "FAIL: isolated connection persistence" }
-    }
-}
-
-private struct AIConnectionRegressionView: View {
-    @StateObject private var fixture = AIConnectionFixture()
-    @State private var presenting = false
-
-    var body: some View {
-        VStack(spacing: 24) {
-            Text(fixture.status).accessibilityIdentifier("connection-fixture-status")
-            Button("Open isolated AI connection") { presenting = true }
-                .accessibilityIdentifier("open-connection-fixture")
-            Button("Clean up isolated AI connection") { fixture.cleanup() }
-                .accessibilityIdentifier("cleanup-connection-fixture")
-        }
-        .sheet(isPresented: $presenting, onDismiss: { fixture.refreshStatus() }) {
-            AIConnectionSettingsView(connection: fixture.connection)
         }
     }
 }
-
+@MainActor private func checkMathRenderer() async throws {
+    let config = WKWebViewConfiguration(); config.websiteDataStore = .nonPersistent()
+    let web = WKWebView(frame: CGRect(x: 0, y: 0, width: 320, height: 180), configuration: config)
+    guard let file = Bundle.main.url(forResource: "renderer", withExtension: "html", subdirectory: "MathResources") else { throw CocoaError(.fileNoSuchFile) }
+    web.loadFileURL(file, allowingReadAccessTo: file.deletingLastPathComponent())
+    var ready = false
+    for _ in 0..<100 {
+        if (try? await web.evaluateJavaScript("typeof window.drawMath === 'function' && typeof katex !== 'undefined'")) as? Bool == true { ready = true; break }
+        try await Task.sleep(for: .milliseconds(50))
+    }
+    try PDFIntegrationChecks.check(ready, "offline KaTeX bundle loads")
+    // Supply only fixture text; never credentials. The missing native size handler
+    // is harmless for this standalone renderer check.
+    _ = try await web.callAsyncJavaScript("window.drawMath(expression); return document.querySelectorAll('.katex').length", arguments: ["expression": #"\frac{x^2}{1+x} = \sqrt{2}"#], in: nil, contentWorld: .page)
+    let count = try await web.evaluateJavaScript("document.querySelectorAll('.katex').length") as? Int
+    try PDFIntegrationChecks.check(count == 1, "LaTeX renders as math")
+    _ = try await web.callAsyncJavaScript("window.drawMath(expression)", arguments: ["expression": #"\href{https://example.invalid/secret}{click} + <script>alert(1)</script>"#], in: nil, contentWorld: .page)
+    let links = try await web.evaluateJavaScript("document.querySelectorAll('a,img,iframe').length") as? Int
+    try PDFIntegrationChecks.check(links == 0, "untrusted math cannot create links or external resources")
+    let parts = AnswerPart.parse(#"**Proof** \(x^2\) unfinished \(x"#)
+    try PDFIntegrationChecks.check(parts.filter(\.math).count == 1 && parts.last?.math == false, "streaming unfinished math stays text")
+}
 @MainActor enum PDFIntegrationChecks {
     static func check(_ value: Bool, _ message: String) throws {
         if !value { throw NSError(domain: message, code: 1) }
@@ -447,7 +316,7 @@ private struct AIConnectionRegressionView: View {
         let restored = MarginAIStore(repository: repository); restored.load(noteID: noteID)
         try check(restored.conversation(id)?.draft == "질문 작성 중", "chat draft survives reopening the store")
         try check(store.assignProject(noteID: noteID, projectID: second), "move project persists")
-        try check(!ai.send("other project", conversationID: id, note: store.note(noteID)!, project: store.project(second)),
+        try check(!ai.sendPlan("other project", conversationID: id, project: store.project(second)),
                   "old-project chat cannot send under the destination project")
         // Make atomic replacement fail in the disposable test directory, without
         // discarding the previously saved chat. No API or Keychain is accessed.
@@ -524,6 +393,16 @@ private struct AIConnectionRegressionView: View {
         try checkViewport(store, prepared: prepared)
         try checkPageReplacement(store)
         try checkEraserPersistence(store)
+        let manager = UndoManager(); manager.groupsByEvent = false
+        let card = PageElement(kind: .text, text: "Proof: \\(x^2\\)")
+        manager.beginUndoGrouping()
+        store.setAIElement(noteID: joinedID, pageID: joined.pages[0].id, element: card, present: true, undoManager: manager)
+        manager.endUndoGrouping()
+        try check(store.note(joinedID)!.pages[0].elements.contains(card), "answer card inserted without replacing ink")
+        manager.undo()
+        try check(!store.note(joinedID)!.pages[0].elements.contains(card), "answer card undo")
+        manager.redo()
+        try check(store.note(joinedID)!.pages[0].elements.contains(card), "answer card redo")
         report("PASS: bounded region capture; PDF/ink seam alignment; rotated region PDF text; page render replacement; blank and existing ink destinations; stale callback rejection; selected pen preservation; bounded native PencilKit viewport; deep scrolling; zoom/background coordinates; repeated update stability; rotated and mixed-size PDF preparation; prepare without commit; both layouts; joined background pixel order; cross-boundary drawing save/reopen; continuous and paged PDF export; PNG export; duplicated assets")
         return joinedID
     }

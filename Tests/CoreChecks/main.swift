@@ -28,7 +28,7 @@ func sampleConversation(for note: Notebook) -> MarginConversation {
                        sourceDescription: "\(note.title) · 1페이지")
 }
 
-let checks: [CoreCheck] = [
+let checks: [CoreCheck] = planChecks + [
     CoreCheck(name: "Personal ChatGPT links exclude credentials and authentication URLs") { _ in
         let clean = ChatGPTWebContext.conversationURL(URL(string: "https://chatgpt.com/c/abc-123?token=private#secret"))
         try expect(clean?.absoluteString == "https://chatgpt.com/c/abc-123")

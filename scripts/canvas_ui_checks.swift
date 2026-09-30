@@ -1,125 +1,6 @@
 import XCTest
 import UIKit
 
-final class AIConnectionVisualTests: XCTestCase {
-    @MainActor private func launchFixture() -> XCUIApplication {
-        continueAfterFailure = false
-        let app = XCUIApplication()
-        app.launchArguments = ["--ai-connection"]
-        app.launch()
-        XCTAssertTrue(app.buttons["open-connection-fixture"].waitForExistence(timeout: 30))
-        XCTAssertEqual(app.staticTexts["connection-fixture-status"].label, "PASS: no API key saved")
-        app.buttons["open-connection-fixture"].tap()
-        XCTAssertTrue(app.secureTextFields["ai-api-key"].waitForExistence(timeout: 5))
-        return app
-    }
-
-    @MainActor private func enterFakeKey(_ app: XCUIApplication, value: String = "fixture-key-not-valid") {
-        let field = app.secureTextFields["ai-api-key"]
-        field.tap()
-        field.typeText(value)
-    }
-
-    @MainActor private func finishAndExpect(_ app: XCUIApplication, status: String) {
-        // This is the exact path reported by the user: type a key, then tap
-        // the top-right Done action without tapping the separate Save row.
-        let done = app.buttons["complete-ai-connection"]
-        done.tap()
-        expectDismissed(app, status: status)
-    }
-
-    @MainActor private func expectDismissed(_ app: XCUIApplication, status: String) {
-        let done = app.buttons["complete-ai-connection"]
-        expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: done)
-        waitForExpectations(timeout: 5)
-        expectation(for: NSPredicate(format: "label == %@", status), evaluatedWith: app.staticTexts["connection-fixture-status"])
-        waitForExpectations(timeout: 5)
-    }
-
-    @MainActor private func cleanup(_ app: XCUIApplication) {
-        app.buttons["cleanup-connection-fixture"].tap()
-        XCTAssertEqual(app.staticTexts["connection-fixture-status"].label, "PASS: no API key saved")
-    }
-
-    @MainActor func testDoneSavesKeyAndReopeningDoesNotExposeIt() {
-        let app = launchFixture()
-        enterFakeKey(app)
-        finishAndExpect(app, status: "PASS: OpenAI / gpt-5-mini")
-        app.buttons["open-connection-fixture"].tap()
-        // LabeledContent combines its label and value for accessibility.
-        let storedStatus = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "API 키 저장됨")).firstMatch
-        XCTAssertTrue(storedStatus.waitForExistence(timeout: 5))
-        let field = app.secureTextFields["ai-api-key"]
-        let value = field.value as? String ?? ""
-        XCTAssertTrue(value.isEmpty || value == field.placeholderValue, "Reopening must leave the credential field empty")
-        app.buttons["cancel-ai-connection"].tap()
-        XCTAssertTrue(app.buttons["cleanup-connection-fixture"].waitForExistence(timeout: 5))
-        cleanup(app)
-    }
-
-    @MainActor func testKeyboardDoneSavesKey() {
-        let app = launchFixture()
-        enterFakeKey(app)
-        // A newline from typeText invokes the focused SecureField's keyboard
-        // action, covering submit independently of the navigation bar button.
-        app.secureTextFields["ai-api-key"].typeText("\n")
-        expectDismissed(app, status: "PASS: OpenAI / gpt-5-mini")
-        cleanup(app)
-    }
-
-    @MainActor func testInvalidKeyShowsErrorAndKeepsSettingsOpen() {
-        let app = launchFixture()
-        enterFakeKey(app, value: "bad key")
-        app.buttons["complete-ai-connection"].tap()
-        let alert = app.alerts["연결 설정을 저장하지 못했습니다"]
-        XCTAssertTrue(alert.waitForExistence(timeout: 5))
-        XCTAssertTrue(alert.staticTexts["API 키에 공백이나 줄바꿈이 포함되어 있습니다. 키를 다시 확인해 주세요."].exists)
-        alert.buttons["확인"].tap()
-        XCTAssertTrue(app.buttons["complete-ai-connection"].exists, "A failed save must retain the settings sheet")
-        XCTAssertTrue(app.secureTextFields["ai-api-key"].exists)
-        app.buttons["cancel-ai-connection"].tap()
-        XCTAssertTrue(app.buttons["cleanup-connection-fixture"].waitForExistence(timeout: 5))
-        XCTAssertEqual(app.staticTexts["connection-fixture-status"].label, "PASS: no API key saved")
-        cleanup(app)
-    }
-
-    @MainActor func testCancelDoesNotSaveTheEnteredKey() {
-        let app = launchFixture()
-        enterFakeKey(app)
-        app.buttons["cancel-ai-connection"].tap()
-        XCTAssertTrue(app.buttons["cleanup-connection-fixture"].waitForExistence(timeout: 5))
-        XCTAssertEqual(app.staticTexts["connection-fixture-status"].label, "PASS: no API key saved")
-        cleanup(app)
-    }
-
-    @MainActor func testDoneSavesChangedModelWithoutReplacingExistingKey() {
-        let app = launchFixture()
-        enterFakeKey(app)
-        finishAndExpect(app, status: "PASS: OpenAI / gpt-5-mini")
-        app.buttons["open-connection-fixture"].tap()
-        let model = app.textFields["ai-model"]
-        XCTAssertTrue(model.waitForExistence(timeout: 5))
-        // Tap beyond the short model name to place the caret at its end.
-        model.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)).tap()
-        model.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 40))
-        model.typeText("gpt-5.2")
-        finishAndExpect(app, status: "PASS: OpenAI / gpt-5.2")
-        cleanup(app)
-    }
-
-    @MainActor func testDoneSavesSelectedProviderAndItsModel() {
-        let app = launchFixture()
-        app.buttons["ai-provider"].tap()
-        let gemini = app.buttons["Gemini"].firstMatch
-        XCTAssertTrue(gemini.waitForExistence(timeout: 5))
-        gemini.tap()
-        XCTAssertEqual(app.textFields["ai-model"].value as? String, "gemini-2.5-flash")
-        enterFakeKey(app)
-        finishAndExpect(app, status: "PASS: Gemini / gemini-2.5-flash")
-        cleanup(app)
-    }
-}
-
 final class CanvasLiveInkTests: XCTestCase {
     @MainActor func testInkStaysAtTouchWhileDrawingDeepInLongPDF() {
         continueAfterFailure = false
@@ -245,7 +126,7 @@ final class MarginChatVisualTests: XCTestCase {
         expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: confirm)
         waitForExpectations(timeout: 5)
         confirm.tap()
-        let input = app.textFields["ai-question-input"]
+        let input = app.descendants(matching: .any)["ai-question-input"].firstMatch
         XCTAssertTrue(input.waitForExistence(timeout: 5))
         input.tap()
         input.typeText("Draft stays here")
@@ -289,10 +170,7 @@ final class MarginChatVisualTests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["ai-question-input"].firstMatch.exists, "chat is ready for the user's question")
 
         func openPreviewAndCheckInk() {
-            let disclosure = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "선택 영역 보기")).firstMatch
-            XCTAssertTrue(disclosure.waitForExistence(timeout: 5))
-            disclosure.tap()
-            let preview = app.images["질문에 첨부될 PDF와 필기 영역"]
+            let preview = app.images["ai-region-preview"]
             XCTAssertTrue(preview.waitForExistence(timeout: 5), "chat reveals the captured source image")
             expectation(for: NSPredicate(format: "hittable == true"), evaluatedWith: preview)
             waitForExpectations(timeout: 5)
@@ -360,39 +238,15 @@ final class MarginChatVisualTests: XCTestCase {
 }
 
 
-#if PERSONAL_CHATGPT
-final class PersonalChatGPTVisualTests: XCTestCase {
-    func testRegionTransferAndWebConversationSurviveHidingPanel() throws {
-        let app = XCUIApplication()
-        app.launchArguments = ["--personal-web"]
-        app.launch()
-        XCTAssertTrue(app.webViews.staticTexts["Offline ChatGPT browser fixture"].waitForExistence(timeout: 15))
+final class ChatGPTPlanVisualTests: XCTestCase {
+    func testOfflinePreviewAndConnectionStatus() throws {
+        let app = XCUIApplication(); app.launchArguments = ["--plan-ui"]; app.launch()
+        XCTAssertTrue(app.staticTexts["여백 대화"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.staticTexts["Offline PDF fixture"].exists)
         XCTAssertFalse(app.secureTextFields.element.exists)
-        if !app.textFields["personal-question"].exists && !app.textViews["personal-question"].exists {
-            app.buttons["personal-region"].tap()
-        }
-        let question = app.textFields["personal-question"]
-        // The multiline SwiftUI field may be exposed as a text view.
-        let editor = question.exists ? question : app.textViews["personal-question"]
-        editor.tap(); editor.typeText("Explain this")
-        app.buttons["personal-copy-prompt"].tap()
-        app.buttons["Check copied prompt"].tap()
-        XCTAssertTrue(app.staticTexts["PASS: selected prompt copied"].exists)
-        app.buttons["personal-copy-image"].tap()
-        app.buttons["Check copied image"].tap()
-        XCTAssertTrue(app.staticTexts["PASS: region image copied"].exists)
-        app.buttons["personal-region"].tap()
-        app.webViews.buttons["Open fixture conversation"].tap()
-        XCTAssertTrue(app.staticTexts["https://chatgpt.com/c/offline-fixture"].waitForExistence(timeout: 5))
-        app.buttons["ai-chat-close"].tap()
-        app.buttons["Reopen personal chat"].tap()
-        XCTAssertTrue(app.webViews.staticTexts["Fixture conversation opened"].waitForExistence(timeout: 5))
-        if !app.textFields["personal-question"].exists && !app.textViews["personal-question"].exists {
-            app.buttons["personal-region"].tap()
-        }
-        XCTAssertEqual((app.textFields["personal-question"].exists ? app.textFields["personal-question"] : app.textViews["personal-question"]).value as? String, "Explain this")
-        let attachment = XCTAttachment(screenshot: app.screenshot()); attachment.lifetime = .keepAlways; add(attachment)
+        XCTAssertFalse(app.buttons["확인한 영역과 질문 보내기"].isEnabled)
+        app.buttons["ChatGPT 구독 연결 확인"].tap()
+        XCTAssertTrue(app.buttons["Continue with ChatGPT"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["미연결"].exists)
     }
 }
-
-#endif

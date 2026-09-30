@@ -94,17 +94,20 @@ struct AIEditorCanvas: View {
             }
             .overlay(alignment: .topTrailing) {
                 if let id = activeChatID, !selecting, !editingObjects {
-                    #if PERSONAL_CHATGPT
-                    PersonalChatGPTView(conversationID: id, project: note.projectID.flatMap { store.project($0) }, onClose: { activeChatID = nil })
+                    ChatGPTMarginView(conversationID: id, project: note.projectID.flatMap { store.project($0) }, onClose: { activeChatID = nil }, onSave: { text in
+                        let element = PageElement(kind: .text, text: text, x: 24, y: max(24, min(page.height - 200, selection?.maxY ?? 100)), width: min(600, page.width - 48), height: 180, fontSize: 18)
+                        store.setAIElement(noteID: note.id, pageID: page.id, element: element, present: true, undoManager: session.canvas.undoManager)
+                        session.refreshUndo()
+                    }, onSource: {
+                        if let chat = ai.conversation(id) {
+                            activeChatID = nil
+                            let rect = chat.rect.insetBy(dx: -24, dy: -24)
+                            session.canvas.zoom(to: rect, animated: true)
+                        }
+                    })
                         .id(id)
                         .frame(width: max(180, min(620, geometry.size.width - 72)), height: max(180, geometry.size.height - 68))
                         .padding(.trailing, 54).padding(.top, 54)
-                    #else
-                    MarginChatView(conversationID: id, note: note, project: note.projectID.flatMap { store.project($0) }, onClose: { activeChatID = nil })
-                        .id(id)
-                        .frame(width: max(180, min(410, geometry.size.width - 72)), height: max(180, min(650, geometry.size.height - 68)))
-                        .padding(.trailing, 54).padding(.top, 54)
-                    #endif
                 }
             }
         }

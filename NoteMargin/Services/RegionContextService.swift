@@ -75,7 +75,7 @@ struct CapturedRegion {
         }
         let index = note.pages.firstIndex(where: { $0.id == page.id }).map { $0 + 1 } ?? 1
         return CapturedRegion(pageID: page.id, rect: rect, imageData: data,
-                              extractedText: String(texts.joined(separator: "\n\n").prefix(24_000)),
+                              extractedText: texts.joined(separator: "\n\n"),
                               sourceDescription: "\(note.title) · 노트 \(index)페이지" + (pageNumbers.isEmpty ? "" : " · PDF \(pageNumbers.map(String.init).joined(separator: ", "))페이지"),
                               pdfPageNumbers: pageNumbers)
     }

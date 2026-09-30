@@ -15,17 +15,23 @@ ROOT = Path(__file__).resolve().parents[1]
 BUNDLE = 'com.notemargin.integrationcheck'
 
 def run(*args):
-    return subprocess.check_output(args, text=True).strip()
+    try:
+        return subprocess.check_output(args, text=True).strip()
+    except subprocess.CalledProcessError as error:
+        print(error.output, file=sys.stderr)
+        raise
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('device', nargs='?', help='Available iPad simulator UUID')
 parser.add_argument('--build-setting', action='append', default=[], help='Optional Xcode setting override for the test build')
-parser.add_argument('--personal', action='store_true', help='Compile the personal ChatGPT flavor in the isolated test app')
+parser.add_argument('--plan', '--personal', dest='plan', action='store_true', help='Check unified ChatGPT panel, Keychain and math in the default app target')
 parser.add_argument('--live-ui', action='store_true', help='Exercise real touch strokes with XCUITest')
 parser.add_argument('--only-testing', action='append', default=[], help='UI test class or method, e.g. CanvasLiveInkTests/StrokeEraserVisualTests')
+parser.add_argument('--auth-probe', action='store_true', help='Local system browser callback probe; no OpenAI credentials or requests')
 args = parser.parse_args()
-if args.personal and args.live_ui and not args.only_testing:
-    args.only_testing = ['CanvasLiveInkTests/PersonalChatGPTVisualTests']
+if args.auth_probe: args.plan = True
+if args.plan and args.live_ui and not args.only_testing:
+    args.only_testing = ['CanvasLiveInkTests/ChatGPTPlanVisualTests']
 
 available = json.loads(run('xcrun', 'simctl', 'list', 'devices', 'available', '-j'))
 ipads = [d for devices in available['devices'].values() for d in devices if 'iPad' in d['name']]
@@ -47,7 +53,7 @@ with tempfile.TemporaryDirectory(prefix='NoteMarginPDFChecks-') as temporary:
     # Let Xcode package Simulator entitlements into the test executable. Hand
     # signing iOS entitlements after linking makes macOS reject the simulator app.
     entitlements = work / 'FixtureKeychain.entitlements'
-    if args.live_ui:
+    if args.live_ui or args.plan:
         entitlements.write_bytes(plistlib.dumps({
             'application-identifier': 'NOTEMARGIN.' + BUNDLE,
             'keychain-access-groups': ['NOTEMARGIN.' + BUNDLE],
@@ -55,9 +61,7 @@ with tempfile.TemporaryDirectory(prefix='NoteMarginPDFChecks-') as temporary:
     for obj in settings['objects'].values():
         if 'PRODUCT_BUNDLE_IDENTIFIER' in obj.get('buildSettings', {}):
             obj['buildSettings']['PRODUCT_BUNDLE_IDENTIFIER'] = BUNDLE
-            if args.personal:
-                obj['buildSettings']['SWIFT_ACTIVE_COMPILATION_CONDITIONS'] = 'DEBUG PERSONAL_CHATGPT $(inherited)'
-            if args.live_ui:
+            if args.live_ui or args.plan:
                 obj['buildSettings'].update({
                     'CODE_SIGNING_ALLOWED': 'YES', 'CODE_SIGN_IDENTITY': '-',
                     'CODE_SIGN_STYLE': 'Manual', 'DEVELOPMENT_TEAM': '',
@@ -79,7 +83,7 @@ with tempfile.TemporaryDirectory(prefix='NoteMarginPDFChecks-') as temporary:
             objects[ids[mode]] = dict(isa='XCBuildConfiguration', name=mode.title(), buildSettings={
                 'PRODUCT_NAME': '$(TARGET_NAME)', 'PRODUCT_BUNDLE_IDENTIFIER': BUNDLE + '.uitests',
                 'GENERATE_INFOPLIST_FILE': 'YES', 'SWIFT_VERSION': '5.0', 'TARGETED_DEVICE_FAMILY': '2',
-                'SWIFT_ACTIVE_COMPILATION_CONDITIONS': 'PERSONAL_CHATGPT $(inherited)' if args.personal else '$(inherited)',
+                'SWIFT_ACTIVE_COMPILATION_CONDITIONS': '$(inherited)',
                 'CODE_SIGNING_ALLOWED': 'NO',
                 'IPHONEOS_DEPLOYMENT_TARGET': '17.0', 'SDKROOT': 'iphoneos', 'TEST_TARGET_NAME': 'NoteMargin',
                 'LD_RUNPATH_SEARCH_PATHS': ['$(inherited)', '@executable_path/Frameworks', '@loader_path/Frameworks']})
@@ -109,15 +113,15 @@ with tempfile.TemporaryDirectory(prefix='NoteMarginPDFChecks-') as temporary:
             *['-only-testing:' + name for name in args.only_testing], *args.build_setting, 'test'])
         sys.exit(result.returncode)
     run('xcodebuild', '-quiet', '-project', str(project.parent), '-scheme', 'NoteMargin', '-configuration', 'Debug',
-        '-sdk', 'iphonesimulator', '-destination', 'generic/platform=iOS Simulator', '-derivedDataPath', str(work / 'build'), 'CODE_SIGNING_ALLOWED=NO', *args.build_setting, 'build')
+        '-sdk', 'iphonesimulator', '-destination', 'generic/platform=iOS Simulator', '-derivedDataPath', str(work / 'build'), 'CODE_SIGNING_ALLOWED=' + ('YES' if args.plan else 'NO'), *args.build_setting, 'build')
     subprocess.run(['xcrun', 'simctl', 'terminate', device['udid'], BUNDLE], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     run('xcrun', 'simctl', 'install', device['udid'], str(work / 'build/Build/Products/Debug-iphonesimulator/NoteMargin.app'))
     # Only the disposable test app's data is cleared; the real app uses a different identifier.
     container = Path(run('xcrun', 'simctl', 'get_app_container', device['udid'], BUNDLE, 'data'))
     results = container / 'Documents/results.txt'
     results.unlink(missing_ok=True)
-    run('xcrun', 'simctl', 'launch', device['udid'], BUNDLE, *(['--personal-self-check'] if args.personal else []))
-    for _ in range(60):
+    run('xcrun', 'simctl', 'launch', device['udid'], BUNDLE, *(['--auth-probe'] if args.auth_probe else ['--plan-self-check'] if args.plan else []))
+    for _ in range(400 if args.auth_probe else 60):
         if results.exists():
             message = results.read_text()
             print(message)

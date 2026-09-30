@@ -12,6 +12,10 @@ struct NoteMarginApp: App {
                 .tint(.accentColor)
                 .onChange(of: scenePhase) { _, phase in
                     if phase != .active { store.flushDrawings() }
+                    if phase == .background {
+                        ChatGPTPlanConnection.shared.cancelSignIn()
+                        MarginAIStore.shared.cancelPlanRequests()
+                    }
                 }
         }
     }

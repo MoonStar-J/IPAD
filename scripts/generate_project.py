@@ -37,6 +37,11 @@ def group(path):
         relative = str(child.relative_to(ROOT))
         if child.suffix == ".lproj":
             continue
+        if child.name == "MathResources" and child.is_dir():
+            ref = add("file:" + relative, f'isa = PBXFileReference; lastKnownFileType = folder; path = {quote(child.name)}; sourceTree = "<group>";')
+            children.append(ref)
+            resources.append(add("build:" + relative, f"isa = PBXBuildFile; fileRef = {ref};"))
+            continue
         if child.is_dir() and child.suffix != ".xcassets":
             children.append(group(child))
             continue
@@ -97,7 +102,7 @@ app_settings = {
 target_configs = configs("target", app_settings)
 target = add("target", f'isa = PBXNativeTarget; buildConfigurationList = {target_configs}; buildPhases = ({source_phase}, {framework_phase}, {resource_phase}); buildRules = (); dependencies = (); name = NoteMargin; productName = NoteMargin; productReference = {product}; productType = "com.apple.product-type.application";')
 personal_settings = dict(app_settings)
-personal_settings.update({"PRODUCT_BUNDLE_IDENTIFIER": "com.yeobaek.notes.personal", "SWIFT_ACTIVE_COMPILATION_CONDITIONS": "PERSONAL_CHATGPT $(inherited)"})
+personal_settings.update({"PRODUCT_BUNDLE_IDENTIFIER": "com.yeobaek.notes.personal"})
 personal_configs = configs("personal-target", personal_settings)
 # Build files and phases belong to one target; file references are shared.
 def personal_phase(name, original_files, isa):

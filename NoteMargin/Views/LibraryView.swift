@@ -169,11 +169,7 @@ struct LibraryView: View {
         .sheet(isPresented: $creatingProject) { ProjectForm() }
         .sheet(item: $editingProject) { ProjectForm(existing: $0) }
         .sheet(isPresented: $connectingAI) {
-            #if PERSONAL_CHATGPT
-            PersonalChatGPTView(conversationID: nil, project: nil)
-            #else
-            AIConnectionSettingsView()
-            #endif
+            ChatGPTMarginView(conversationID: nil, project: nil)
         }
         .alert("프로젝트를 삭제할까요?", isPresented: Binding(get: { deletingProject != nil }, set: { if !$0 { deletingProject = nil } })) {
             Button("취소", role: .cancel) { deletingProject = nil }

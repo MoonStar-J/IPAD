@@ -1,36 +1,28 @@
 # 노트 여백 · note margin
 
-iPad와 Apple Pencil을 위한 설치형 필기앱입니다. SwiftUI, PencilKit, PDFKit을 사용하며, 필기·보관함은 오프라인으로 동작합니다. AI 연결 방식에 따라 **API 버전**과 **개인용 ChatGPT 웹 버전**을 각각 설치할 수 있습니다.
+iPad와 Apple Pencil을 위한 설치형 필기앱입니다. SwiftUI, PencilKit, PDFKit을 사용하며, 필기·보관함은 오프라인으로 동작합니다. AI 연결은 모든 앱에서 **ChatGPT 구독 연결**로 통합했습니다.
 
 **노트 여백 · note margin**은 ‘노트의 여백에서 AI와 상호작용하며 학습한다’는 의미를 담고 있습니다. 프로젝트별로 노트를 정리하고, 선택한 PDF와 필기 영역에 대해 AI와 대화할 수 있습니다. 질문은 여백의 원형 아이콘으로 열고 닫습니다.
 
 기기 언어가 한국어이면 앱 이름은 **노트 여백**, 영어이면 **note margin**으로 표시됩니다.
 
-**현재 상태:** 프로젝트 관리·여백 AI 구현, Core 검증 33개 및 과금 없는 API 형식 검사 31개 통과, iPad 시뮬레이터 Debug 빌드 성공. 기존 긴 PDF 필기·페이지 잔상·획 지우개 UI 3개와 새 여백 대화 UI 2개 검사 통과. 실제 API 키를 이용한 응답과 실제 Apple Pencil 입력은 별도 확인이 필요합니다. 서명된 `.ipa`는 포함하지 않습니다.
+**현재 상태:** 기본 필기·PDF·프로젝트 기능에 공식 ChatGPT 구독 연결을 통합했습니다. 검증 수준과 실계정 확인이 필요한 항목은 아래 연동 기록을 참고하세요. 서명된 `.ipa`는 포함하지 않습니다.
 
-## 두 가지 앱 버전
+## ChatGPT 구독 연결
 
-| Xcode 스킴 | 설치되는 앱 | AI 연결 |
-| --- | --- | --- |
-| `NoteMargin` | 노트 여백 / note margin | OpenAI·Gemini API 키, 앱 자체 여백 채팅 |
-| `NoteMarginPersonal` | 노트 여백 개인용 / note margin personal | 앱 안의 실제 ChatGPT 웹 화면에서 로그인·채팅 |
+기본 실행 스킴은 **`NoteMargin`**입니다. API 키 입력과 ChatGPT 웹 자동 전송을 제거하고 공식 OAuth + 네이티브 대화 + HTTP 스트리밍을 사용합니다. **빌드·모의 검사와 실제 계정 연결 검증은 별개이며, iPad 실계정 로그인과 이미지 응답 완료는 아직 미검증입니다.**
 
-두 앱은 서로 다른 Bundle Identifier를 사용하여 **같은 iPad에 동시에 설치**할 수 있습니다. API 버전은 기존 `com.yeobaek.notes`를 유지하고 개인용은 `com.yeobaek.notes.personal`을 사용합니다. 노트·프로젝트·설정은 각 앱에 따로 저장되며 자동으로 동기화되지 않습니다. 기존 노트는 PDF로 공유한 뒤 개인용에서 불러올 수 있습니다.
+`NoteMarginPersonal`은 이미 설치한 앱의 데이터를 보존하기 위한 호환 스킴으로만 남아 있습니다. 두 스킴의 기능과 표시 이름은 동일합니다. 기존 Bundle Identifier(`com.yeobaek.notes`, `com.yeobaek.notes.personal`)와 각 앱의 보관함을 유지하므로 앱을 삭제하거나 다른 앱으로 노트를 옮길 필요가 없습니다. 서로 다른 설치의 노트·로그인은 자동으로 합쳐지지 않습니다.
 
-### 개인용에서 ChatGPT 사용하기
+1. `NoteMargin.xcodeproj`를 열고 `NoteMargin` 스킴으로 연결한 iPad에서 실행합니다. 기존 Personal 설치를 업데이트할 때만 `NoteMarginPersonal`을 선택합니다.
+2. **ChatGPT 구독 연결 → Continue with ChatGPT**에서 시스템 인증 화면으로 로그인하고 권한을 확인합니다.
+3. 노트에서 **질문 → 영역 조절 → 이 영역으로 질문**을 누릅니다.
+4. 선택 이미지·전송할 맥락·질문 모드·모델을 확인하고 질문을 보냅니다. 답변은 앱에서 스트리밍되며 원래 노트의 여백 아이콘에 저장됩니다.
+5. 후속 질문, Markdown/LaTeX 표시·복사, 부분 답변 복원, 편집 가능한 답변 카드 삽입을 사용할 수 있습니다.
 
-1. Xcode 상단 스킴을 **NoteMarginPersonal**로 바꾸고, 해당 타깃의 **Signing & Capabilities → Team**을 선택합니다. 연결한 iPad를 실행 대상으로 선택하고 **⌘R**로 설치합니다.
-2. 보관함의 **ChatGPT 로그인 · 채팅**을 누르고, 실제 ChatGPT 웹 화면에서 기존 가입 방식으로 로그인합니다. 앱이 별도의 로그인 폼이나 API 키를 요구하지 않습니다.
-3. 노트에서 **질문 → 영역 조절 → 이 영역으로 질문**을 누릅니다. 여백에 ChatGPT 웹 화면이 열립니다.
-4. **선택 영역 · 질문 준비**를 펼쳐 질문을 입력하고 **ChatGPT로 보내기**를 누릅니다. 앱이 웹 입력창에 선택 영역 PNG와 질문·프로젝트 지침·추출 텍스트를 넣고, 이미지 미리보기와 전송 가능 상태를 확인한 뒤 전송 버튼을 한 번 누릅니다.
-5. **자동 전송은 실험 기능**입니다. ChatGPT 웹 화면 변경, 로그인·안내창, 이미지 업로드 상태를 확인할 수 없는 경우 중단합니다. 기존 웹 입력칸의 질문·첨부를 덮어쓰지 않습니다. 전송 결과가 불확실하면 자동 재시도하지 않으므로 아래 대화에서 결과를 확인하세요. 중단 버튼, 여백 창 닫기, 앱 백그라운드 전환 시 대기 중인 자동 전송도 중단합니다.
-6. 자동 처리가 안 되면 **질문·자료 복사**, **이미지 복사**로 붙여넣거나 **PNG 저장 → ChatGPT의 + → 파일 첨부**를 이용해 직접 전송할 수 있습니다. 대화 주소가 생기면 여백 아이콘에 자동으로 저장합니다. 같은 아이콘을 다시 열면 해당 대화를 이어 볼 수 있습니다. 다른 브라우저에서 사용한 대화는 메뉴의 **대화 링크 직접 연결**로 연결합니다.
+플랜 사용량과 허용된 크레딧 설정이 적용됩니다. [사용량 관리](https://chatgpt.com/settings/usage)에서 확인하세요. 기존 ChatGPT 대화 기록을 가져오는 기능은 아닙니다. iPad의 시스템 인증 세션과 HTTP loopback 조합, 이미지 입력을 받는 모델은 실제 연결에서 확인해야 합니다.
 
-자동 처리는 로그인된 `chatgpt.com`의 화면 요소만 조작하며 비공개 API·세션 토큰을 사용하지 않습니다. 공식 연동 SDK가 아니므로 웹 화면이 변경되면 유지보수가 필요합니다. 개인용에서는 API를 호출하지 않습니다. ChatGPT 계정의 구독·이용 한도가 적용되며, API 요금 체계와는 별개입니다. [OpenAI의 ChatGPT/API 결제 안내](https://help.openai.com/en/articles/9039756-managing-billing-settings-on-the-chatgpt-web-and-api-platform)
-
-**로그인 호환성:** WebKit의 지속 저장소로 이 앱 안의 로그인 세션을 유지합니다. Google·Apple 로그인 또는 ChatGPT의 보안 검증이 내장 브라우저를 거부할 수 있으므로 모든 계정의 로그인을 보장하지 않습니다. 문제 발생 시 메뉴에서 로그인 도움말·새로고침·Safari로 열기를 사용하세요. **Safari의 로그인 세션은 앱 안으로 이전되지 않습니다.** 계정 비밀번호·세션 토큰을 추출하거나 로그인 제한을 우회하지 않습니다. [OpenAI 로그인 문제 안내](https://help.openai.com/en/articles/7426629-why-cant-i-log-in-to-chatgpt)
-
-프로젝트별 노트와 여백 아이콘은 앱에서 관리합니다. ChatGPT의 프로젝트·맞춤 GPT를 사용하려면 웹에서 직접 선택하세요. 앱의 프로젝트와 ChatGPT 프로젝트를 자동 생성·동기화하지 않습니다. 답변 원문은 ChatGPT에 저장되며, 앱은 선택 영역·작성한 질문·대화 주소만 보관합니다. 웹 입력칸의 전송 전 초안은 앱이 저장하지 않습니다. 최근 웹 화면 3개는 유지하고, 그 밖의 화면과 앱 재시작 후에는 저장한 주소로 다시 엽니다. 로그인 리디렉션의 쿼리·토큰은 노트 파일에 저장하지 않습니다.
+구현 파일, 저장 호환성, 공식 출처, 테스트 결과 및 제약은 [ChatGPT 연동 기록](docs/chatgpt-integration.md)에 정리했습니다.
 
 ## 화면 미리보기
 
@@ -55,7 +47,7 @@ AI 기능 추가 전 SwiftUI 구현을 바탕으로 제작한 **디자인 미리
 | 보관함 | 노트 생성, 이름·표지 변경, 복제, 즐겨찾기 |
 | 프로젝트 | 프로젝트 생성·이름 및 에이전트 지침 변경·삭제, 노트 할당·이동, 프로젝트별 필터 |
 | 여백 AI | 사각형 선택·이동·크기 조절, PDF·필기·텍스트·사진 영역 미리보기, 원형 대화 아이콘, 후속 질문·중단·재시도 |
-| AI 연결 | OpenAI Responses / Gemini generateContent, 앱 전체 공급자·모델 설정, 개인 API 키의 Keychain 저장 |
+| AI 연결 | 공식 Sign in with ChatGPT, 계정별 모델 조회, 구독 사용량, OAuth 토큰 Keychain 저장 |
 | 정리 | 폴더 생성·이름 변경·삭제, 노트 이동, 이름·입력 텍스트 검색, 정렬 |
 | 삭제 | 휴지통 이동, 복원, 확인 후 영구 삭제 |
 | 필기 | PencilKit 기본 펜·연필·형광펜·지우개·올가미·자, 색상·굵기, 필기 실행 취소·다시 실행 |
@@ -70,9 +62,9 @@ AI 기능 추가 전 SwiftUI 구현을 바탕으로 제작한 **디자인 미리
 
 **획 지우기:** 지우개가 닿은 획은 누르고 있는 동안 반투명하게 유지되고, 지나간 범위는 흰색으로 표시됩니다. 지우개를 떼면 닿았던 획 전체가 삭제되며 실행 취소 한 번으로 복원할 수 있습니다. 흰색 자국은 저장되지 않습니다. 픽셀 지우개는 기존 방식으로 동작합니다.
 
-## API 버전: 프로젝트와 여백 AI 사용하기
+## 프로젝트와 여백 AI 사용하기
 
-1. 보관함 사이드바의 **AI 연결**에서 OpenAI 또는 Gemini를 고릅니다. 제공사 링크에서 발급한 본인의 API 키를 입력하고 상단 **완료**를 누르면 키·제공자·모델이 저장됩니다. 저장에 실패하면 화면이 닫히지 않고 오류가 표시됩니다. **취소**는 입력한 변경을 저장하지 않고 닫습니다. ChatGPT/Gemini 구독 로그인과 별개이며, **API 사용료가 별도**로 발생합니다. 저장됨 표시는 키가 기기에 저장되었다는 의미이며, 실제 권한·잔액은 전송 시 확인됩니다.
+1. 보관함의 **ChatGPT 구독 연결 → Continue with ChatGPT**에서 로그인합니다. API 키 입력은 없습니다.
 2. **새 프로젝트**를 만들고 프로젝트 에이전트 지침을 입력합니다. 예: “대학 1학년 수준으로, 풀이 과정을 먼저 설명해 줘.” 프로젝트 안에서 새 노트를 만들거나 PDF를 가져옵니다. 기존 노트는 길게 눌러 **프로젝트로 이동**을 선택합니다.
 3. 노트의 작은 **질문** 버튼을 누릅니다. 사각형 안을 끌어 이동하고 모서리를 끌어 크기를 바꾼 다음 **이 영역으로 질문**을 누릅니다.
 4. 열린 대화에서 **선택 영역 보기**로 PDF와 필기가 합쳐진 이미지 및 추출 텍스트를 확인합니다. 질문을 입력하고 전송합니다.
@@ -82,7 +74,7 @@ AI 기능 추가 전 SwiftUI 구현을 바탕으로 제작한 **디자인 미리
 
 프로젝트 학습 지침은 해당 프로젝트의 대화에 공통으로 적용됩니다. **각 대화에는 선택 영역과 해당 대화 기록, 프로젝트 지침만 전송**하며, 다른 프로젝트나 다른 노트 전체의 대화 기록을 자동으로 합치지 않습니다. 노트를 다른 프로젝트로 옮기면 새 프로젝트에 새 대화를 만들 수 있고, 이전 프로젝트 대화는 목록에서 읽기 전용으로 확인합니다. 프로젝트를 삭제해도 노트는 보존됩니다.
 
-연결은 앱 전체에서 한 번 설정합니다. 키는 이 iPad 전용 Keychain에 저장되고 동기화되지 않으며, 코드나 노트 파일에 기록하지 않습니다. 질문은 선택한 제공사의 공식 HTTPS API로 직접 전송합니다. 앱 자체 중계 서버는 없습니다. 자세한 요청 형식은 [OpenAI 이미지 입력 안내](https://developers.openai.com/api/docs/guides/images-vision)와 [Gemini generateContent 문서](https://ai.google.dev/api/generate-content)를 참고하세요.
+연결은 앱 전체에서 설정하며 OAuth 토큰은 기기 전용 Keychain에 저장합니다. 선택 이미지·질문·대화 맥락은 공식 OpenAI HTTPS 경로로 전송합니다. 앱 자체 중계 서버는 없습니다.
 
 ## Xcode에서 실행
 
@@ -90,7 +82,7 @@ AI 기능 추가 전 SwiftUI 구현을 바탕으로 제작한 **디자인 미리
 
 1. Mac에 Xcode를 설치하고 최초 실행 설정에서 iOS 플랫폼을 설치합니다.
 2. 이 폴더의 `NoteMargin.xcodeproj`를 엽니다. `Package.swift`는 Core 검증용입니다.
-3. API용 `NoteMargin` 또는 개인용 `NoteMarginPersonal` 스킴과 사용할 iPad 시뮬레이터를 선택하고 `⌘R`로 빌드·실행합니다.
+3. `NoteMargin` 스킴과 사용할 iPad 또는 iPad 시뮬레이터를 선택하고 `⌘R`로 빌드·실행합니다.
 4. 실제 iPad에 설치하려면 Xcode 설정에서 Apple 계정에 로그인하고, 앱 타깃의 **Signing & Capabilities → Team**에서 본인 팀을 선택합니다. 기본 Bundle Identifier `com.yeobaek.notes`는 본인 계정의 고유한 값으로 변경하세요.
 5. iPad를 Mac에 연결해 신뢰 설정을 완료하고, 필요한 경우 iPad의 개발자 모드를 활성화합니다. 실행 대상으로 해당 iPad를 선택한 뒤 `⌘R`을 누릅니다.
 
@@ -159,12 +151,16 @@ Core 검증은 XCTest가 없는 Command Line Tools 환경에서도 실행할 수
 swift run --scratch-path /tmp/note-margin-swift-build CoreChecks
 ```
 
-API 형식 검사는 실제 키와 네트워크 요청 없이 실행합니다.
+OAuth 세션·HTTP 스트리밍 검사는 실제 계정과 외부 요청 없이 실행합니다.
 
 ```sh
-swiftc NoteMargin/Services/AIConnectionStore.swift NoteMargin/Services/AIClient.swift \
-  scripts/ai_wire_checks.swift -o /tmp/note-margin-ai-wire-checks
-/tmp/note-margin-ai-wire-checks
+swiftc -parse-as-library NoteMargin/Core/Models.swift NoteMargin/Core/AIModels.swift \
+  NoteMargin/Core/ChatGPTPlan.swift NoteMargin/Core/ChatGPTOAuth.swift \
+  NoteMargin/Core/ServerSentEvents.swift NoteMargin/Services/ChatGPTCredentials.swift \
+  NoteMargin/Services/ChatGPTPlanTransport.swift scripts/plan_session_checks.swift \
+  -o /tmp/note-margin-plan-session-checks
+/tmp/note-margin-plan-session-checks
+python3 scripts/check_pdf_import.py --plan
 ```
 
 PDF 영역 합성 및 UI 회귀 검사:
