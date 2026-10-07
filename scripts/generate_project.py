@@ -46,11 +46,12 @@ def group(path):
             children.append(group(child))
             continue
         types = {".swift": "sourcecode.swift", ".plist": "text.plist.xml", ".xcprivacy": "text.xml", ".xcassets": "folder.assetcatalog"}
+        if child.name == "Excalidraw-LICENSE.txt": types[".txt"] = "text"
         if child.suffix not in types:
             continue
         ref = add("file:" + relative, f"isa = PBXFileReference; lastKnownFileType = {types[child.suffix]}; path = {quote(child.name)}; sourceTree = \"<group>\";")
         children.append(ref)
-        if child.suffix in [".swift", ".xcassets", ".xcprivacy"]:
+        if child.suffix in [".swift", ".xcassets", ".xcprivacy"] or child.name == "Excalidraw-LICENSE.txt":
             build = add("build:" + relative, f"isa = PBXBuildFile; fileRef = {ref};")
             (sources if child.suffix == ".swift" else resources).append(build)
     localized_names = sorted({p.name for p in path.glob("*.lproj/*.strings")})

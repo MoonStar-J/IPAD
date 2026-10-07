@@ -1,0 +1,81 @@
+{
+  "scope": "Hold timing only. Production changes are ShapeCompletion.swift and DrawingSession.swift; shape fitting, UI, rendering/eraser engine, file format and other product code unchanged.",
+  "xcodeProject": "/Users/whans/Documents/IPAD/NoteMargin.xcodeproj",
+  "nativeHeldObservation": {
+    "input": "Real XCUITest touch in isolated app; not physical Apple Pencil",
+    "contactActive": true,
+    "beforeCount": 0,
+    "heldDrawingStrokeCount": 0,
+    "heldLastPathCount": 0,
+    "conclusion": "Do not assume drawing.strokes.last is the active stroke."
+  },
+  "behavior": {
+    "holdSeconds": 0.55,
+    "stationaryRegionScreenPoints": 2.5,
+    "timer": "Cancellable monotonic deadline; pending wakeup re-evaluates anchor, no per-frame polling or per-move task allocation",
+    "preview": "Actual/coalesced current-contact points, existing fitter, transparent viewport-sized native ink image; hides native ink layer atomically without covering PDF. Native drawing and native drawing gesture are untouched while contact is active.",
+    "commit": "After contact/native end and known estimated updates: reuse native brush/point attributes, trim post-snap tail, one existing undoable replacement. Render-finished handoff; matching late native source repaired without an extra undo entry.",
+    "cancellation": "Invalidate generations on lift before snap, cancellation, tool/page change, app inactivity. Cancellation retains native ink."
+  },
+  "testResults": {
+    "shapeLifecycleAttributesUndo": 214,
+    "shapeRecognition": 449,
+    "spatialRevision": 202,
+    "activeDrawingSnapshots": 48,
+    "persistence": 30,
+    "drawingPerformanceCorrectness": 1149,
+    "uiPassed": 4,
+    "uiFailed": 0,
+    "uiSkipped": 0,
+    "deviceReleaseBuildExitCode": 0
+  },
+  "coverage": [
+    "Four shape kinds snap with no subsequent move/lift at 0.5x and 2x using injected monotonic scheduler",
+    "Jitter vs accumulated motion at 0.5x/1x/4x",
+    "Before/after deadline boundary and one pending timer during normal movement",
+    "Cancelled timers and stale async fits",
+    "Real touch held line at three pan/zoom locations, native render handoff and subsequent short stroke",
+    "Frozen geometry, suppressed post-snap tail, delayed force/native revision, late-original repair, one Undo/Redo and repository reopen through actual DrawingSession",
+    "Rapid short real touch strokes; whole and zoomed partial eraser regression"
+  ],
+  "uiTestNames": [
+    "CanvasLiveInkTests.testShapeSnapsBeforeLiftAndNextStrokeWorks",
+    "CanvasLiveInkTests.testRapidShortStrokesAfterViewportMovement",
+    "StrokeEraserVisualTests.testStrokePreviewUntilLift",
+    "InkToolsVisualTests.testSingleEraserRetapSettingsAndRememberedMode"
+  ],
+  "warnings": {
+    "runtime": [
+      {
+        "issueType": "Runtime Warning",
+        "message": "Publishing changes from within view updates is not allowed, this will cause undefined behavior."
+      },
+      {
+        "issueType": "Runtime Warning",
+        "message": "Publishing changes from within view updates is not allowed, this will cause undefined behavior."
+      },
+      {
+        "issueType": "Runtime Warning",
+        "message": "Publishing changes from within view updates is not allowed, this will cause undefined behavior."
+      }
+    ],
+    "earlierRun": "Earlier passing UI run timed out collecting optional simulator diagnostics. Final run passed with collect-test-diagnostics=never."
+  },
+  "notVerified": [
+    "Physical Apple Pencil/iPad execution, hardware pressure delivery timing and input-to-display latency",
+    "Physical held circle/ellipse/rectangle: verified with deterministic production-controller sample injection; real XCUITest touch coverage uses lines",
+    "Device signing and installation"
+  ],
+  "commands": [
+    "python3 scripts/check_pdf_import.py --drawing-engine --reuse-work /var/folders/wb/hzygp7510z38b4vblx_m9xh00000gn/T/NoteMarginPDFChecks-b0r5z5n2",
+    "swiftc -O -D SHAPE_RECOGNITION_STANDALONE -module-cache-path /private/tmp/note-margin-shape-module-cache NoteMargin/Canvas/ShapeRecognition.swift scripts/shape_recognition_checks.swift -o /private/tmp/note-margin-shape-hold-checks",
+    "/private/tmp/note-margin-shape-hold-checks",
+    "python3 scripts/check_pdf_import.py --drawing-performance after --reuse-work /var/folders/wb/hzygp7510z38b4vblx_m9xh00000gn/T/NoteMarginPDFChecks-b0r5z5n2",
+    "python3 scripts/check_pdf_import.py --live-ui --only-testing CanvasLiveInkTests/CanvasLiveInkTests/testShapeSnapsBeforeLiftAndNextStrokeWorks --only-testing CanvasLiveInkTests/CanvasLiveInkTests/testRapidShortStrokesAfterViewportMovement --only-testing CanvasLiveInkTests/StrokeEraserVisualTests --only-testing CanvasLiveInkTests/InkToolsVisualTests/testSingleEraserRetapSettingsAndRememberedMode --build-setting=-collect-test-diagnostics --build-setting=never --reuse-work /var/folders/wb/hzygp7510z38b4vblx_m9xh00000gn/T/NoteMarginPDFChecks-b0r5z5n2",
+    "xcodebuild -quiet -project /Users/whans/Documents/IPAD/NoteMargin.xcodeproj -scheme NoteMargin -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath /private/tmp/NoteMargin-engine-device-build CODE_SIGNING_ALLOWED=NO build"
+  ],
+  "sourceSHA256": {
+    "NoteMargin/Canvas/ShapeCompletion.swift": "7f089e589ed5386e8f90df48c5bad214dca31d4ee4fc9597f096debf3b5db0a0",
+    "NoteMargin/Canvas/DrawingSession.swift": "256a61edee6db178547a0e734ee32f34776a946cca32fdc69f02a5615dee7309"
+  }
+}

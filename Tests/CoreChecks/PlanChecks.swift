@@ -54,7 +54,7 @@ let planChecks: [CoreCheck] = [
         try expect(request.input[2].content[0].text?.contains("불완전") == true)
         try expectThrows { _ = try PlanRequest.build(chat: chat, model: "unverified-model", projectInstructions: "") }
         chat.includeImage = false
-        try expect(PlanRequest.build(chat: chat, model: "unverified-model", projectInstructions: "").input[0].content.count == 1)
+        try expectThrows { _ = try PlanRequest.build(chat: chat, model: "unverified-model", projectInstructions: "") } // Legacy opt-out no longer silently removes evidence.
         chat.pinnedConditions = String(repeating: "x", count: 12_000_001)
         try expectThrows { _ = try PlanRequest.build(chat: chat, model: "gpt-6.1-sol", projectInstructions: "") }
     },
@@ -114,7 +114,7 @@ let planChecks: [CoreCheck] = [
             var chat = sampleConversation(for: Notebook(title: "Template"))
             chat.mode = mode; chat.includeImage = false
             chat.messages = [.init(role: .user, text: mode.question(for: ""), mode: mode)]
-            let request = try PlanRequest.build(chat: chat, model: "fixture", projectInstructions: "")
+            let request = try PlanRequest.build(chat: chat, model: "gpt-6-astra", projectInstructions: "")
             try expect(request.input.last?.content.first?.text == mode.defaultQuestion)
             try expect(request.instructions.contains(mode.instruction))
         }

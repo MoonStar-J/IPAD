@@ -52,6 +52,18 @@ struct PDFSegment: Codable, Equatable {
     let height: Double
 }
 
+/// Public PencilKit identifiers that remain unchanged by transforms and masks.
+/// Kept outside the drawing bytes so grouping never flattens editable strokes.
+struct InkStrokeID: Codable, Hashable {
+    var creationDate: Date
+    var randomSeed: UInt32
+}
+
+struct InkGroup: Codable, Identifiable, Equatable {
+    var id = UUID()
+    var strokeIDs: [InkStrokeID]
+}
+
 struct NotePage: Codable, Identifiable, Equatable {
     var id = UUID()
     var paper: PaperStyle = .plain
@@ -59,6 +71,9 @@ struct NotePage: Codable, Identifiable, Equatable {
     var height: Double = 1024
     var pdfPageIndex: Int?
     var elements: [PageElement] = []
+    // Older pages decode without a migration. Erased members can remain here so
+    // undo restores their group; selection only expands to currently live ink.
+    var inkGroups: [InkGroup]?
     // Optional for compatibility with notebooks saved before continuous import.
     var pdfSegments: [PDFSegment]?
     var pdfFitToPage: Bool?
@@ -105,12 +120,16 @@ struct NoteProject: Codable, Identifiable, Equatable {
     var id = UUID()
     var title: String
     var agentInstructions = ""
+    var parentID: UUID?
+    // Older project libraries did not store a color; nil keeps the blue default.
+    var cover: CoverColor?
     var preferredProvider: String?
     var preferredModel: String?
 }
 
 struct Library: Codable, Equatable {
     var version = 1
+    var projectsMigrated: Bool?
     var folders: [NoteFolder] = []
     var projects: [NoteProject] = []
     var notebooks: [Notebook] = []
@@ -122,10 +141,11 @@ struct Library: Codable, Equatable {
         self.notebooks = notebooks
     }
 
-    private enum CodingKeys: String, CodingKey { case version, folders, projects, notebooks }
+    private enum CodingKeys: String, CodingKey { case version, folders, projects, notebooks, projectsMigrated }
 
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
+        projectsMigrated = try values.decodeIfPresent(Bool.self, forKey: .projectsMigrated)
         version = try values.decode(Int.self, forKey: .version)
         folders = try values.decode([NoteFolder].self, forKey: .folders)
         projects = try values.decodeIfPresent([NoteProject].self, forKey: .projects) ?? []
@@ -140,9 +160,13 @@ struct Library: Codable, Equatable {
     }
 
     mutating func removeProject(_ id: UUID) {
+        guard let removed = projects.first(where: { $0.id == id }) else { return }
         projects.removeAll { $0.id == id }
+        for index in projects.indices where projects[index].parentID == id {
+            projects[index].parentID = removed.parentID
+        }
         for index in notebooks.indices where notebooks[index].projectID == id {
-            notebooks[index].projectID = nil
+            notebooks[index].projectID = removed.parentID
         }
     }
 
@@ -195,5 +219,99 @@ extension Library {
             case .title: return $0.title.localizedStandardCompare($1.title) == .orderedAscending
             }
         }
+    }
+}
+
+
+/// Local drag payloads carry typed IDs only; every destination is validated before saving.
+enum LibraryItem: Hashable, Identifiable {
+    case project(UUID), note(UUID)
+    var id: String {
+        switch self {
+        case .project(let id): return "notemargin:project:" + id.uuidString
+        case .note(let id): return "notemargin:note:" + id.uuidString
+        }
+    }
+    init?(payload: String) {
+        let parts = payload.split(separator: ":")
+        guard parts.count == 3, parts[0] == "notemargin", let id = UUID(uuidString: String(parts[2])) else { return nil }
+        switch parts[1] {
+        case "project": self = .project(id)
+        case "note": self = .note(id)
+        default: return nil
+        }
+    }
+}
+
+extension Library {
+    func projectPath(_ id: UUID) -> [NoteProject] {
+        var result: [NoteProject] = [], seen = Set<UUID>(), next: UUID? = id
+        while let id = next, seen.insert(id).inserted, let project = projects.first(where: { $0.id == id }) {
+            result.insert(project, at: 0); next = project.parentID
+        }
+        return result
+    }
+    func canMove(_ item: LibraryItem, to parent: UUID?) -> Bool {
+        guard parent == nil || projects.contains(where: { $0.id == parent }) else { return false }
+        switch item {
+        case .project(let id):
+            return projects.contains(where: { $0.id == id }) &&
+                !(parent.map { projectPath($0).contains(where: { $0.id == id }) } ?? false)
+        case .note(let id): return notebooks.contains { $0.id == id && $0.deletedAt == nil }
+        }
+    }
+    @discardableResult mutating func move(_ item: LibraryItem, to parent: UUID?) -> Bool {
+        guard canMove(item, to: parent) else { return false }
+        switch item {
+        case .project(let id): projects[projects.firstIndex(where: { $0.id == id })!].parentID = parent
+        case .note(let id): assignProject(noteID: id, projectID: parent)
+        }
+        return true
+    }
+    /// Keep original folder metadata for recovery. Existing project IDs (and chat links) remain stable.
+    @discardableResult mutating func migrateFoldersToProjects() -> Bool {
+        guard projectsMigrated != true else { return false }
+        let originalProjects = projects
+        var mapping: [UUID: UUID] = [:]
+        for folder in folders {
+            let id = projects.contains(where: { $0.id == folder.id }) ? UUID() : folder.id
+            projects.append(NoteProject(id: id, title: folder.title))
+            mapping[folder.id] = id
+        }
+        for project in originalProjects where project.parentID == nil {
+            let members = notebooks.filter { $0.projectID == project.id }
+            if let folder = members.first?.folderID, members.allSatisfy({ $0.folderID == folder }),
+               let parent = mapping[folder], canMove(.project(project.id), to: parent) {
+                move(.project(project.id), to: parent)
+            }
+        }
+        for index in notebooks.indices where notebooks[index].projectID == nil {
+            if let folder = notebooks[index].folderID { notebooks[index].projectID = mapping[folder] }
+        }
+        projectsMigrated = true
+        return true
+    }
+}
+
+
+struct ProjectTreeEntry: Identifiable {
+    let project: NoteProject
+    let depth: Int
+    var id: UUID { project.id }
+}
+
+extension Library {
+    func projectTree(collapsed: Set<UUID> = []) -> [ProjectTreeEntry] {
+        let children = Dictionary(grouping: projects, by: \.parentID)
+        var result: [ProjectTreeEntry] = [], visited = Set<UUID>()
+        func appendChildren(of parent: UUID?, depth: Int) {
+            for project in (children[parent] ?? []).sorted(by: { $0.title.localizedStandardCompare($1.title) == .orderedAscending }) {
+                guard visited.insert(project.id).inserted else { continue }
+                result.append(ProjectTreeEntry(project: project, depth: depth))
+                if !collapsed.contains(project.id) { appendChildren(of: project.id, depth: depth + 1) }
+            }
+        }
+        appendChildren(of: nil, depth: 0)
+        return result
     }
 }

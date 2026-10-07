@@ -12,6 +12,9 @@ struct MarginMessage: Codable, Identifiable, Equatable {
     var model: String?
     var diagnosticCode: String?
     var diagnostic: PlanDiagnostic?
+    var revision: Int?
+    var attachmentIDs: [UUID]?
+    var replyTo: MessageReference?
 }
 
 struct MarginConversation: Codable, Identifiable, Equatable {
@@ -36,6 +39,15 @@ struct MarginConversation: Codable, Identifiable, Equatable {
     var includeImage: Bool?
     var accountRegistrationID: String?
     var schemaVersion: Int?
+    var contextRevision: Int?
+    var originalAttachment: ConversationAttachment?
+    var attachments: [ConversationAttachment]?
+    var draftReply: MessageReference?
+    var draftMessageID: UUID?
+    var corrections: [SourceCorrection]?
+    var snapshots: [MemorySnapshot]?
+    var runs: [ContextRun]?
+    var contextBudget: ContextBudget?
 
     var title: String { messages.first(where: { $0.role == .user })?.text ?? "선택 영역 질문" }
     func belongs(to note: Notebook) -> Bool { note.id == noteID && note.projectID == projectID }

@@ -1,0 +1,113 @@
+{
+  "task": "held shape visibility, same-contact line endpoint edit, automatic closed-shape direct editing",
+  "actual_xcode_project": "/Users/whans/Documents/IPAD/NoteMargin.xcodeproj",
+  "baseline_snapshot": "/private/tmp/NoteMargin-shape-edit-before-20261004",
+  "scope": "Drawing subsystem only. Existing PKDrawing archive, tools, selection UI and Undo/store reused. No document migration.",
+  "upstream": {
+    "project": "Excalidraw",
+    "commit": "ed10ac7dca7e40f3f4a31269b4bfba980d0db41e",
+    "license": "MIT; Copyright (c) 2020 Excalidraw",
+    "bundled_notice": "NoteMargin/ThirdParty/Excalidraw-LICENSE.txt",
+    "reviewed": {
+      "packages/element/src/linearElementEditor.ts": [
+        "handlePointDragging",
+        "createPointAt",
+        "movePoints",
+        "pointerOffset"
+      ],
+      "packages/element/src/dragElements.ts": [
+        "dragSelectedElements",
+        "updateElementCoords"
+      ],
+      "packages/element/src/resizeElements.ts": [
+        "getResizeOffsetXY",
+        "getNextSingleWidthAndHeightFromPointer",
+        "resizeSingleElement",
+        "getResizeAnchor",
+        "getResizedOrigin"
+      ]
+    },
+    "ported": "Unbound single endpoint, no grid/angle/bindings; original geometry plus total drag delta; rotated corner, maintainAspectRatio=true, resizeFromCenter=false; handle grab offset and opposite anchor.",
+    "intentional_difference": "Crossing either anchored edge clamps ONE positive minimum scale. Reflections are not supported.",
+    "comparison": "Executed extracted ORIGINAL getResizeOffsetXY/getNextSingleWidthAndHeightFromPointer/getResizeAnchor/getResizedOrigin/updateElementCoords/createPointAt/movePoints in Node with elementary bounds/rotation/scene-mutation adapters. 144 resize + 100 drag + 100 endpoint inputs. Not full Excalidraw application or its renderer. handlePointDragging/resizeSingleElement were reviewed, not independently executed.",
+    "ux_reference": "https://help.procreate.com/procreate/handbook/guides/quickshape",
+    "pencilkit_reference": [
+      "https://developer.apple.com/documentation/pencilkit/pkcanvasviewdelegate",
+      "https://developer.apple.com/documentation/pencilkit/pkcanvasviewdelegate/canvasviewdidfinishrendering(_:)",
+      "https://developer.apple.com/videos/play/wwdc2019/221/"
+    ],
+    "source_sha256": {
+      "linearElementEditor.ts": "5a1196b739fc269fdf05641dde396b64e9b8b724c2b09254cca03d8e7800ee62",
+      "dragElements.ts": "ad514775600d0c2dd0ef0c536fda2c76020894defafa6e65a3678909bf193166",
+      "resizeElements.ts": "db291eeaa59e817f18612f82226d1e2dfdcf7c38b58c70b450cd9f6d445c71c6",
+      "LICENSE": "1352d204fdb90d5e482c13139d848bc2c9300a9a7de358a0a558a23e72d0d8be"
+    }
+  },
+  "findings": [
+    "Old held preview set the parent PKCanvasView layer opacity to zero, including its paper/native display. Selection cleanup unconditionally reset this opacity without owning it.",
+    "Old handoff only compared model drawing equality and accepted any finish-rendering callback; manual persistence notifications were not distinguished from native delegate notifications. The screenshots alone do not establish physical-device callback timing.",
+    "Actual UIKit touch regression exposed a synchronous native drawing echo at revision 2 followed by identical persistence at revision 3; one render callback arrived with same committed drawing and same viewport, but equality of bookkeeping revisions blocked handoff. Fixed by requiring a native echo of committed CONTENT, then freezing current revision for the CA transaction. Regression simulates this exact ordering."
+  ],
+  "implementation": {
+    "ShapeCompletion.swift": "Opaque composition of shared paper tiles + retained committed ink + current native shape; native canvas stays renderable underneath. Endpoint editing updates two actual points only; no refit, predicted samples or extra Undo. Final native attributes copied to preview before commit. Native change echo + matching canvas/session/viewport/revision and Core Animation completion gate the handoff; no fixed delay. A synchronous native echo followed by identical bookkeeping does not block handoff. A very fast next native contact retains its own ink and does not overwrite the previous shape session; queued render acknowledgements are drained without polling. Closed-shape input is armed after the original contact ends and model commit succeeds, before preview removal.",
+    "ShapeEditing.swift": "Pure ported endpoint/drag/uniform-resize math; rotated frame, opposite anchor, grab offset, finite/zero-length/no-reflection guards.",
+    "NotebookCanvas.swift": "Reuse existing outline/handles/InkTransformPreview. Closed shape selection while held, activate gestures between contacts. Stable set of InkStrokeID values resolves into immutable gesture snapshot. Existing PKDrawing transform scales stroke width; retain unaffected geometry/raster cache entries. Native change/render handoff for object transforms.",
+    "DrawingSession.swift": "Separate native delegate echo from synchronous persistence notification. Wire shape preview/activation/cancel to host; reuse commit/Undo/redo/store."
+  },
+  "tests": {
+    "geometry": "PASS: 2174 checks, including 344 cases from actual extracted upstream functions with math/scene adapters. /private/tmp/note-margin-shape-edit-math.log",
+    "integration": "PASS: 202 spatial revision + 48 active snapshot + 374 shape lifecycle/attribute/Undo/display-pixel + 74 direct editing + 30 persistence checks; existing PDF/ink/selection/viewport regressions also pass. Synthetic contacts use the real CanvasHostView/DrawingSession/PKDrawing/store. /private/tmp/note-margin-shape-edit-engine-final.log",
+    "device_build": "PASS: actual /Users/whans/Documents/IPAD/NoteMargin.xcodeproj NoteMargin Release iphoneos, CODE_SIGNING_ALLOWED=NO (unsigned, not physical-device execution). /private/tmp/note-margin-shape-edit-device-build-final.log",
+    "ui": "PASS: final 2/2 real UIKit Simulator touch tests: held snap and next handwriting at top/middle/bottom zoomed PDF; direct touch move, rotated uniform corner resize, outside-tap deselection and next handwriting. Test input uses finger emulation enabled only in the disposable DEBUG fixture; not physical Apple Pencil.",
+    "ui_previous_run": "4/5 passed: direct touch move/resize/deselect/next stroke, rapid handwriting, stroke eraser, eraser tool settings. Held snap handoff exposed synchronous echo ordering; fix rerun pending.",
+    "ui_result_bundle": "/var/folders/wb/hzygp7510z38b4vblx_m9xh00000gn/T/NoteMarginLiveInk-7767b8e759b544c983cb6602b0a44e74.xcresult",
+    "other_ui_regressions": "PASS in earlier five-test run: rapid short handwriting after viewport movement, stroke eraser feedback/Undo/Redo, eraser retap settings and remembered mode. Earlier held-snap failure was corrected and rerun; direct editing test passed in both runs.",
+    "ui_runtime_warnings": [
+      {
+        "issueType": "Runtime Warning",
+        "message": "Publishing changes from within view updates is not allowed, this will cause undefined behavior."
+      },
+      {
+        "issueType": "Runtime Warning",
+        "message": "Publishing changes from within view updates is not allowed, this will cause undefined behavior."
+      }
+    ],
+    "source_sync": "Verified all 12 source/test/project files byte-identical between workspace and /Users/whans/Documents/IPAD; final unsigned Release build exit 0."
+  },
+  "limitations": [
+    "No physical Apple Pencil/iPad validation or latency benchmark. Real UIKit Simulator touch and synthetic controller input are separately reported.",
+    "No new persistent semantic shape database. Native fitted/transformed strokes and existing stable stroke IDs survive reopening; automatic selection is transient."
+  ],
+  "changed_existing_files": [
+    "NoteMargin/Canvas/NotebookCanvas.swift",
+    "NoteMargin/Canvas/ShapeCompletion.swift",
+    "NoteMargin/Canvas/DrawingSession.swift",
+    "scripts/canvas_ui_checks.swift",
+    "scripts/generate_project.py",
+    "scripts/shape_completion_checks.swift",
+    "scripts/pdf_integration_app.swift",
+    "NoteMargin.xcodeproj/project.pbxproj"
+  ],
+  "new_files": [
+    "NoteMargin/Canvas/ShapeEditing.swift",
+    "NoteMargin/ThirdParty/Excalidraw-LICENSE.txt",
+    "scripts/check_shape_editing_reference.py",
+    "scripts/shape_editing_math_checks.swift",
+    "docs/fixtures/shape-editing-upstream.json",
+    "docs/fixtures/shape-editing-validation.json"
+  ],
+  "commands": [
+    "python3 scripts/check_shape_editing_reference.py /private/tmp/NoteMargin-Excalidraw-reference /Users/whans/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node /private/tmp/shape-edit-upstream.json",
+    "swiftc -O -module-cache-path /private/tmp/note-margin-shape-module-cache NoteMargin/Canvas/ShapeRecognition.swift NoteMargin/Canvas/ShapeEditing.swift scripts/shape_editing_math_checks.swift -o /private/tmp/note-margin-shape-edit-math",
+    "/private/tmp/note-margin-shape-edit-math /private/tmp/shape-edit-upstream.json",
+    "python3 scripts/check_pdf_import.py 188E829C-2789-42CD-A31C-E6296F097D26 --drawing-engine --reuse-work /var/folders/wb/hzygp7510z38b4vblx_m9xh00000gn/T/NoteMarginPDFChecks-b0r5z5n2",
+    "python3 scripts/check_pdf_import.py 188E829C-2789-42CD-A31C-E6296F097D26 --live-ui --reuse-work /var/folders/wb/hzygp7510z38b4vblx_m9xh00000gn/T/NoteMarginPDFChecks-b0r5z5n2 --only-testing CanvasLiveInkTests/CanvasLiveInkTests/testShapeSnapsBeforeLiftAndNextStrokeWorks --only-testing CanvasLiveInkTests/ShapeDirectEditVisualTests/testSelectedShapeUsesRealTouchDragResizeAndOutsideTap --build-setting=-collect-test-diagnostics --build-setting=never",
+    "xcodebuild -quiet -project /Users/whans/Documents/IPAD/NoteMargin.xcodeproj -scheme NoteMargin -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath /private/tmp/NoteMargin-engine-device-build CODE_SIGNING_ALLOWED=NO build"
+  ],
+  "manual_check": [
+    "Xcode의 NoteMargin 스킴에서 iPad를 선택해 실행합니다.",
+    "선을 그린 끝에서 약 0.55초 멈춘 뒤 펜을 떼지 않고 끝점을 움직입니다. 시작점이 고정되어야 합니다.",
+    "원·타원·삼각형·사각형은 보정 시 테두리가 보입니다. 펜을 떼고 내부를 끌거나 모서리를 끌어 비율을 유지하며 확대합니다.",
+    "빈 곳을 탭한 뒤 새 필기를 하고, Undo/Redo 및 저장 후 다시 열기를 확인합니다."
+  ]
+}

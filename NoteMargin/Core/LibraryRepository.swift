@@ -46,6 +46,19 @@ final class LibraryRepository {
         return library
     }
 
+    func loadProjectLibrary() throws -> Library {
+        var library = try load()
+        if library.migrateFoldersToProjects() {
+            let original = root.appendingPathComponent("library.json")
+            let backup = root.appendingPathComponent("library-before-projects.json")
+            if files.fileExists(atPath: original.path), !files.fileExists(atPath: backup.path) {
+                try files.copyItem(at: original, to: backup)
+            }
+            try save(library)
+        }
+        return library
+    }
+
     func save(_ library: Library) throws {
         try encoder.encode(library).write(to: root.appendingPathComponent("library.json"), options: .atomic)
     }

@@ -1,0 +1,305 @@
+{
+  "cases" : [
+    {
+      "appendedDrawingRasterCacheReconciliationMilliseconds" : 0.26054166664835066,
+      "appendedSpatialCacheReconciliationMilliseconds" : 0.031041667170939036,
+      "appendedSpatialEntriesReused" : 1,
+      "appendedSpatialEntryChanges" : 1,
+      "appendedSpatialPrefixEntriesReused" : 1,
+      "appendedSpatialRasterReuseMilliseconds" : 0.0042083338485099375,
+      "cachedEraserBegin" : {
+        "maximumMilliseconds" : 0.005416666681412607,
+        "medianMilliseconds" : 0.0005000001692678779,
+        "operations" : 30,
+        "p95Milliseconds" : 0.0012916680134367198,
+        "totalMilliseconds" : 0.02312499964318704
+      },
+      "commitRemainingDrawingMilliseconds" : 0.03208333328075241,
+      "entireDocumentQuery" : {
+        "maximumMilliseconds" : 0.0008749993867240846,
+        "medianMilliseconds" : 0.0004999983502784744,
+        "operations" : 12,
+        "p95Milliseconds" : 0.0008749993867240846,
+        "totalMilliseconds" : 0.006208332706592046
+      },
+      "erasedStrokes" : 1,
+      "firstPassEraserExtend" : {
+        "maximumMilliseconds" : 4.09537500127044,
+        "medianMilliseconds" : 4.09537500127044,
+        "operations" : 1,
+        "p95Milliseconds" : 4.09537500127044,
+        "totalMilliseconds" : 4.09537500127044
+      },
+      "geometryBuildsFirstPass" : 1,
+      "geometryBuildsRepeatedPass" : 0,
+      "indexBuildMilliseconds" : 0.273416666459525,
+      "localCandidatesMaximum" : 1,
+      "localCandidatesMinimum" : 1,
+      "localCandidatesTotal" : 180,
+      "localQuery" : {
+        "maximumMilliseconds" : 0.007791666575940326,
+        "medianMilliseconds" : 0.0005000001692678779,
+        "operations" : 180,
+        "p95Milliseconds" : 0.0005833335308125243,
+        "totalMilliseconds" : 0.09825001143326517
+      },
+      "longDurationCoalescedEraserBatches" : {
+        "maximumMilliseconds" : 3.8986666659184266,
+        "medianMilliseconds" : 0.0016666672308929265,
+        "operations" : 300,
+        "p95Milliseconds" : 0.0019166673155268654,
+        "totalMilliseconds" : 4.414874994836282
+      },
+      "offscreenSpanningQuery" : {
+        "maximumMilliseconds" : 0.0005416659405454993,
+        "medianMilliseconds" : 0.00016666672308929265,
+        "operations" : 120,
+        "p95Milliseconds" : 0.00020833431335631758,
+        "totalMilliseconds" : 0.02241666334157344
+      },
+      "offscreenSpanningReturnedCandidates" : 0,
+      "oneStrokeRasterMilliseconds" : 17.39600000109931,
+      "repeatedEraserExtend" : {
+        "maximumMilliseconds" : 0.017333333744318224,
+        "medianMilliseconds" : 0.0012500004231696948,
+        "operations" : 120,
+        "p95Milliseconds" : 0.0012916680134367198,
+        "totalMilliseconds" : 0.16754167154431343
+      },
+      "totalStrokes" : 1,
+      "uncachedEraserBeginMilliseconds" : 0.011458334483904764,
+      "unchangedStrokeReusedWithoutRasterization" : true
+    },
+    {
+      "appendedDrawingRasterCacheReconciliationMilliseconds" : 0.06408333319996018,
+      "appendedSpatialCacheReconciliationMilliseconds" : 0.3806249987974297,
+      "appendedSpatialEntriesReused" : 100,
+      "appendedSpatialEntryChanges" : 1,
+      "appendedSpatialPrefixEntriesReused" : 100,
+      "appendedSpatialRasterReuseMilliseconds" : 0.008333334335475229,
+      "cachedEraserBegin" : {
+        "maximumMilliseconds" : 0.0023749998945277184,
+        "medianMilliseconds" : 0.00045833439799025655,
+        "operations" : 30,
+        "p95Milliseconds" : 0.0007500002539018169,
+        "totalMilliseconds" : 0.016375000996049494
+      },
+      "commitRemainingDrawingMilliseconds" : 0.16200000027311035,
+      "entireDocumentQuery" : {
+        "maximumMilliseconds" : 0.09145833428192418,
+        "medianMilliseconds" : 0.08362500011571683,
+        "operations" : 12,
+        "p95Milliseconds" : 0.09145833428192418,
+        "totalMilliseconds" : 0.9994166648539249
+      },
+      "erasedStrokes" : 10,
+      "firstPassEraserExtend" : {
+        "maximumMilliseconds" : 4.044875000545289,
+        "medianMilliseconds" : 3.85916666527919,
+        "operations" : 10,
+        "p95Milliseconds" : 4.044875000545289,
+        "totalMilliseconds" : 38.77000000102271
+      },
+      "geometryBuildsFirstPass" : 10,
+      "geometryBuildsRepeatedPass" : 0,
+      "indexBuildMilliseconds" : 0.14550000014423858,
+      "localCandidatesMaximum" : 1,
+      "localCandidatesMinimum" : 1,
+      "localCandidatesTotal" : 180,
+      "localQuery" : {
+        "maximumMilliseconds" : 0.0023749998945277184,
+        "medianMilliseconds" : 0.0007500002539018169,
+        "operations" : 180,
+        "p95Milliseconds" : 0.0009166669769911095,
+        "totalMilliseconds" : 0.14216666204447392
+      },
+      "longDurationCoalescedEraserBatches" : {
+        "maximumMilliseconds" : 31.715375000203494,
+        "medianMilliseconds" : 0.0037083336792420596,
+        "operations" : 300,
+        "p95Milliseconds" : 0.004833333150600083,
+        "totalMilliseconds" : 40.65854167129146
+      },
+      "offscreenSpanningQuery" : {
+        "maximumMilliseconds" : 0.0006249993020901456,
+        "medianMilliseconds" : 0.00020833249436691403,
+        "operations" : 120,
+        "p95Milliseconds" : 0.00020833431335631758,
+        "totalMilliseconds" : 0.02308333569089882
+      },
+      "offscreenSpanningReturnedCandidates" : 0,
+      "oneStrokeRasterMilliseconds" : 3.320208332297625,
+      "repeatedEraserExtend" : {
+        "maximumMilliseconds" : 0.007583334081573412,
+        "medianMilliseconds" : 0.0044166663428768516,
+        "operations" : 120,
+        "p95Milliseconds" : 0.005500000042957254,
+        "totalMilliseconds" : 0.56087499797286
+      },
+      "totalStrokes" : 100,
+      "uncachedEraserBeginMilliseconds" : 0.12241666627232917,
+      "unchangedStrokeReusedWithoutRasterization" : true
+    },
+    {
+      "appendedDrawingRasterCacheReconciliationMilliseconds" : 0.48241666627291124,
+      "appendedSpatialCacheReconciliationMilliseconds" : 3.6849166681349743,
+      "appendedSpatialEntriesReused" : 1000,
+      "appendedSpatialEntryChanges" : 1,
+      "appendedSpatialPrefixEntriesReused" : 1000,
+      "appendedSpatialRasterReuseMilliseconds" : 0.0603333337494405,
+      "cachedEraserBegin" : {
+        "maximumMilliseconds" : 0.004583333065966144,
+        "medianMilliseconds" : 0.0005000001692678779,
+        "operations" : 30,
+        "p95Milliseconds" : 0.0010833337000804022,
+        "totalMilliseconds" : 0.019416667782934383
+      },
+      "commitRemainingDrawingMilliseconds" : 1.47645833385468,
+      "entireDocumentQuery" : {
+        "maximumMilliseconds" : 1.107999998566811,
+        "medianMilliseconds" : 1.0903749989665812,
+        "operations" : 12,
+        "p95Milliseconds" : 1.107999998566811,
+        "totalMilliseconds" : 12.89800000085961
+      },
+      "erasedStrokes" : 10,
+      "firstPassEraserExtend" : {
+        "maximumMilliseconds" : 4.051208334203693,
+        "medianMilliseconds" : 3.8954583324084524,
+        "operations" : 10,
+        "p95Milliseconds" : 4.051208334203693,
+        "totalMilliseconds" : 38.81379166523402
+      },
+      "geometryBuildsFirstPass" : 10,
+      "geometryBuildsRepeatedPass" : 0,
+      "indexBuildMilliseconds" : 1.956791666088975,
+      "localCandidatesMaximum" : 1,
+      "localCandidatesMinimum" : 1,
+      "localCandidatesTotal" : 180,
+      "localQuery" : {
+        "maximumMilliseconds" : 0.0028750000637955964,
+        "medianMilliseconds" : 0.0010833337000804022,
+        "operations" : 180,
+        "p95Milliseconds" : 0.001375001374981366,
+        "totalMilliseconds" : 0.1992499928746838
+      },
+      "longDurationCoalescedEraserBatches" : {
+        "maximumMilliseconds" : 31.667666666180594,
+        "medianMilliseconds" : 0.0044583339331438765,
+        "operations" : 300,
+        "p95Milliseconds" : 0.005708332537324168,
+        "totalMilliseconds" : 41.01625000657805
+      },
+      "offscreenSpanningQuery" : {
+        "maximumMilliseconds" : 0.0012083346518920735,
+        "medianMilliseconds" : 0.00020833249436691403,
+        "operations" : 120,
+        "p95Milliseconds" : 0.00020833431335631758,
+        "totalMilliseconds" : 0.02383333230682183
+      },
+      "offscreenSpanningReturnedCandidates" : 0,
+      "oneStrokeRasterMilliseconds" : 3.4862500015151454,
+      "repeatedEraserExtend" : {
+        "maximumMilliseconds" : 0.007083333912305534,
+        "medianMilliseconds" : 0.005083333235234022,
+        "operations" : 120,
+        "p95Milliseconds" : 0.005208334187045693,
+        "totalMilliseconds" : 0.6124166575318668
+      },
+      "totalStrokes" : 1000,
+      "uncachedEraserBeginMilliseconds" : 1.7920833324751584,
+      "unchangedStrokeReusedWithoutRasterization" : true
+    },
+    {
+      "appendedDrawingRasterCacheReconciliationMilliseconds" : 2.750749999904656,
+      "appendedSpatialCacheReconciliationMilliseconds" : 17.896583332912996,
+      "appendedSpatialEntriesReused" : 5000,
+      "appendedSpatialEntryChanges" : 1,
+      "appendedSpatialPrefixEntriesReused" : 5000,
+      "appendedSpatialRasterReuseMilliseconds" : 0.28362499870127067,
+      "cachedEraserBegin" : {
+        "maximumMilliseconds" : 0.00641666520095896,
+        "medianMilliseconds" : 0.0005000001692678779,
+        "operations" : 30,
+        "p95Milliseconds" : 0.0007500002539018169,
+        "totalMilliseconds" : 0.021166664737393148
+      },
+      "commitRemainingDrawingMilliseconds" : 7.669124999665655,
+      "entireDocumentQuery" : {
+        "maximumMilliseconds" : 2.2835833333374467,
+        "medianMilliseconds" : 2.0662916667788522,
+        "operations" : 12,
+        "p95Milliseconds" : 2.2835833333374467,
+        "totalMilliseconds" : 25.148541664748336
+      },
+      "erasedStrokes" : 10,
+      "firstPassEraserExtend" : {
+        "maximumMilliseconds" : 4.139791666602832,
+        "medianMilliseconds" : 4.009708332887385,
+        "operations" : 10,
+        "p95Milliseconds" : 4.139791666602832,
+        "totalMilliseconds" : 40.2606666648353
+      },
+      "geometryBuildsFirstPass" : 10,
+      "geometryBuildsRepeatedPass" : 0,
+      "indexBuildMilliseconds" : 8.975916667623096,
+      "localCandidatesMaximum" : 1,
+      "localCandidatesMinimum" : 1,
+      "localCandidatesTotal" : 180,
+      "localQuery" : {
+        "maximumMilliseconds" : 0.007624999852851033,
+        "medianMilliseconds" : 0.0016249996406259015,
+        "operations" : 180,
+        "p95Milliseconds" : 0.0022500007617054507,
+        "totalMilliseconds" : 0.3029166655323934
+      },
+      "longDurationCoalescedEraserBatches" : {
+        "maximumMilliseconds" : 31.161791666818317,
+        "medianMilliseconds" : 0.004958334102411754,
+        "operations" : 300,
+        "p95Milliseconds" : 0.006416667019948363,
+        "totalMilliseconds" : 40.16700000647688
+      },
+      "offscreenSpanningQuery" : {
+        "maximumMilliseconds" : 0.0015833338693482801,
+        "medianMilliseconds" : 0.00020833249436691403,
+        "operations" : 120,
+        "p95Milliseconds" : 0.00020833431335631758,
+        "totalMilliseconds" : 0.02416666757198982
+      },
+      "offscreenSpanningReturnedCandidates" : 0,
+      "oneStrokeRasterMilliseconds" : 3.1855416655162117,
+      "repeatedEraserExtend" : {
+        "maximumMilliseconds" : 0.013208333257352933,
+        "medianMilliseconds" : 0.005958332621958107,
+        "operations" : 120,
+        "p95Milliseconds" : 0.006416667019948363,
+        "totalMilliseconds" : 0.7276666510733776
+      },
+      "totalStrokes" : 5000,
+      "uncachedEraserBeginMilliseconds" : 7.840000000214786,
+      "unchangedStrokeReusedWithoutRasterization" : true
+    }
+  ],
+  "empty" : {
+    "eraserExtend" : {
+      "maximumMilliseconds" : 0.02433333247608971,
+      "medianMilliseconds" : 0.0008333336154464632,
+      "operations" : 180,
+      "p95Milliseconds" : 0.0010833337000804022,
+      "totalMilliseconds" : 0.18345833268540446
+    },
+    "indexBuildMilliseconds" : 0.19616666759247892,
+    "query" : {
+      "maximumMilliseconds" : 0.37091666672495194,
+      "medianMilliseconds" : 0.00020833249436691403,
+      "operations" : 180,
+      "p95Milliseconds" : 0.00025000008463393897,
+      "totalMilliseconds" : 0.4061666659254115
+    }
+  },
+  "environment" : "iOS Simulator; synthetic production method calls; not physical Apple Pencil latency",
+  "measurementScope" : "Monotonic elapsed CPU-operation wall time; excludes fixture generation, assertions, and serialization. No frame, allocation, GPU, or Pencil-to-display latency claim.",
+  "operatingSystem" : "Version 26.5 (Build 23F77)",
+  "processorCount" : 10
+}

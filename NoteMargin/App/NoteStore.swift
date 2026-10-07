@@ -18,9 +18,25 @@ final class NoteStore: ObservableObject {
     @Published private(set) var loadingError: String?
     @Published private(set) var hasUnsavedChanges = false
     private var repository: LibraryRepository?
-    private var pending: [DrawingKey: Data] = [:]
+    // PKDrawing is a value snapshot. Do not serialize the entire drawing on the
+    // PencilKit callback thread; late pressure updates may replace this value.
+    private var pending: [DrawingKey: PendingDrawing] = [:]
     private var saveTask: Task<Void, Never>?
-    private struct DrawingKey: Hashable { let noteID: UUID; let pageID: UUID }
+    private var drawingRevision: UInt64 = 0
+    private var activeDrawingInteractions: Set<DrawingKey> = []
+    // An active PencilKit stroke stays owned by its canvas. Explicit flushes
+    // (backgrounding/export/navigation) request its current real-data snapshot;
+    // ordinary Pencil updates only mark it dirty, without copying the document.
+    private var activeDrawingSnapshots: [DrawingKey: () -> PKDrawing?] = [:]
+    private var dirtyActiveDrawings: Set<DrawingKey> = []
+    private var savingID: UUID?
+    private var deferredSaveCompletion: (() -> Void)?
+    private struct DrawingKey: Hashable, Sendable { let noteID: UUID; let pageID: UUID }
+    private struct PendingDrawing: Sendable {
+        let drawing: PKDrawing
+        let revision: UInt64
+        let modifiedAt: Date
+    }
 
     init() { loadLibrary() }
 
@@ -29,7 +45,8 @@ final class NoteStore: ObservableObject {
             let documents = try FileManager.default.url(for: .documentDirectory, in: .userDomainMask,
                                                        appropriateFor: nil, create: true)
             let repository = try LibraryRepository.applicationLibrary(in: documents)
-            library = try repository.load()
+            guard (pending.isEmpty && dirtyActiveDrawings.isEmpty) || flushDrawings() else { return }
+            library = try DrawingPersistence.queue.sync { try repository.loadProjectLibrary() }
             self.repository = repository
             loadingError = nil
         } catch { loadingError = error.localizedDescription }
@@ -38,25 +55,38 @@ final class NoteStore: ObservableObject {
     func note(_ id: UUID) -> Notebook? { library.notebooks.first { $0.id == id } }
     func project(_ id: UUID) -> NoteProject? { library.projects.first { $0.id == id } }
 
-    func createProject(title: String, agentInstructions: String = "") -> UUID? {
+    func createProject(title: String, agentInstructions: String = "", parentID: UUID? = nil, cover: CoverColor = .blue) -> UUID? {
         let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !title.isEmpty else { return nil }
-        let project = NoteProject(title: title, agentInstructions: agentInstructions)
+        guard !title.isEmpty, parentID == nil || project(parentID!) != nil else { return nil }
+        let project = NoteProject(title: title, agentInstructions: agentInstructions, parentID: parentID, cover: cover)
         return commit { $0.projects.append(project) } ? project.id : nil
     }
     @discardableResult func updateProject(_ id: UUID, title: String, agentInstructions: String) -> Bool {
+        updateProject(id, title: title, agentInstructions: agentInstructions, parentID: project(id)?.parentID)
+    }
+    @discardableResult func updateProject(_ id: UUID, title: String, agentInstructions: String, parentID: UUID?, cover: CoverColor? = nil) -> Bool {
         let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !title.isEmpty, project(id) != nil else { return false }
+        guard !title.isEmpty, library.canMove(.project(id), to: parentID) else { return false }
         return commit { library in
             guard let index = library.projects.firstIndex(where: { $0.id == id }) else { return }
             library.projects[index].title = title
             library.projects[index].agentInstructions = agentInstructions
+            library.projects[index].parentID = parentID
+            if let cover { library.projects[index].cover = cover }
         }
     }
     @discardableResult func assignProject(noteID: UUID, projectID: UUID?) -> Bool {
         guard note(noteID) != nil, projectID == nil || project(projectID!) != nil else { return false }
         guard flushDrawings() else { return false }
         return commit { $0.assignProject(noteID: noteID, projectID: projectID) }
+    }
+    @discardableResult func move(_ item: LibraryItem, to parentID: UUID?) -> Bool {
+        guard library.canMove(item, to: parentID) else {
+            errorMessage = "이 위치로 이동할 수 없습니다. 프로젝트는 자신이나 하위 프로젝트 안으로 이동할 수 없습니다."
+            return false
+        }
+        guard flushDrawings() else { return false }
+        return commit { $0.move(item, to: parentID) }
     }
     func deleteProject(_ id: UUID) { commit { $0.removeProject(id) } }
 
@@ -65,9 +95,12 @@ final class NoteStore: ObservableObject {
         guard let repository else { return false }
         var next = library
         change(&next)
+        applyDrawingDates(pending, to: &next)
         do {
-            try repository.save(next)
-            library = next
+            // Synchronous edits must follow an already queued autosave. Otherwise
+            // an older background library snapshot could undo a rename or move.
+            try DrawingPersistence.queue.sync { try repository.save(next) }
+            if library != next { library = next }
             return true
         } catch { errorMessage = "저장하지 못했습니다. \(error.localizedDescription)"; return false }
     }
@@ -91,6 +124,66 @@ final class NoteStore: ObservableObject {
             target.setAIElement(noteID: noteID, pageID: pageID, element: element, present: !present, undoManager: undoManager)
         }
         undoManager?.setActionName("AI 답변 카드")
+    }
+
+    @discardableResult
+    func setInkGroups(noteID: UUID, pageID: UUID, groups: [InkGroup], undoManager: UndoManager?, action: String) -> Bool {
+        guard let page = note(noteID)?.pages.first(where: { $0.id == pageID }) else { return false }
+        let previous = page.inkGroups ?? []
+        guard previous != groups else { return true }
+        // A group may refer to a just-finished stroke. Persist its latest pressure
+        // snapshot before committing metadata, and retain it on a write failure.
+        guard flushDrawings(), updatePage(noteID: noteID, pageID: pageID, { page in
+            page.inkGroups = groups.isEmpty ? nil : groups
+        }) else { return false }
+        undoManager?.registerUndo(withTarget: self) { [weak undoManager] target in
+            target.setInkGroups(noteID: noteID, pageID: pageID, groups: previous, undoManager: undoManager, action: action)
+        }
+        undoManager?.setActionName(action)
+        return true
+    }
+
+    /// Commits the rare legacy-copy identity repair together with its group
+    /// metadata. The session owns a single undo entry for this paired change.
+    @discardableResult
+    func setInkGroupsAndDrawing(noteID: UUID, pageID: UUID, drawing: PKDrawing, groups: [InkGroup]) -> Bool {
+        guard let repository,
+              let noteIndex = library.notebooks.firstIndex(where: { $0.id == noteID }),
+              let pageIndex = library.notebooks[noteIndex].pages.firstIndex(where: { $0.id == pageID }),
+              flushDrawings() else { return false }
+        let original: PKDrawing
+        do { original = try self.drawing(noteID: noteID, pageID: pageID) }
+        catch { reportDrawingSaveError(error); return false }
+        var next = library
+        next.notebooks[noteIndex].pages[pageIndex].inkGroups = groups.isEmpty ? nil : groups
+        next.notebooks[noteIndex].updatedAt = Date()
+        let root = repository.root
+        do {
+            try DrawingPersistence.queue.sync {
+                let writer = try LibraryRepository(root: root)
+                let previousData = try writer.readDrawing(noteID: noteID, pageID: pageID)
+                try writer.writeDrawing(drawing.dataRepresentation(), noteID: noteID, pageID: pageID)
+                do { try writer.save(next) }
+                catch {
+                    // Library replacement is atomic; if it fails, restore the
+                    // preceding drawing before exposing any change to the UI.
+                    if let previousData {
+                        try? writer.writeDrawing(previousData, noteID: noteID, pageID: pageID)
+                    } else if let url = try? writer.assetURL(noteID: noteID, name: "\(pageID).drawing") {
+                        try? FileManager.default.removeItem(at: url)
+                    }
+                    throw error
+                }
+            }
+            if library != next { library = next }
+            return true
+        } catch {
+            // Even if disk rollback is blocked (for example by a full volume),
+            // the original remains available to readers and to a later retry.
+            queueDrawing(original, noteID: noteID, pageID: pageID)
+            errorMessage = "필기 그룹을 저장하지 못했습니다. 기존 필기는 보존되어 있습니다. 저장을 다시 시도해 주세요. \(error.localizedDescription)"
+            return false
+        }
     }
 
     @discardableResult func updatePage(noteID: UUID, pageID: UUID, _ change: (inout NotePage) -> Void) -> Bool {
@@ -150,45 +243,161 @@ final class NoteStore: ObservableObject {
 
     func drawing(noteID: UUID, pageID: UUID) throws -> PKDrawing {
         let key = DrawingKey(noteID: noteID, pageID: pageID)
-        if let data = pending[key] { return try PKDrawing(data: data) }
-        if let data = try repository?.readDrawing(noteID: noteID, pageID: pageID) {
+        captureActiveDrawing(key)
+        if let snapshot = pending[key] { return snapshot.drawing }
+        if let data = try DrawingPersistence.queue.sync(execute: { try repository?.readDrawing(noteID: noteID, pageID: pageID) }) {
             return try PKDrawing(data: data)
         }
         return PKDrawing()
     }
 
     func queueDrawing(_ drawing: PKDrawing, noteID: UUID, pageID: UUID) {
-        pending[DrawingKey(noteID: noteID, pageID: pageID)] = drawing.dataRepresentation()
-        hasUnsavedChanges = true
+        dirtyActiveDrawings.remove(DrawingKey(noteID: noteID, pageID: pageID))
+        drawingRevision &+= 1
+        pending[DrawingKey(noteID: noteID, pageID: pageID)] = PendingDrawing(
+            drawing: drawing, revision: drawingRevision, modifiedAt: Date())
+        if !hasUnsavedChanges { hasUnsavedChanges = true }
+        scheduleDrawingSave()
+    }
+
+    func beginDrawingInteraction(noteID: UUID, pageID: UUID, snapshot: (() -> PKDrawing?)? = nil) {
+        let key = DrawingKey(noteID: noteID, pageID: pageID)
+        activeDrawingInteractions.insert(key)
+        activeDrawingSnapshots[key] = snapshot
         saveTask?.cancel()
+        saveTask = nil
+    }
+
+    func endDrawingInteraction(noteID: UUID, pageID: UUID) {
+        let key = DrawingKey(noteID: noteID, pageID: pageID)
+        captureActiveDrawing(key)
+        activeDrawingSnapshots.removeValue(forKey: key)
+        activeDrawingInteractions.remove(key)
+        guard activeDrawingInteractions.isEmpty else { return }
+        let completion = deferredSaveCompletion
+        deferredSaveCompletion = nil
+        completion?()
+        scheduleDrawingSave()
+    }
+
+    func markActiveDrawingChanged(noteID: UUID, pageID: UUID) {
+        let key = DrawingKey(noteID: noteID, pageID: pageID)
+        guard activeDrawingSnapshots[key] != nil else { return }
+        dirtyActiveDrawings.insert(key)
+        if !hasUnsavedChanges { hasUnsavedChanges = true }
+    }
+
+    private func captureActiveDrawing(_ key: DrawingKey) {
+        guard dirtyActiveDrawings.contains(key), let drawing = activeDrawingSnapshots[key]?() else { return }
+        queueDrawing(drawing, noteID: key.noteID, pageID: key.pageID)
+    }
+
+    private func scheduleDrawingSave() {
+        saveTask?.cancel()
+        saveTask = nil
+        guard !pending.isEmpty, activeDrawingInteractions.isEmpty, savingID == nil else { return }
         saveTask = Task { [weak self] in
-            do { try await Task.sleep(for: .milliseconds(350)) } catch { return }
-            self?.flushDrawings()
+            do { try await Task.sleep(for: .milliseconds(700)) } catch { return }
+            self?.saveDrawingsInBackground()
+        }
+    }
+
+    private func saveDrawingsInBackground() {
+        saveTask = nil
+        guard activeDrawingInteractions.isEmpty, savingID == nil,
+              !pending.isEmpty, let root = repository?.root else { return }
+        let id = UUID(), batch = pending
+        var next = library
+        applyDrawingDates(batch, to: &next)
+        savingID = id
+        DrawingPersistence.queue.async { [weak self, next] in
+            let result = Result { try Self.writeDrawingBatch(batch, library: next, root: root) }
+            Task { @MainActor [weak self] in
+                guard let self, self.savingID == id else { return }
+                let finish: () -> Void = { [weak self] in self?.finishDrawingSave(id: id, batch: batch, result: result) }
+                if self.activeDrawingInteractions.isEmpty { finish() }
+                else { self.deferredSaveCompletion = finish }
+            }
+        }
+    }
+
+    private func finishDrawingSave(id: UUID, batch: [DrawingKey: PendingDrawing], result: Result<Void, Error>) {
+        guard savingID == id else { return }
+        savingID = nil
+        switch result {
+        case .success:
+            var next = library
+            applyDrawingDates(batch, to: &next)
+            if library != next { library = next }
+            removeSavedDrawings(batch)
+            scheduleDrawingSave()
+        case .failure(let error):
+            // Keep every original snapshot for an explicit retry or the next edit.
+            reportDrawingSaveError(error)
         }
     }
 
     @discardableResult
     func flushDrawings() -> Bool {
-        saveTask?.cancel()
-        guard !pending.isEmpty else { return true }
-        guard let repository else { return false }
-        do {
-            for (key, data) in pending {
-                try repository.writeDrawing(data, noteID: key.noteID, pageID: key.pageID)
-            }
-            let changed = Set(pending.keys.map(\.noteID))
-            guard commit({ library in
-                for index in library.notebooks.indices where changed.contains(library.notebooks[index].id) {
-                    library.notebooks[index].updatedAt = Date()
-                }
-            }) else { return false }
-            pending.removeAll()
-            hasUnsavedChanges = false
-            return true
-        } catch {
-            errorMessage = "필기를 저장하지 못했습니다. 여유 공간을 확인한 후 다시 저장해 주세요. \(error.localizedDescription)"
+        for key in Array(dirtyActiveDrawings) { captureActiveDrawing(key) }
+        guard dirtyActiveDrawings.isEmpty else {
+            reportDrawingSaveError(CocoaError(.fileWriteUnknown))
             return false
         }
+        saveTask?.cancel()
+        saveTask = nil
+        // Queued disk work still finishes in order. Its later UI callback must
+        // not clear newer revisions or overwrite this synchronous flush result.
+        savingID = nil
+        deferredSaveCompletion = nil
+        guard !pending.isEmpty else { return true }
+        guard let root = repository?.root else { return false }
+        let batch = pending
+        var next = library
+        applyDrawingDates(batch, to: &next)
+        do {
+            try DrawingPersistence.queue.sync { try Self.writeDrawingBatch(batch, library: next, root: root) }
+            if library != next { library = next }
+            removeSavedDrawings(batch)
+            return true
+        } catch {
+            reportDrawingSaveError(error)
+            return false
+        }
+    }
+
+    private func removeSavedDrawings(_ batch: [DrawingKey: PendingDrawing]) {
+        for (key, snapshot) in batch where pending[key]?.revision == snapshot.revision {
+            pending.removeValue(forKey: key)
+        }
+        let unsaved = !pending.isEmpty || !dirtyActiveDrawings.isEmpty
+        if hasUnsavedChanges != unsaved { hasUnsavedChanges = unsaved }
+    }
+
+    private func applyDrawingDates(_ batch: [DrawingKey: PendingDrawing], to library: inout Library) {
+        var dates: [UUID: Date] = [:]
+        for (key, snapshot) in batch {
+            dates[key.noteID] = max(dates[key.noteID] ?? .distantPast, snapshot.modifiedAt)
+        }
+        for index in library.notebooks.indices {
+            if let date = dates[library.notebooks[index].id], date > library.notebooks[index].updatedAt {
+                library.notebooks[index].updatedAt = date
+            }
+        }
+    }
+
+    private nonisolated static func writeDrawingBatch(_ batch: [DrawingKey: PendingDrawing], library: Library, root: URL) throws {
+        // This repository/encoder belongs only to this serial write operation.
+        let writer = try LibraryRepository(root: root)
+        for (key, snapshot) in batch {
+            try writer.writeDrawing(snapshot.drawing.dataRepresentation(), noteID: key.noteID, pageID: key.pageID)
+        }
+        try writer.save(library)
+    }
+
+    private func reportDrawingSaveError(_ error: Error) {
+        let message = "필기를 저장하지 못했습니다. 여유 공간을 확인한 후 다시 저장해 주세요. \(error.localizedDescription)"
+        if errorMessage != message { errorMessage = message }
     }
 
     func addPage(noteID: UUID, after pageID: UUID?, paper: PaperStyle) -> UUID? {
@@ -224,6 +433,12 @@ final class NoteStore: ObservableObject {
         defer { if access { url.stopAccessingSecurityScopedResource() } }
         do {
             let data = try Data(contentsOf: url)
+            return preparePDF(data: data, title: url.deletingPathExtension().lastPathComponent, folderID: folderID)
+        } catch { errorMessage = "PDF를 가져오지 못했습니다. \(error.localizedDescription)"; return nil }
+    }
+
+    func preparePDF(data: Data, title: String, folderID: UUID?) -> PreparedPDFImport? {
+        do {
             guard let document = PDFDocument(data: data), !document.isLocked, document.pageCount > 0 else {
                 errorMessage = "이 PDF를 열 수 없습니다. 암호가 해제된 PDF를 선택해 주세요."
                 return nil
@@ -238,8 +453,7 @@ final class NoteStore: ObservableObject {
                 return NotePage(width: 768, height: 768 * height / width, pdfPageIndex: index, pdfFitToPage: true)
             }
             // Own the bytes before releasing file-provider access while the user chooses a layout.
-            return PreparedPDFImport(title: url.deletingPathExtension().lastPathComponent,
-                                     data: data, pages: pages, folderID: folderID)
+            return PreparedPDFImport(title: title, data: data, pages: pages, folderID: folderID)
         } catch { errorMessage = "PDF를 가져오지 못했습니다. \(error.localizedDescription)"; return nil }
     }
 
@@ -270,6 +484,12 @@ final class NoteStore: ObservableObject {
             updatePage(noteID: noteID, pageID: pageID) { $0.elements.append(element) }
         } catch { errorMessage = error.localizedDescription }
     }
+}
+
+// Shared across stores, including a freshly reopened store. A lifecycle flush
+// waits for older autosaves without waiting for any callback on the main actor.
+private enum DrawingPersistence {
+    static let queue = DispatchQueue(label: "com.notemargin.drawing-persistence", qos: .utility)
 }
 
 extension String {

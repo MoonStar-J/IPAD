@@ -119,3 +119,507 @@ struct StoreErrorAlert: ViewModifier {
 extension View {
     func storeErrorAlert() -> some View { modifier(StoreErrorAlert()) }
 }
+
+// Original 24-point line drawings: a split nib, graphite facets and a slanted
+// marker edge. These are vector geometry, not images from another app.
+enum InkTool: String, CaseIterable, Identifiable {
+    case pen, pencil, marker, eraser, pixelEraser, lasso, rectangle
+    var id: String { rawValue }
+    var isInk: Bool { self == .pen || self == .pencil || self == .marker }
+    var isSelection: Bool { self == .lasso || self == .rectangle }
+    var isEraser: Bool { self == .eraser || self == .pixelEraser }
+    var title: String {
+        switch self {
+        case .pen: "펜"
+        case .pencil: "연필"
+        case .marker: "형광펜"
+        case .eraser: "획 지우개"
+        case .pixelEraser: "부분 지우개"
+        case .lasso: "자유 선택"
+        case .rectangle: "네모 선택"
+        }
+    }
+}
+
+struct InkToolGlyph: Shape {
+    var tool: InkTool
+    func path(in rect: CGRect) -> Path {
+        var p = Path()
+        func line(_ points: [CGPoint], closed: Bool = false) {
+            guard let first = points.first else { return }
+            p.move(to: first); points.dropFirst().forEach { p.addLine(to: $0) }
+            if closed { p.closeSubpath() }
+        }
+        func pts(_ values: [(CGFloat, CGFloat)]) -> [CGPoint] { values.map { CGPoint(x: $0.0, y: $0.1) } }
+        switch tool {
+        case .pen:
+            line(pts([(5,19),(8,7),(17,3),(21,7),(17,16),(5,19)]))
+            line(pts([(5,19),(12,12)])); p.addEllipse(in: CGRect(x: 11, y: 10, width: 3, height: 3))
+            line(pts([(9,7),(17,15)])); line(pts([(4,22),(15,22)]))
+        case .pencil:
+            line(pts([(4,20),(6,13),(16,3),(21,8),(11,18),(4,20)]))
+            line(pts([(6,13),(11,18)])); line(pts([(14,5),(19,10)])); line(pts([(9,14),(16,7)]))
+            line(pts([(4,20),(7,19)]))
+        case .marker:
+            line(pts([(4,17),(9,12),(8,10),(16,2),(22,8),(14,16),(12,15),(8,19)]))
+            line(pts([(9,7),(17,15)])); line(pts([(3,21),(14,21)]))
+        case .eraser, .pixelEraser:
+            line(pts([(3,14),(13,3),(21,10),(12,20),(9,20),(3,14)]))
+            line(pts([(7,10),(15,17)]))
+            if tool == .pixelEraser {
+                for x: CGFloat in [16, 20] { p.addRect(CGRect(x: x, y: 20, width: 1, height: 1)) }
+            } else { line(pts([(15,21),(22,21)])) }
+        case .rectangle:
+            for points: [(CGFloat, CGFloat)] in [[(3,9),(3,3),(9,3)],[(15,3),(21,3),(21,9)],[(21,15),(21,21),(15,21)],[(9,21),(3,21),(3,15)]] { line(pts(points)) }
+            p.addEllipse(in: CGRect(x: 11, y: 11, width: 2, height: 2))
+        case .lasso:
+            p.addEllipse(in: CGRect(x: 3, y: 3, width: 18, height: 12))
+            p.move(to: CGPoint(x: 8, y: 14))
+            p.addCurve(to: CGPoint(x: 6, y: 22), control1: CGPoint(x: 16, y: 22), control2: CGPoint(x: 1, y: 24))
+            p.addCurve(to: CGPoint(x: 10, y: 16), control1: CGPoint(x: 10, y: 20), control2: CGPoint(x: 11, y: 18))
+        }
+        let scale = min(rect.width, rect.height) / 24
+        return p.applying(CGAffineTransform(a: scale, b: 0, c: 0, d: scale, tx: rect.midX - 12 * scale, ty: rect.midY - 12 * scale))
+    }
+}
+
+enum InkPalette {
+    static let defaults = ["000000", "007AFF", "FF3B30", "FF9500", "FFFFFF"]
+    static func values(_ stored: String) -> [String] {
+        let parts = stored.split(separator: ",", omittingEmptySubsequences: false).map(String.init)
+        return (0..<5).map { i in
+            guard i < parts.count, parts[i].count == 6, UInt32(parts[i], radix: 16) != nil else { return defaults[i] }
+            return parts[i].uppercased()
+        }
+    }
+    static func color(_ hex: String) -> Color {
+        let rgb = UInt32(hex, radix: 16) ?? 0
+        return Color(.sRGB, red: Double((rgb >> 16) & 255) / 255, green: Double((rgb >> 8) & 255) / 255, blue: Double(rgb & 255) / 255, opacity: 1)
+    }
+    static func hex(_ color: Color) -> String {
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        UIColor(color).resolvedColor(with: UITraitCollection(userInterfaceStyle: .light)).getRed(&r, green: &g, blue: &b, alpha: &a)
+        func byte(_ value: CGFloat) -> Int { Int((min(1, max(0, value)) * 255).rounded()) }
+        return String(format: "%02X%02X%02X", byte(r), byte(g), byte(b))
+    }
+}
+
+struct DrawingToolsView: View {
+    @ObservedObject var session: DrawingSession
+    @Binding var expanded: Bool
+    var vertical = false
+    var onMove: (CGPoint, Bool) -> Void = { _, _ in }
+    @AppStorage("inkTools.colors") private var storedColors = InkPalette.defaults.joined(separator: ",")
+    @State private var editingColor = 0
+    @State private var selectedColorSlot: Int?
+    @State private var colorSettings = false
+    @State private var widthSettings = false
+    @State private var eraserSettings = false
+    private var moveGesture: some Gesture {
+        DragGesture(minimumDistance: 8, coordinateSpace: .named("ink-tool-dock"))
+            .onChanged { onMove($0.location, false) }
+            .onEnded { onMove($0.location, true) }
+    }
+    private let colors: [(String, Color)] = [("검정", .black), ("파랑", .blue), ("빨강", .red), ("초록", .green), ("노랑", .yellow), ("흰색", .white)]
+    var body: some View {
+        VStack(alignment: .trailing, spacing: 8) {
+            if expanded {
+                // Both rails keep their own scroll position. The separator is
+                // outside them, so it also provides a stationary drag handle.
+                let railLayout = vertical ? AnyLayout(VStackLayout(spacing: 0)) : AnyLayout(HStackLayout(spacing: 0))
+                railLayout {
+                    toolRail
+                    Capsule().fill(Color.secondary.opacity(0.45))
+                        .frame(width: vertical ? 24 : 2, height: vertical ? 2 : 24)
+                        .frame(width: vertical ? 44 : 18, height: vertical ? 18 : 44)
+                        .contentShape(Rectangle())
+                        .gesture(moveGesture)
+                        .accessibilityLabel("도구 팔레트 이동 손잡이")
+                        .accessibilityHint("끌어서 화면의 위, 아래, 왼쪽, 오른쪽 가장자리에 놓습니다")
+                        .accessibilityIdentifier("ink-tools-drag")
+                    colorRail
+                }
+                .padding(6)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+                .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.primary.opacity(0.12), lineWidth: 1))
+            } else {
+                Button { expanded = true } label: {
+                    InkToolGlyph(tool: session.selectedTool).stroke(style: StrokeStyle(lineWidth: 1.8, lineCap: .round, lineJoin: .round))
+                        .frame(width: 29, height: 29).foregroundStyle(.primary)
+                        .frame(width: 60, height: 60)
+                        .background(.regularMaterial, in: Circle())
+                        .overlay(alignment: .bottom) {
+                            Capsule().fill(session.selectedTool.isInk ? session.inkColor : Color.accentColor).frame(width: 18, height: 4).padding(.bottom, 8)
+                        }.overlay(Circle().stroke(Color.primary.opacity(0.15), lineWidth: 1))
+                }.highPriorityGesture(moveGesture)
+                    .accessibilityHint("누르면 펼치고, 끌면 화면 가장자리로 이동합니다")
+                    .accessibilityLabel(session.selectedTool.title + " · 필기 도구 펼치기").accessibilityIdentifier("ink-tools-expand")
+            }
+        }.buttonStyle(.plain).foregroundStyle(.primary)
+            .shadow(color: .black.opacity(0.12), radius: 8, y: 3)
+    }
+    private var toolRail: some View {
+        ScrollView(vertical ? .vertical : .horizontal, showsIndicators: false) {
+            let layout = vertical ? AnyLayout(VStackLayout(spacing: 2)) : AnyLayout(HStackLayout(spacing: 2))
+            layout {
+                ForEach(InkTool.allCases.filter { $0.isInk }) { tool in
+                    Button { session.selectTool(tool) } label: {
+                        InkToolGlyph(tool: tool).stroke(style: StrokeStyle(lineWidth: 1.7, lineCap: .round, lineJoin: .round))
+                            .frame(width: 24, height: 24).frame(width: 44, height: 44)
+                            .foregroundStyle(session.selectedTool == tool ? Color.accentColor : Color.primary)
+                            .background(session.selectedTool == tool ? Color.accentColor.opacity(0.14) : Color.clear, in: RoundedRectangle(cornerRadius: 10))
+                            .contentShape(Rectangle())
+                    }.accessibilityLabel(tool.title).accessibilityIdentifier("ink-tool-" + tool.rawValue)
+                        .accessibilityAddTraits(session.selectedTool == tool ? .isSelected : [])
+                }
+                eraserToolButton
+                selectionToolButton
+                if session.selectedTool.isSelection {
+                    selectionModeMenu
+                    Text(session.selectedStrokeCount == 0 ? "선택" : "\(session.selectedStrokeCount)획")
+                        .font(.caption).frame(width: 44, height: 44)
+                        .accessibilityLabel(selectionStatus).accessibilityIdentifier("ink-selection-status")
+                    selectionMenu.frame(width: 44, height: 44)
+                } else if session.selectedTool.isInk {
+                    Button { widthSettings = true } label: {
+                        Text(session.inkWidth.formatted(.number.precision(.fractionLength(1))))
+                            .font(.callout.monospacedDigit()).frame(width: 44, height: 44).contentShape(Rectangle())
+                    }.accessibilityLabel("도구 굵기 및 자").accessibilityIdentifier("ink-width-settings")
+                        .popover(isPresented: $widthSettings) { widthControls.padding().frame(width: 280).presentationCompactAdaptation(.popover) }
+                }
+                undoButtons
+                Button { expanded = false } label: {
+                    Image(systemName: vertical ? "chevron.right" : "chevron.down").frame(width: 44, height: 44).contentShape(Rectangle())
+                }.accessibilityLabel("필기 도구 접기").accessibilityIdentifier("ink-tools-collapse")
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .accessibilityIdentifier("ink-tools-tool-rail")
+        .accessibilityLabel("필기 도구 목록")
+    }
+    private var eraserTool: InkTool {
+        session.selectedTool.isEraser ? session.selectedTool : session.lastEraserTool
+    }
+    private var eraserToolButton: some View {
+        Button {
+            if session.selectedTool.isEraser { eraserSettings = true }
+            else { session.selectTool(session.lastEraserTool) }
+        } label: {
+            InkToolGlyph(tool: eraserTool).stroke(style: StrokeStyle(lineWidth: 1.7, lineCap: .round, lineJoin: .round))
+                .frame(width: 24, height: 24).frame(width: 44, height: 44)
+                .foregroundStyle(session.selectedTool.isEraser ? Color.accentColor : Color.primary)
+                .background(session.selectedTool.isEraser ? Color.accentColor.opacity(0.14) : Color.clear, in: RoundedRectangle(cornerRadius: 10))
+                .contentShape(Rectangle())
+        }
+        .accessibilityLabel("지우개")
+        .accessibilityValue(eraserTool.title + " · " + session.eraserWidth.formatted(.number.precision(.fractionLength(1))))
+        .accessibilityIdentifier("ink-tool-eraser")
+        .accessibilityHint(session.selectedTool.isEraser ? "다시 누르면 지우는 방식과 폭을 변경합니다" : "마지막 지우개를 선택합니다")
+        .accessibilityAddTraits(session.selectedTool.isEraser ? .isSelected : [])
+        .popover(isPresented: $eraserSettings) {
+            eraserControls.padding(16).frame(width: 280).presentationCompactAdaptation(.popover)
+        }
+    }
+    private var eraserControls: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("지우개").font(.headline)
+            Picker("지우는 방식", selection: Binding(get: { eraserTool }, set: { session.selectTool($0) })) {
+                Text("획").tag(InkTool.eraser).accessibilityIdentifier("ink-eraser-mode-stroke")
+                Text("부분").tag(InkTool.pixelEraser).accessibilityIdentifier("ink-eraser-mode-partial")
+            }.pickerStyle(.segmented).accessibilityIdentifier("ink-eraser-mode")
+            HStack {
+                Text("폭")
+                Spacer()
+                Text(session.eraserWidth.formatted(.number.precision(.fractionLength(1))))
+                    .monospacedDigit().foregroundStyle(.secondary)
+            }
+            Slider(value: $session.eraserWidth, in: session.eraserWidthRange, step: 1)
+                .accessibilityLabel("지우개 폭").accessibilityIdentifier("ink-eraser-width-slider")
+                .onChange(of: session.eraserWidth) { _, _ in session.applyTool() }
+            HStack {
+                Spacer()
+                Button("완료") { eraserSettings = false }.accessibilityIdentifier("ink-eraser-settings-done")
+            }
+        }
+        .foregroundStyle(.primary)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("ink-eraser-settings")
+    }
+    private var selectionTool: InkTool {
+        session.selectedTool.isSelection ? session.selectedTool : session.lastSelectionTool
+    }
+    private var selectionModeTitle: String { selectionTool == .lasso ? "자유형" : "박스형" }
+    private var selectionToolButton: some View {
+        Button { session.selectTool(session.lastSelectionTool) } label: {
+            InkToolGlyph(tool: selectionTool).stroke(style: StrokeStyle(lineWidth: 1.7, lineCap: .round, lineJoin: .round))
+                .frame(width: 24, height: 24).frame(width: 44, height: 44)
+                .foregroundStyle(session.selectedTool.isSelection ? Color.accentColor : Color.primary)
+                .background(session.selectedTool.isSelection ? Color.accentColor.opacity(0.14) : Color.clear, in: RoundedRectangle(cornerRadius: 10))
+                .contentShape(Rectangle())
+        }
+        .accessibilityLabel("선택").accessibilityValue(selectionModeTitle)
+        .accessibilityIdentifier("ink-tool-selection")
+        .accessibilityHint("마지막으로 사용한 방식으로 필기를 선택합니다")
+        .accessibilityAddTraits(session.selectedTool.isSelection ? .isSelected : [])
+    }
+    private var selectionModeMenu: some View {
+        Menu {
+            Button { session.selectTool(.lasso) } label: {
+                Label("자유형", systemImage: selectionTool == .lasso ? "checkmark" : "lasso")
+            }.accessibilityIdentifier("ink-selection-mode-freeform")
+            Button { session.selectTool(.rectangle) } label: {
+                Label("박스형", systemImage: selectionTool == .rectangle ? "checkmark" : "rectangle.dashed")
+            }.accessibilityIdentifier("ink-selection-mode-box")
+        } label: {
+            Text(selectionModeTitle).font(.caption).frame(width: 44, height: 44).contentShape(Rectangle())
+        }
+        .accessibilityLabel("선택 방식").accessibilityValue(selectionModeTitle)
+        .accessibilityIdentifier("ink-selection-mode")
+    }
+    private var colorRail: some View {
+        ScrollView(vertical ? .vertical : .horizontal, showsIndicators: false) {
+            let layout = vertical ? AnyLayout(VStackLayout(spacing: 2)) : AnyLayout(HStackLayout(spacing: 2))
+            layout { ForEach(0..<5) { index in colorButton(index) } }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .accessibilityIdentifier("ink-tools-color-rail")
+        .accessibilityLabel("펜 색상 목록")
+    }
+    private var palette: [String] { InkPalette.values(storedColors) }
+    private var selectedColorIndex: Int? {
+        let hex = InkPalette.hex(session.inkColor)
+        if let index = selectedColorSlot, palette.indices.contains(index), palette[index] == hex { return index }
+        return palette.firstIndex(of: hex)
+    }
+    private func colorButton(_ index: Int) -> some View {
+        let hex = palette[index], selected = selectedColorIndex == index
+        return Button {
+            if selected { editingColor = index; colorSettings = true }
+            else { selectedColorSlot = index; session.inkColor = InkPalette.color(hex); session.applyTool() }
+        } label: {
+            Circle().fill(InkPalette.color(hex)).frame(width: 24, height: 24)
+                .overlay(Circle().stroke(.gray.opacity(0.6), lineWidth: 1))
+                .padding(4).overlay(Circle().stroke(selected ? Color.accentColor : .clear, lineWidth: 2))
+                .frame(width: 44, height: 44).contentShape(Rectangle())
+        }.accessibilityLabel("펜 색상 \(index + 1)").accessibilityValue(hex)
+            .accessibilityIdentifier("ink-color-\(index)")
+            .accessibilityHint(selected ? "누르면 색상 변경 창을 엽니다" : "누르면 이 색상을 선택합니다")
+            .accessibilityAddTraits(selected ? .isSelected : [])
+            .disabled(!session.selectedTool.isInk)
+            .accessibilityAction(named: "색상 변경") { editingColor = index; colorSettings = true }
+            .popover(isPresented: Binding(get: { colorSettings && editingColor == index }, set: { colorSettings = $0 })) {
+                colorControls.padding().frame(width: 300).presentationCompactAdaptation(.popover)
+            }
+    }
+    private func setPaletteColor(_ color: Color) {
+        var values = palette; values[editingColor] = InkPalette.hex(color)
+        storedColors = values.joined(separator: ","); selectedColorSlot = editingColor
+        session.inkColor = color; session.applyTool()
+    }
+    private var colorControls: some View {
+        VStack(spacing: 12) {
+            Text("펜 색상 \(editingColor + 1) 변경").font(.headline)
+            HStack(spacing: 4) {
+                ForEach(colors, id: \.0) { name, color in
+                    Button { setPaletteColor(color) } label: {
+                        Circle().fill(color).frame(width: 28, height: 28).overlay(Circle().stroke(.gray, lineWidth: 1)).frame(width: 40, height: 44)
+                    }.accessibilityLabel(name + " 잉크")
+                }
+            }
+            ColorPicker("사용자 지정 색상", selection: Binding(get: { InkPalette.color(palette[editingColor]) }, set: setPaletteColor), supportsOpacity: false)
+            Text("#" + palette[editingColor]).font(.caption.monospaced())
+            Button("완료") { colorSettings = false }
+        }
+    }
+    private var widthControls: some View {
+        VStack(spacing: 12) {
+            Text(session.selectedTool.title + " 굵기").font(.headline)
+            Slider(value: $session.inkWidth, in: 0.1...12, step: 0.1).accessibilityLabel("도구 굵기")
+                .accessibilityIdentifier("ink-width-slider")
+                .onChange(of: session.inkWidth) { _, _ in session.applyTool() }
+            Text(session.inkWidth.formatted(.number.precision(.fractionLength(1)))).monospacedDigit()
+            Toggle("자", isOn: $session.rulerActive).disabled(!session.selectedTool.isInk)
+                .onChange(of: session.rulerActive) { _, _ in session.applyTool() }
+        }
+    }
+    private var undoButtons: some View {
+        let layout = vertical ? AnyLayout(VStackLayout(spacing: 0)) : AnyLayout(HStackLayout(spacing: 0))
+        return layout {
+            Button { session.undo() } label: { Image(systemName: "arrow.uturn.backward").frame(width: 44, height: 44).contentShape(Rectangle()) }.disabled(!session.canUndo).accessibilityLabel("실행 취소")
+            Button { session.redo() } label: { Image(systemName: "arrow.uturn.forward").frame(width: 44, height: 44).contentShape(Rectangle()) }.disabled(!session.canRedo).accessibilityLabel("다시 실행")
+        }
+    }
+    private var selectionStatus: String {
+        if session.selectedStrokeCount > 0 { return "\(session.selectedStrokeCount)획 선택 · 안쪽을 끌어 이동" }
+        return selectionTool == .lasso ? "필기를 자유형으로 둘러싸세요" : "필기를 네모로 둘러싸세요"
+    }
+    private var selectionMenu: some View {
+        Menu {
+            Text(selectionStatus)
+            Text("모서리로 크기 조절 · 안쪽을 끌어 이동 · 두 손가락으로 화면 이동")
+            Button("복사", systemImage: "doc.on.doc") { session.host?.copySelectedInk() }.disabled(session.selectedStrokeCount == 0)
+            Button("잘라내기", systemImage: "scissors") { session.host?.copySelectedInk(cut: true) }.disabled(session.selectedStrokeCount == 0)
+            Button("복제", systemImage: "plus.square.on.square") { session.host?.pasteInk(duplicate: true) }.disabled(session.selectedStrokeCount == 0)
+            Button("붙여넣기", systemImage: "doc.on.clipboard") { session.host?.pasteInk() }.disabled(DrawingSession.copiedInk == nil)
+            Button(session.selectionIsGrouped ? "그룹 해제" : "그룹화", systemImage: "square.3.layers.3d") {
+                if session.selectionIsGrouped { session.host?.ungroupSelectedInk() }
+                else { session.host?.groupSelectedInk() }
+            }.disabled(session.selectedStrokeCount < 2 && !session.selectionIsGrouped)
+            Button("저장", systemImage: "square.and.arrow.down") { session.saveSelectedInk() }
+                .disabled(session.selectedStrokeCount == 0)
+            Menu("필기 크기", systemImage: "arrow.up.left.and.arrow.down.right") {
+                Button("작게 (90%)") { session.host?.scaleSelectedInk(by: 0.9) }
+                Button("크게 (110%)") { session.host?.scaleSelectedInk(by: 1.1) }
+            }.disabled(session.selectedStrokeCount == 0)
+            Button("삭제", systemImage: "trash", role: .destructive) { session.host?.deleteSelectedInk() }.disabled(session.selectedStrokeCount == 0)
+            Button("선택 해제") { session.host?.clearInkSelection() }
+        } label: { Image(systemName: "ellipsis.circle").frame(width: 44, height: 44).contentShape(Rectangle()) }
+            .accessibilityLabel("편집").accessibilityIdentifier("ink-selection-menu")
+    }
+}
+
+
+/// Selection actions are independent of the palette's scroll/collapse state.
+/// The host publishes the final selection rect, not every live pointer sample.
+private struct InkSelectionActionBar: View {
+    @ObservedObject var session: DrawingSession
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 2) {
+                action("복제", icon: "plus.square.on.square", id: "duplicate") { session.host?.pasteInk(duplicate: true) }
+                action("잘라내기", icon: "scissors", id: "cut") { session.host?.copySelectedInk(cut: true) }
+                action("복사", icon: "doc.on.doc", id: "copy") { session.host?.copySelectedInk() }
+                action("붙여넣기", icon: "doc.on.clipboard", id: "paste") { session.host?.pasteInk() }
+                    .disabled(DrawingSession.copiedInk == nil)
+                action(session.selectionIsGrouped ? "그룹 해제" : "그룹화", icon: "square.3.layers.3d", id: "group") {
+                    if session.selectionIsGrouped { session.host?.ungroupSelectedInk() }
+                    else { session.host?.groupSelectedInk() }
+                }.disabled(session.selectedStrokeCount < 2 && !session.selectionIsGrouped)
+                action("삭제", icon: "trash", id: "delete", destructive: true) { session.host?.deleteSelectedInk() }
+                action("저장", icon: "square.and.arrow.down", id: "save") { session.saveSelectedInk() }
+            }
+        }
+        .padding(6)
+        .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.primary.opacity(0.15), lineWidth: 1))
+        .shadow(color: .black.opacity(0.12), radius: 7, y: 3)
+        .accessibilityIdentifier("ink-selection-actions")
+    }
+
+    private func action(_ title: String, icon: String, id: String, destructive: Bool = false,
+                        perform: @escaping () -> Void) -> some View {
+        Button(action: perform) {
+            VStack(spacing: 3) {
+                Image(systemName: icon).font(.system(size: 17, weight: .medium))
+                Text(title).font(.system(size: 11, weight: .medium)).lineLimit(1)
+            }
+            .foregroundStyle(destructive ? Color.red : Color.primary)
+            .frame(width: 58, height: 48).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
+        .accessibilityIdentifier("ink-selection-action-" + id)
+    }
+}
+
+/// The entire tool surface stays inside the viewport, on one of its four edges.
+struct ToolDock: Equatable {
+    enum Edge: String, CaseIterable {
+        case top, bottom, left, right
+        var isVertical: Bool { self == .left || self == .right }
+    }
+    func paletteSize(viewport: CGSize, expanded: Bool) -> CGSize {
+        if !expanded { return CGSize(width: 60, height: 60) }
+        return edge.isVertical
+            ? CGSize(width: 56, height: min(440, max(60, viewport.height - 24)))
+            : CGSize(width: min(430, max(60, viewport.width - 24)), height: 56)
+    }
+    var edge: Edge = .bottom
+    var fraction: Double = 1
+    static func limits(viewport: CGSize, tool: CGSize) -> CGRect {
+        let x = min(viewport.width / 2, tool.width / 2 + 12)
+        let y = min(viewport.height / 2, tool.height / 2 + 12)
+        return CGRect(x: x, y: y, width: max(0, viewport.width - 2 * x), height: max(0, viewport.height - 2 * y))
+    }
+    func center(viewport: CGSize, tool: CGSize) -> CGPoint {
+        let r = Self.limits(viewport: viewport, tool: tool)
+        let t = min(1, max(0, fraction.isFinite ? fraction : 1))
+        switch edge {
+        case .top: return CGPoint(x: r.minX + r.width * t, y: r.minY)
+        case .bottom: return CGPoint(x: r.minX + r.width * t, y: r.maxY)
+        case .left: return CGPoint(x: r.minX, y: r.minY + r.height * t)
+        case .right: return CGPoint(x: r.maxX, y: r.minY + r.height * t)
+        }
+    }
+    static func nearest(to point: CGPoint, viewport: CGSize, tool: CGSize) -> Self {
+        let r = limits(viewport: viewport, tool: tool)
+        let x = min(r.maxX, max(r.minX, point.x)), y = min(r.maxY, max(r.minY, point.y))
+        let choices: [(Edge, CGFloat)] = [(.top, abs(point.y - r.minY)), (.bottom, abs(point.y - r.maxY)), (.left, abs(point.x - r.minX)), (.right, abs(point.x - r.maxX))]
+        let edge = choices.min { $0.1 < $1.1 }!.0
+        let t = (edge == .top || edge == .bottom) ? (x - r.minX) / max(1, r.width) : (y - r.minY) / max(1, r.height)
+        return Self(edge: edge, fraction: t)
+    }
+}
+struct DockedDrawingTools: View {
+    @ObservedObject var session: DrawingSession
+    @AppStorage("inkTools.dock.edge") private var edge = "bottom"
+    @AppStorage("inkTools.dock.fraction") private var fraction = 1.0
+    @State private var expanded = true
+    @State private var moving: ToolDock?
+    var body: some View {
+        GeometryReader { geometry in
+            let dock = moving ?? ToolDock(edge: ToolDock.Edge(rawValue: edge) ?? .bottom, fraction: fraction)
+            let size = dock.paletteSize(viewport: geometry.size, expanded: expanded)
+            DrawingToolsView(session: session, expanded: $expanded, vertical: dock.edge.isVertical) { location, ended in
+                // Choose the edge from finger position, independently of the
+                // palette's changing aspect ratio, so rotation cannot oscillate.
+                var projected = ToolDock.nearest(to: location, viewport: geometry.size, tool: CGSize(width: 60, height: 60))
+                let limits = ToolDock.limits(viewport: geometry.size, tool: projected.paletteSize(viewport: geometry.size, expanded: expanded))
+                projected.fraction = projected.edge.isVertical
+                    ? min(1, max(0, (location.y - limits.minY) / max(1, limits.height)))
+                    : min(1, max(0, (location.x - limits.minX) / max(1, limits.width)))
+                if ended {
+                    edge = projected.edge.rawValue; fraction = projected.fraction; moving = nil
+                } else { moving = projected }
+            }
+            .frame(width: size.width, height: size.height)
+            .position(dock.center(viewport: geometry.size, tool: size))
+            .accessibilityAction(named: "위쪽으로 이동") { edge = "top"; fraction = 0.5 }
+            .accessibilityAction(named: "아래쪽으로 이동") { edge = "bottom"; fraction = 0.5 }
+            .accessibilityAction(named: "왼쪽으로 이동") { edge = "left"; fraction = 0.5 }
+            .accessibilityAction(named: "오른쪽으로 이동") { edge = "right"; fraction = 0.5 }
+            if session.selectedTool.isSelection, session.selectedStrokeCount > 0,
+               let selectionRect = session.selectionActionRect,
+               selectionRect.intersects(CGRect(origin: .zero, size: geometry.size)) {
+                let barSize = CGSize(width: min(430, max(60, geometry.size.width - 16)), height: 60)
+                let paletteCenter = dock.center(viewport: geometry.size, tool: size)
+                let paletteFrame = CGRect(x: paletteCenter.x - size.width / 2, y: paletteCenter.y - size.height / 2,
+                                          width: size.width, height: size.height)
+                InkSelectionActionBar(session: session)
+                    .frame(width: barSize.width, height: barSize.height)
+                    .position(actionBarCenter(selection: selectionRect, viewport: geometry.size,
+                                              bar: barSize, palette: paletteFrame))
+            }
+        }
+        .coordinateSpace(name: "ink-tool-dock")
+        .sheet(item: $session.selectedInkExport) { export in
+            ShareSheet(urls: export.urls)
+        }
+    }
+
+    private func actionBarCenter(selection: CGRect, viewport: CGSize, bar: CGSize, palette: CGRect) -> CGPoint {
+        let margin: CGFloat = 8, gap: CGFloat = 12
+        let x = min(max(selection.midX, bar.width / 2 + margin), viewport.width - bar.width / 2 - margin)
+        let top = bar.height / 2 + margin
+        let bottom = max(top, viewport.height - bar.height / 2 - margin)
+        let above = selection.minY - bar.height / 2 - gap
+        let below = selection.maxY + bar.height / 2 + gap
+        let candidates = [above, below, top, bottom].filter { $0 >= top && $0 <= bottom }
+        let y = candidates.first { value in
+            !CGRect(x: x - bar.width / 2, y: value - bar.height / 2, width: bar.width, height: bar.height)
+                .insetBy(dx: -4, dy: -4).intersects(palette)
+        } ?? min(bottom, max(top, above))
+        return CGPoint(x: x, y: y)
+    }
+}

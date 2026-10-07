@@ -27,19 +27,24 @@ struct CapturedRegion {
         format.scale = 1
         format.opaque = true
         let size = CGSize(width: ceil(rect.width * scale), height: ceil(rect.height * scale))
-        let image = UIGraphicsImageRenderer(size: size, format: format).image { output in
-            // Rounding to whole pixels may leave a fractional edge outside the
-            // document clip. Keep that edge white instead of opaque black.
-            UIColor.white.setFill()
-            output.fill(CGRect(origin: .zero, size: size))
-            output.cgContext.scaleBy(x: scale, y: scale)
-            output.cgContext.translateBy(x: -rect.minX, y: -rect.minY)
-            output.cgContext.clip(to: rect)
-            PageRenderer.drawBackground(page: page, note: note, store: store, context: output.cgContext)
-            // Only the crop is rasterized, including on a 100-page continuous canvas.
-            drawing.image(from: rect, scale: scale).draw(in: rect)
+        // The note paper and live PKCanvasView are always light, even in dark UI.
+        // PencilKit otherwise resolves black ink as white when rasterizing a crop.
+        var image: UIImage?
+        UITraitCollection(userInterfaceStyle: .light).performAsCurrent {
+            image = UIGraphicsImageRenderer(size: size, format: format).image { output in
+                // Rounding to whole pixels may leave a fractional edge outside the
+                // document clip. Keep that edge white instead of opaque black.
+                UIColor.white.setFill()
+                output.fill(CGRect(origin: .zero, size: size))
+                output.cgContext.scaleBy(x: scale, y: scale)
+                output.cgContext.translateBy(x: -rect.minX, y: -rect.minY)
+                output.cgContext.clip(to: rect)
+                PageRenderer.drawBackground(page: page, note: note, store: store, context: output.cgContext)
+                // Only the crop is rasterized, including on a 100-page continuous canvas.
+                drawing.image(from: rect, scale: scale).draw(in: rect)
+            }
         }
-        guard let data = image.pngData() else { throw CocoaError(.fileWriteUnknown) }
+        guard let data = image?.pngData() else { throw CocoaError(.fileWriteUnknown) }
         var texts: [String] = []
         var pageNumbers: [Int] = []
         for region in page.pdfRegions where CGRect(x: 0, y: region.y, width: page.width, height: region.height).intersects(rect) {

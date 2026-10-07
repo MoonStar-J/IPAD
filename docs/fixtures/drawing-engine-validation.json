@@ -1,0 +1,47 @@
+{
+  "environment": "iPadOS Simulator 26.5 on Mac; minimum app target iPadOS 17; Xcode device Release build without signing",
+  "testResults": {
+    "CoreChecks": 65,
+    "pureShapeRecognition": 449,
+    "spatialRevision": 202,
+    "activeDrawingSnapshot": 48,
+    "shapeLifecycleAttributesUndo": 160,
+    "drawingPersistence": 30,
+    "drawingPerformanceCorrectness": 1149,
+    "XCUITests": {
+      "passed": 4,
+      "failed": 0,
+      "skipped": 0
+    }
+  },
+  "uiTests": [
+    "CanvasLiveInkTests.testInkStaysAtTouchWhileDrawingDeepInLongPDF",
+    "StrokeEraserVisualTests.testStrokePreviewUntilLift",
+    "InkToolsVisualTests.testSingleEraserRetapSettingsAndRememberedMode",
+    "CanvasLiveInkTests.testRapidShortStrokesAfterViewportMovement"
+  ],
+  "additionalChecks": "Existing PDF import/export, region capture, selection/mask/move/resize/copy/cut/paste/undo/redo/reopen, native preview pixels, page replacement and zoom/document transform regressions passed.",
+  "build": "xcodebuild NoteMargin Release iphoneos CODE_SIGNING_ALLOWED=NO: exit 0",
+  "scopeVerification": "10 existing NoteMargin/Views files match pre-task SHA-256; PageRenderer unchanged. Xcode checkout drawing sources match workspace.",
+  "warnings": [
+    "Three passing UI tests using two fixture types reported Publishing changes from within view updates; exact runtime callsite not provided."
+  ],
+  "notVerified": [
+    "Physical Apple Pencil tip-to-display latency and sustained device FPS",
+    "Physical late-pressure ordering on an iPad; synthetic public callback lifecycle tests passed",
+    "Simultaneous physical pinch/pan/Pencil interactions; native transforms and subsequent synthetic touch drawing were tested",
+    "Physical device installation/signing was not performed",
+    "Allocation comparison before/after, steady-state physical handwriting allocations, peak RSS and memory leak analysis"
+  ],
+  "commands": [
+    "swift run --scratch-path /private/tmp/note-margin-engine-core-checks CoreChecks",
+    "swiftc -O -D SHAPE_RECOGNITION_STANDALONE -module-cache-path /private/tmp/note-margin-shape-module-cache NoteMargin/Canvas/ShapeRecognition.swift scripts/shape_recognition_checks.swift -o /private/tmp/note-margin-shape-checks",
+    "/private/tmp/note-margin-shape-checks",
+    "python3 scripts/check_pdf_import.py --drawing-engine --reuse-work /var/folders/wb/hzygp7510z38b4vblx_m9xh00000gn/T/NoteMarginPDFChecks-p8s5wabj",
+    "python3 scripts/check_pdf_import.py --drawing-performance after --reuse-work /var/folders/wb/hzygp7510z38b4vblx_m9xh00000gn/T/NoteMarginPDFChecks-p8s5wabj",
+    "python3 scripts/check_pdf_import.py --live-ui --only-testing CanvasLiveInkTests/CanvasLiveInkTests --only-testing CanvasLiveInkTests/StrokeEraserVisualTests --only-testing CanvasLiveInkTests/InkToolsVisualTests/testSingleEraserRetapSettingsAndRememberedMode --reuse-work /var/folders/wb/hzygp7510z38b4vblx_m9xh00000gn/T/NoteMarginPDFChecks-p8s5wabj",
+    "xcodebuild -quiet -project /Users/whans/Documents/IPAD/NoteMargin.xcodeproj -scheme NoteMargin -configuration Release -sdk iphoneos -destination generic/platform=iOS -derivedDataPath /private/tmp/NoteMargin-engine-device-build CODE_SIGNING_ALLOWED=NO build",
+    "python3 scripts/check_pdf_import.py --live-ui --only-testing CanvasLiveInkTests/CanvasLiveInkTests/testRapidShortStrokesAfterViewportMovement --reuse-work /var/folders/wb/hzygp7510z38b4vblx_m9xh00000gn/T/NoteMarginPDFChecks-p8s5wabj"
+  ],
+  "rapidTouchTest": "24 genuine short UIKit touch strokes at four viewport locations, checking retained stroke count, starting position, old bounds and viewport stability; not hardware Pencil latency."
+}

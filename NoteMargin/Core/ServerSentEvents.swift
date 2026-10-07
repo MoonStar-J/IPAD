@@ -45,6 +45,9 @@ struct PlanStreamAccumulator {
     private(set) var text = ""
     private(set) var status: AnswerStatus = .streaming
     private(set) var failure: PlanFailure?
+    private(set) var inputTokens: Int?
+    private(set) var outputTokens: Int?
+    private(set) var cachedTokens: Int?
     private var seenSequences = Set<Int>()
     mutating func consume(_ event: SSEDecoder.Event) throws {
         guard status == .streaming else { return }
@@ -61,6 +64,10 @@ struct PlanStreamAccumulator {
             if let response = object["response"] as? [String: Any], let output = response["output"] as? [[String: Any]] {
                 let final = output.flatMap { $0["content"] as? [[String: Any]] ?? [] }.compactMap { $0["type"] as? String == "output_text" ? $0["text"] as? String : nil }.joined(separator: "\n")
                 if !final.isEmpty { text = final }
+            }
+            if let response = object["response"] as? [String: Any], let usage = response["usage"] as? [String: Any] {
+                inputTokens = usage["input_tokens"] as? Int; outputTokens = usage["output_tokens"] as? Int
+                cachedTokens = (usage["input_tokens_details"] as? [String: Any])?["cached_tokens"] as? Int
             }
             status = .completed
         case "response.failed", "error":

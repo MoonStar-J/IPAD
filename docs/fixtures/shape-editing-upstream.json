@@ -1,0 +1,7642 @@
+{
+  "sha": "ed10ac7dca7e40f3f4a31269b4bfba980d0db41e",
+  "scope": "Extracted original functions with coordinate/scene adapters; not the full Excalidraw application",
+  "cases": [
+    {
+      "center": [
+        160,
+        130
+      ],
+      "width": 80,
+      "height": 80,
+      "angle": 0,
+      "corner": 0,
+      "grab": [
+        123,
+        85
+      ],
+      "pointer": [
+        123,
+        85
+      ],
+      "expectedCenter": [
+        160,
+        130
+      ],
+      "expectedWidth": 80,
+      "expectedHeight": 80,
+      "offset": [
+        3,
+        -5
+      ]
+    },
+    {
+      "center": [
+        160,
+        130
+      ],
+      "width": 80,
+      "height": 80,
+      "angle": 0,
+      "corner": 0,
+      "grab": [
+        123,
+        85
+      ],
+      "pointer": [
+        59,
+        69
+      ],
+      "expectedCenter": [
+        128,
+        98
+      ],
+      "expectedWidth": 144,
+      "expectedHeight": 144,
+      "offset": [
+        3,
+        -5
+      ]
+    },
+    {
+      "center": [
+        160,
+        130
+      ],
+      "width": 80,
+      "height": 80,
+      "angle": 0,
+      "corner": 0,
+      "grab": [
+        123,
+        85
+      ],
+      "pointer": [
+        179,
+        101
+      ],
+      "expectedCenter": [
+        168,
+        138
+      ],
+      "expectedWidth": 64,
+      "expectedHeight": 64,
+      "offset": [
+        3,
+        -5
+      ]
+    },
+    {
+      "center": [
+        160,
+        130
+      ],
+      "width": 80,
+      "height": 80,
+      "angle": 0,
+      "corner": 1,
+      "grab": [
+        203,
+        85
+      ],
+      "pointer": [
+        203,
+        85
+      ],
+      "expectedCenter": [
+        160,
+        130
+      ],
+      "expectedWidth": 80,
+      "expectedHeight": 80,
+      "offset": [
+        3,
+        -5
+      ]
+    },
+    {
+      "center": [
+        160,
+        130
+      ],
+      "width": 80,
+      "height": 80,
+      "angle": 0,
+      "corner": 1,
+      "grab": [
+        203,
+        85
+      ],
+      "pointer": [
+        267,
+        69
+      ],
+      "expectedCenter": [
+        192,
+        98
+      ],
+      "expectedWidth": 144,
+      "expectedHeight": 144,
+      "offset": [
+        3,
+        -5
+      ]
+    },
+    {
+      "center": [
+        160,
+        130
+      ],
+      "width": 80,
+      "height": 80,
+      "angle": 0,
+      "corner": 1,
+      "grab": [
+        203,
+        85
+      ],
+      "pointer": [
+        147,
+        101
+      ],
+      "expectedCenter": [
+        152,
+        138
+      ],
+      "expectedWidth": 64,
+      "expectedHeight": 64,
+      "offset": [
+        3,
+        -5
+      ]
+    },
+    {
+      "center": [
+        160,
+        130
+      ],
+      "width": 80,
+      "height": 80,
+      "angle": 0,
+      "corner": 2,
+      "grab": [
+        203,
+        165
+      ],
+      "pointer": [
+        203,
+        165
+      ],
+      "expectedCenter": [
+        160,
+        130
+      ],
+      "expectedWidth": 80,
+      "expectedHeight": 80,
+      "offset": [
+        3,
+        -5
+      ]
+    },
+    {
+      "center": [
+        160,
+        130
+      ],
+      "width": 80,
+      "height": 80,
+      "angle": 0,
+      "corner": 2,
+      "grab": [
+        203,
+        165
+      ],
+      "pointer": [
+        267,
+        181
+      ],
+      "expectedCenter": [
+        192,
+        162
+      ],
+      "expectedWidth": 144,
+      "expectedHeight": 144,
+      "offset": [
+        3,
+        -5
+      ]
+    },
+    {
+      "center": [
+        160,
+        130
+      ],
+      "width": 80,
+      "height": 80,
+      "angle": 0,
+      "corner": 2,
+      "grab": [
+        203,
+        165
+      ],
+      "pointer": [
+        147,
+        149
+      ],
+      "expectedCenter": [
+        152,
+        122
+      ],
+      "expectedWidth": 64,
+      "expectedHeight": 64,
+      "offset": [
+        3,
+        -5
+      ]
+    },
+    {
+      "center": [
+        160,
+        130
+      ],
+      "width": 80,
+      "height": 80,
+      "angle": 0,
+      "corner": 3,
+      "grab": [
+        123,
+        165
+      ],
+      "pointer": [
+        123,
+        165
+      ],
+      "expectedCenter": [
+        160,
+        130
+      ],
+      "expectedWidth": 80,
+      "expectedHeight": 80,
+      "offset": [
+        3,
+        -5
+      ]
+    },
+    {
+      "center": [
+        160,
+        130
+      ],
+      "width": 80,
+      "height": 80,
+      "angle": 0,
+      "corner": 3,
+      "grab": [
+        123,
+        165
+      ],
+      "pointer": [
+        59,
+        181
+      ],
+      "expectedCenter": [
+        128,
+        162
+      ],
+      "expectedWidth": 144,
+      "expectedHeight": 144,
+      "offset": [
+        3,
+        -5
+      ]
+    },
+    {
+      "center": [
+        160,
+        130
+      ],
+      "width": 80,
+      "height": 80,
+      "angle": 0,
+      "corner": 3,
+      "grab": [
+        123,
+        165
+      ],
+      "pointer": [
+        179,
+        149
+      ],
+      "expectedCenter": [
+        168,
+        122
+      ],
+      "expectedWidth": 64,
+      "expectedHeight": 64,
+      "offset": [
+        3,
+        -5
+      ]
+    },
+    {
+      "center": [
+        200,
+        122.5
+      ],
+      "width": 160,
+      "height": 65,
+      "angle": 0,
+      "corner": 0,
+      "grab": [
+        123,
+        85
+      ],
+      "pointer": [
+        123,
+        85
+      ],
+      "expectedCenter": [
+        200,
+        122.5
+      ],
+      "expectedWidth": 160,
+      "expectedHeight": 65,
+      "offset": [
+        3,
+        -5
+      ]
+    },
+    {
+      "center": [
+        200,
+        122.5
+      ],
+      "width": 160,
+      "height": 65,
+      "angle": 0,
+      "corner": 0,
+      "grab": [
+        123,
+        85
+      ],
+      "pointer": [
+        -5,
+        72
+      ],
+      "expectedCenter": [
+        136,
+        96.5
+      ],
+      "expectedWidth": 288,
+      "expectedHeight": 117,
+      "offset": [
+        3,
+        -5
+      ]
+    },
+    {
+      "center": [
+        200,
+        122.5
+      ],
+      "width": 160,
+      "height": 65,
+      "angle": 0,
+      "corner": 0,
+      "grab": [
+        123,
+        85
+      ],
+      "pointer": [
+        235,
+        98
+      ],
+      "expectedCenter": [
+        216,
+        129
+      ],
+      "expectedWidth": 128,
+      "expectedHeight": 52,
+      "offset": [
+        3,
+        -5
+      ]
+    },
+    {
+      "center": [
+        200,
+        122.5
+      ],
+      "width": 160,
+      "height": 65,
+      "angle": 0,
+      "corner": 1,
+      "grab": [
+        283,
+        85
+      ],
+      "pointer": [
+        283,
+        85
+      ],
+      "expectedCenter": [
+        200,
+        122.5
+      ],
+      "expectedWidth": 160,
+      "expectedHeight": 65,
+      "offset": [
+        3,
+        -5
+      ]
+    },
+    {
+      "center": [
+        200,
+        122.5
+      ],
+      "width": 160,
+      "height": 65,
+      "angle": 0,
+      "corner": 1,
+      "grab": [
+        283,
+        85
+      ],
+      "pointer": [
+        411,
+        72
+      ],
+      "expectedCenter": [
+        264,
+        96.5
+      ],
+      "expectedWidth": 288,
+      "expectedHeight": 117,
+      "offset": [
+        3,
+        -5
+      ]
+    },
+    {
+      "center": [
+        200,
+        122.5
+      ],
+      "width": 160,
+      "height": 65,
+      "angle": 0,
+      "corner": 1,
+      "grab": [
+        283,
+        85
+      ],
+      "pointer": [
+        171,
+        98
+      ],
+      "expectedCenter": [
+        184,
+        129
+      ],
+      "expectedWidth": 128,
+      "expectedHeight": 52,
+      "offset": [
+        3,
+        -5
+      ]
+    },
+    {
+      "center": [
+        200,
+        122.5
+      ],
+      "width": 160,
+      "height": 65,
+      "angle": 0,
+      "corner": 2,
+      "grab": [
+        283,
+        150
+      ],
+      "pointer": [
+        283,
+        150
+      ],
+      "expectedCenter": [
+        200,
+        122.5
+      ],
+      "expectedWidth": 160,
+      "expectedHeight": 65,
+      "offset": [
+        3,
+        -5
+      ]
+    },
+    {
+      "center": [
+        200,
+        122.5
+      ],
+      "width": 160,
+      "height": 65,
+      "angle": 0,
+      "corner": 2,
+      "grab": [
+        283,
+        150
+      ],
+      "pointer": [
+        411,
+        163
+      ],
+      "expectedCenter": [
+        264,
+        148.5
+      ],
+      "expectedWidth": 288,
+      "expectedHeight": 117,
+      "offset": [
+        3,
+        -5
+      ]
+    },
+    {
+      "center": [
+        200,
+        122.5
+      ],
+      "width": 160,
+      "height": 65,
+      "angle": 0,
+      "corner": 2,
+      "grab": [
+        283,
+        150
+      ],
+      "pointer": [
+        171,
+        137
+      ],
+      "expectedCenter": [
+        184,
+        116
+      ],
+      "expectedWidth": 128,
+      "expectedHeight": 52,
+      "offset": [
+        3,
+        -5
+      ]
+    },
+    {
+      "center": [
+        200,
+        122.5
+      ],
+      "width": 160,
+      "height": 65,
+      "angle": 0,
+      "corner": 3,
+      "grab": [
+        123,
+        150
+      ],
+      "pointer": [
+        123,
+        150
+      ],
+      "expectedCenter": [
+        200,
+        122.5
+      ],
+      "expectedWidth": 160,
+      "expectedHeight": 65,
+      "offset": [
+        3,
+        -5
+      ]
+    },
+    {
+      "center": [
+        200,
+        122.5
+      ],
+      "width": 160,
+      "height": 65,
+      "angle": 0,
+      "corner": 3,
+      "grab": [
+        123,
+        150
+      ],
+      "pointer": [
+        -5,
+        163
+      ],
+      "expectedCenter": [
+        136,
+        148.5
+      ],
+      "expectedWidth": 288,
+      "expectedHeight": 117,
+      "offset": [
+        3,
+        -5
+      ]
+    },
+    {
+      "center": [
+        200,
+        122.5
+      ],
+      "width": 160,
+      "height": 65,
+      "angle": 0,
+      "corner": 3,
+      "grab": [
+        123,
+        150
+      ],
+      "pointer": [
+        235,
+        137
+      ],
+      "expectedCenter": [
+        216,
+        116
+      ],
+      "expectedWidth": 128,
+      "expectedHeight": 52,
+      "offset": [
+        3,
+        -5
+      ]
+    },
+    {
+      "center": [
+        150.5,
+        156
+      ],
+      "width": 61,
+      "height": 132,
+      "angle": 0,
+      "corner": 0,
+      "grab": [
+        123,
+        85
+      ],
+      "pointer": [
+        123,
+        85
+      ],
+      "expectedCenter": [
+        150.5,
+        156
+      ],
+      "expectedWidth": 61,
+      "expectedHeight": 132,
+      "offset": [
+        3,
+        -5
+      ]
+    },
+    {
+      "center": [
+        150.5,
+        156
+      ],
+      "width": 61,
+      "height": 132,
+      "angle": 0,
+      "corner": 0,
+      "grab": [
+        123,
+        85
+      ],
+      "pointer": [
+        74.2,
+        58.599999999999994
+      ],
+      "expectedCenter": [
+        126.1,
+        103.2
+      ],
+      "expectedWidth": 109.8,
+      "expectedHeight": 237.6,
+      "offset": [
+        3,
+        -5
+      ]
+    },
+    {
+      "center": [
+        150.5,
+        156
+      ],
+      "width": 61,
+      "height": 132,
+      "angle": 0,
+      "corner": 0,
+      "grab": [
+        123,
+        85
+      ],
+      "pointer": [
+        165.7,
+        111.39999999999999
+      ],
+      "expectedCenter": [
+        156.6,
+        169.2
+      ],
+      "expectedWidth": 48.800000000000004,
+      "expectedHeight": 105.60000000000001,
+      "offset": [
+        3,
+        -5
+      ]
+    },
+    {
+      "center": [
+        150.5,
+        156
+      ],
+      "width": 61,
+      "height": 132,
+      "angle": 0,
+      "corner": 1,
+      "grab": [
+        184,
+        85
+      ],
+      "pointer": [
+        184,
+        85
+      ],
+      "expectedCenter": [
+        150.5,
+        156
+      ],
+      "expectedWidth": 61,
+      "expectedHeight": 132,
+      "offset": [
+        3,
+        -5
+      ]
+    },
+    {
+      "center": [
+        150.5,
+        156
+      ],
+      "width": 61,
+      "height": 132,
+      "angle": 0,
+      "corner": 1,
+      "grab": [
+        184,
+        85
+      ],
+      "pointer": [
+        232.8,
+        58.599999999999994
+      ],
+      "expectedCenter": [
+        174.9,
+        103.19999999999999
+      ],
+      "expectedWidth": 109.80000000000001,
+      "expectedHeight": 237.60000000000002,
+      "offset": [
+        3,
+        -5
+      ]
+    },
+    {
+      "center": [
+        150.5,
+        156
+      ],
+      "width": 61,
+      "height": 132,
+      "angle": 0,
+      "corner": 1,
+      "grab": [
+        184,
+        85
+      ],
+      "pointer": [
+        141.3,
+        111.39999999999999
+      ],
+      "expectedCenter": [
+        144.4,
+        169.2
+      ],
+      "expectedWidth": 48.800000000000004,
+      "expectedHeight": 105.60000000000001,
+      "offset": [
+        3,
+        -5
+      ]
+    },
+    {
+      "center": [
+        150.5,
+        156
+      ],
+      "width": 61,
+      "height": 132,
+      "angle": 0,
+      "corner": 2,
+      "grab": [
+        184,
+        217
+      ],
+      "pointer": [
+        184,
+        217
+      ],
+      "expectedCenter": [
+        150.5,
+        156
+      ],
+      "expectedWidth": 61,
+      "expectedHeight": 132,
+      "offset": [
+        3,
+        -5
+      ]
+    },
+    {
+      "center": [
+        150.5,
+        156
+      ],
+      "width": 61,
+      "height": 132,
+      "angle": 0,
+      "corner": 2,
+      "grab": [
+        184,
+        217
+      ],
+      "pointer": [
+        232.8,
+        243.4
+      ],
+      "expectedCenter": [
+        174.9,
+        208.8
+      ],
+      "expectedWidth": 109.80000000000001,
+      "expectedHeight": 237.60000000000002,
+      "offset": [
+        3,
+        -5
+      ]
+    },
+    {
+      "center": [
+        150.5,
+        156
+      ],
+      "width": 61,
+      "height": 132,
+      "angle": 0,
+      "corner": 2,
+      "grab": [
+        184,
+        217
+      ],
+      "pointer": [
+        141.3,
+        190.60000000000002
+      ],
+      "expectedCenter": [
+        144.4,
+        142.8
+      ],
+      "expectedWidth": 48.80000000000001,
+      "expectedHeight": 105.60000000000002,
+      "offset": [
+        3,
+        -5
+      ]
+    },
+    {
+      "center": [
+        150.5,
+        156
+      ],
+      "width": 61,
+      "height": 132,
+      "angle": 0,
+      "corner": 3,
+      "grab": [
+        123,
+        217
+      ],
+      "pointer": [
+        123,
+        217
+      ],
+      "expectedCenter": [
+        150.5,
+        156
+      ],
+      "expectedWidth": 61,
+      "expectedHeight": 132,
+      "offset": [
+        3,
+        -5
+      ]
+    },
+    {
+      "center": [
+        150.5,
+        156
+      ],
+      "width": 61,
+      "height": 132,
+      "angle": 0,
+      "corner": 3,
+      "grab": [
+        123,
+        217
+      ],
+      "pointer": [
+        74.2,
+        243.4
+      ],
+      "expectedCenter": [
+        126.1,
+        208.8
+      ],
+      "expectedWidth": 109.8,
+      "expectedHeight": 237.6,
+      "offset": [
+        3,
+        -5
+      ]
+    },
+    {
+      "center": [
+        150.5,
+        156
+      ],
+      "width": 61,
+      "height": 132,
+      "angle": 0,
+      "corner": 3,
+      "grab": [
+        123,
+        217
+      ],
+      "pointer": [
+        165.7,
+        190.60000000000002
+      ],
+      "expectedCenter": [
+        156.6,
+        142.8
+      ],
+      "expectedWidth": 48.80000000000001,
+      "expectedHeight": 105.60000000000002,
+      "offset": [
+        3,
+        -5
+      ]
+    },
+    {
+      "center": [
+        160,
+        130
+      ],
+      "width": 80,
+      "height": 80,
+      "angle": 0.31,
+      "corner": 0,
+      "grab": [
+        137.1090026623092,
+        74.70431174683372
+      ],
+      "pointer": [
+        137.10900266230922,
+        74.70431174683371
+      ],
+      "expectedCenter": [
+        160,
+        130
+      ],
+      "expectedWidth": 80,
+      "expectedHeight": 80,
+      "offset": [
+        2.9999999999999973,
+        -5.00000000000001
+      ]
+    },
+    {
+      "center": [
+        160,
+        130
+      ],
+      "width": 80,
+      "height": 80,
+      "angle": 0.31,
+      "corner": 0,
+      "grab": [
+        137.1090026623092,
+        74.70431174683372
+      ],
+      "pointer": [
+        81.04059237271866,
+        39.94322189628192
+      ],
+      "expectedCenter": [
+        139.28720212984737,
+        89.763449397467
+      ],
+      "expectedWidth": 143.99999999999997,
+      "expectedHeight": 143.99999999999997,
+      "offset": [
+        2.9999999999999973,
+        -5.00000000000001
+      ]
+    },
+    {
+      "center": [
+        160,
+        130
+      ],
+      "width": 80,
+      "height": 80,
+      "angle": 0.31,
+      "corner": 0,
+      "grab": [
+        137.1090026623092,
+        74.70431174683372
+      ],
+      "pointer": [
+        185.55874439281408,
+        107.02493250583797
+      ],
+      "expectedCenter": [
+        165.17819946753815,
+        140.05913765063326
+      ],
+      "expectedWidth": 64,
+      "expectedHeight": 64,
+      "offset": [
+        2.9999999999999973,
+        -5.00000000000001
+      ]
+    },
+    {
+      "center": [
+        160,
+        130
+      ],
+      "width": 80,
+      "height": 80,
+      "angle": 0.31,
+      "corner": 1,
+      "grab": [
+        213.29568825316628,
+        99.10900266230921
+      ],
+      "pointer": [
+        213.29568825316625,
+        99.10900266230922
+      ],
+      "expectedCenter": [
+        160,
+        130
+      ],
+      "expectedWidth": 80,
+      "expectedHeight": 80,
+      "offset": [
+        2.9999999999999796,
+        -5.000000000000001
+      ]
+    },
+    {
+      "center": [
+        160,
+        130
+      ],
+      "width": 80,
+      "height": 80,
+      "angle": 0.31,
+      "corner": 1,
+      "grab": [
+        213.29568825316628,
+        99.10900266230921
+      ],
+      "pointer": [
+        279.125974908947,
+        103.39541827651817
+      ],
+      "expectedCenter": [
+        200.236550602533,
+        109.28720212984739
+      ],
+      "expectedWidth": 143.99999999999994,
+      "expectedHeight": 143.99999999999994,
+      "offset": [
+        2.9999999999999796,
+        -5.000000000000001
+      ]
+    },
+    {
+      "center": [
+        160,
+        130
+      ],
+      "width": 80,
+      "height": 80,
+      "angle": 0.31,
+      "corner": 1,
+      "grab": [
+        213.29568825316628,
+        99.10900266230921
+      ],
+      "pointer": [
+        155.0840701564712,
+        97.2630561396478
+      ],
+      "expectedCenter": [
+        149.94086234936674,
+        135.17819946753815
+      ],
+      "expectedWidth": 63.99999999999997,
+      "expectedHeight": 63.99999999999997,
+      "offset": [
+        2.9999999999999796,
+        -5.000000000000001
+      ]
+    },
+    {
+      "center": [
+        160,
+        130
+      ],
+      "width": 80,
+      "height": 80,
+      "angle": 0.31,
+      "corner": 2,
+      "grab": [
+        188.8909973376908,
+        175.29568825316628
+      ],
+      "pointer": [
+        188.89099733769078,
+        175.29568825316628
+      ],
+      "expectedCenter": [
+        160,
+        130
+      ],
+      "expectedWidth": 80,
+      "expectedHeight": 80,
+      "offset": [
+        3.0000000000000107,
+        -5.000000000000005
+      ]
+    },
+    {
+      "center": [
+        160,
+        130
+      ],
+      "width": 80,
+      "height": 80,
+      "angle": 0.31,
+      "corner": 2,
+      "grab": [
+        188.8909973376908,
+        175.29568825316628
+      ],
+      "pointer": [
+        244.95940762728134,
+        210.05677810371807
+      ],
+      "expectedCenter": [
+        180.71279787015263,
+        170.23655060253301
+      ],
+      "expectedWidth": 144,
+      "expectedHeight": 144,
+      "offset": [
+        3.0000000000000107,
+        -5.000000000000005
+      ]
+    },
+    {
+      "center": [
+        160,
+        130
+      ],
+      "width": 80,
+      "height": 80,
+      "angle": 0.31,
+      "corner": 2,
+      "grab": [
+        188.8909973376908,
+        175.29568825316628
+      ],
+      "pointer": [
+        140.44125560718592,
+        142.97506749416203
+      ],
+      "expectedCenter": [
+        154.82180053246185,
+        119.94086234936675
+      ],
+      "expectedWidth": 64,
+      "expectedHeight": 64,
+      "offset": [
+        3.0000000000000107,
+        -5.000000000000005
+      ]
+    },
+    {
+      "center": [
+        160,
+        130
+      ],
+      "width": 80,
+      "height": 80,
+      "angle": 0.31,
+      "corner": 3,
+      "grab": [
+        112.70431174683372,
+        150.8909973376908
+      ],
+      "pointer": [
+        112.70431174683372,
+        150.89099733769083
+      ],
+      "expectedCenter": [
+        160,
+        130
+      ],
+      "expectedWidth": 80,
+      "expectedHeight": 80,
+      "offset": [
+        3.000000000000002,
+        -4.999999999999979
+      ]
+    },
+    {
+      "center": [
+        160,
+        130
+      ],
+      "width": 80,
+      "height": 80,
+      "angle": 0.31,
+      "corner": 3,
+      "grab": [
+        112.70431174683372,
+        150.8909973376908
+      ],
+      "pointer": [
+        46.87402509105297,
+        146.60458172348186
+      ],
+      "expectedCenter": [
+        119.76344939746699,
+        150.71279787015263
+      ],
+      "expectedWidth": 144,
+      "expectedHeight": 144,
+      "offset": [
+        3.000000000000002,
+        -4.999999999999979
+      ]
+    },
+    {
+      "center": [
+        160,
+        130
+      ],
+      "width": 80,
+      "height": 80,
+      "angle": 0.31,
+      "corner": 3,
+      "grab": [
+        112.70431174683372,
+        150.8909973376908
+      ],
+      "pointer": [
+        170.91592984352877,
+        152.73694386035226
+      ],
+      "expectedCenter": [
+        170.05913765063326,
+        124.82180053246184
+      ],
+      "expectedWidth": 64,
+      "expectedHeight": 64,
+      "offset": [
+        3.000000000000002,
+        -4.999999999999979
+      ]
+    },
+    {
+      "center": [
+        200,
+        122.5
+      ],
+      "width": 160,
+      "height": 65,
+      "angle": 0.31,
+      "corner": 0,
+      "grab": [
+        136.72772009355486,
+        62.14446806323883
+      ],
+      "pointer": [
+        136.72772009355486,
+        62.14446806323883
+      ],
+      "expectedCenter": [
+        200,
+        122.5
+      ],
+      "expectedWidth": 160,
+      "expectedHeight": 65,
+      "offset": [
+        3.0000000000000244,
+        -5.000000000000001
+      ]
+    },
+    {
+      "center": [
+        200,
+        122.5
+      ],
+      "width": 160,
+      "height": 65,
+      "angle": 0.31,
+      "corner": 0,
+      "grab": [
+        136.72772009355486,
+        62.14446806323883
+      ],
+      "pointer": [
+        18.794785421948315,
+        10.71662618996379
+      ],
+      "expectedCenter": [
+        146.98217607484386,
+        78.21557445059106
+      ],
+      "expectedWidth": 288,
+      "expectedHeight": 117,
+      "offset": [
+        3.0000000000000244,
+        -5.000000000000001
+      ]
+    },
+    {
+      "center": [
+        200,
+        122.5
+      ],
+      "width": 160,
+      "height": 65,
+      "angle": 0.31,
+      "corner": 0,
+      "grab": [
+        136.72772009355486,
+        62.14446806323883
+      ],
+      "pointer": [
+        239.42331764698997,
+        108.69137175341878
+      ],
+      "expectedCenter": [
+        213.25445598128903,
+        133.57110638735224
+      ],
+      "expectedWidth": 128,
+      "expectedHeight": 52,
+      "offset": [
+        3.0000000000000244,
+        -5.000000000000001
+      ]
+    },
+    {
+      "center": [
+        200,
+        122.5
+      ],
+      "width": 160,
+      "height": 65,
+      "angle": 0.31,
+      "corner": 1,
+      "grab": [
+        289.10109127526897,
+        110.9538498941898
+      ],
+      "pointer": [
+        289.10109127526897,
+        110.9538498941898
+      ],
+      "expectedCenter": [
+        200,
+        122.5
+      ],
+      "expectedWidth": 160,
+      "expectedHeight": 65,
+      "offset": [
+        2.999999999999975,
+        -4.999999999999988
+      ]
+    },
+    {
+      "center": [
+        200,
+        122.5
+      ],
+      "width": 160,
+      "height": 65,
+      "angle": 0.31,
+      "corner": 1,
+      "grab": [
+        289.10109127526897,
+        110.9538498941898
+      ],
+      "pointer": [
+        414.9655504944051,
+        137.62101895043628
+      ],
+      "expectedCenter": [
+        268.8808730202152,
+        117.26307991535184
+      ],
+      "expectedWidth": 288,
+      "expectedHeight": 117,
+      "offset": [
+        2.999999999999975,
+        -4.999999999999988
+      ]
+    },
+    {
+      "center": [
+        200,
+        122.5
+      ],
+      "width": 160,
+      "height": 65,
+      "angle": 0.31,
+      "corner": 1,
+      "grab": [
+        289.10109127526897,
+        110.9538498941898
+      ],
+      "pointer": [
+        178.4739691743043,
+        89.1676190210384
+      ],
+      "expectedCenter": [
+        182.7797817449462,
+        123.80923002116204
+      ],
+      "expectedWidth": 128,
+      "expectedHeight": 52,
+      "offset": [
+        2.999999999999975,
+        -4.999999999999988
+      ]
+    },
+    {
+      "center": [
+        200,
+        122.5
+      ],
+      "width": 160,
+      "height": 65,
+      "angle": 0.31,
+      "corner": 2,
+      "grab": [
+        269.27227990644514,
+        172.85553193676117
+      ],
+      "pointer": [
+        269.2722799064452,
+        172.85553193676117
+      ],
+      "expectedCenter": [
+        200,
+        122.5
+      ],
+      "expectedWidth": 160,
+      "expectedHeight": 65,
+      "offset": [
+        2.999999999999975,
+        -4.999999999999988
+      ]
+    },
+    {
+      "center": [
+        200,
+        122.5
+      ],
+      "width": 160,
+      "height": 65,
+      "angle": 0.31,
+      "corner": 2,
+      "grab": [
+        269.27227990644514,
+        172.85553193676117
+      ],
+      "pointer": [
+        387.2052145780517,
+        224.2833738100362
+      ],
+      "expectedCenter": [
+        253.0178239251561,
+        166.78442554940892
+      ],
+      "expectedWidth": 288,
+      "expectedHeight": 117,
+      "offset": [
+        2.999999999999975,
+        -4.999999999999988
+      ]
+    },
+    {
+      "center": [
+        200,
+        122.5
+      ],
+      "width": 160,
+      "height": 65,
+      "angle": 0.31,
+      "corner": 2,
+      "grab": [
+        269.27227990644514,
+        172.85553193676117
+      ],
+      "pointer": [
+        166.57668235301003,
+        126.30862824658125
+      ],
+      "expectedCenter": [
+        186.74554401871097,
+        111.42889361264777
+      ],
+      "expectedWidth": 128,
+      "expectedHeight": 52,
+      "offset": [
+        2.999999999999975,
+        -4.999999999999988
+      ]
+    },
+    {
+      "center": [
+        200,
+        122.5
+      ],
+      "width": 160,
+      "height": 65,
+      "angle": 0.31,
+      "corner": 3,
+      "grab": [
+        116.89890872473102,
+        124.0461501058102
+      ],
+      "pointer": [
+        116.89890872473102,
+        124.04615010581023
+      ],
+      "expectedCenter": [
+        199.99999999999997,
+        122.5
+      ],
+      "expectedWidth": 160.00000000000006,
+      "expectedHeight": 65.00000000000003,
+      "offset": [
+        3.0000000000000107,
+        -5.000000000000005
+      ]
+    },
+    {
+      "center": [
+        200,
+        122.5
+      ],
+      "width": 160,
+      "height": 65,
+      "angle": 0.31,
+      "corner": 3,
+      "grab": [
+        116.89890872473102,
+        124.0461501058102
+      ],
+      "pointer": [
+        -8.965550494405068,
+        97.37898104956372
+      ],
+      "expectedCenter": [
+        131.11912697978482,
+        127.73692008464816
+      ],
+      "expectedWidth": 288,
+      "expectedHeight": 117,
+      "offset": [
+        3.0000000000000107,
+        -5.000000000000005
+      ]
+    },
+    {
+      "center": [
+        200,
+        122.5
+      ],
+      "width": 160,
+      "height": 65,
+      "angle": 0.31,
+      "corner": 3,
+      "grab": [
+        116.89890872473102,
+        124.0461501058102
+      ],
+      "pointer": [
+        227.52603082569567,
+        145.83238097896162
+      ],
+      "expectedCenter": [
+        217.22021825505374,
+        121.19076997883796
+      ],
+      "expectedWidth": 128.00000000000009,
+      "expectedHeight": 52.00000000000003,
+      "offset": [
+        3.0000000000000107,
+        -5.000000000000005
+      ]
+    },
+    {
+      "center": [
+        150.5,
+        156
+      ],
+      "width": 61,
+      "height": 132,
+      "angle": 0.31,
+      "corner": 0,
+      "grab": [
+        144.587696123753,
+        78.84169597601789
+      ],
+      "pointer": [
+        144.587696123753,
+        78.84169597601789
+      ],
+      "expectedCenter": [
+        150.5,
+        156
+      ],
+      "expectedWidth": 61,
+      "expectedHeight": 132,
+      "offset": [
+        2.999999999999993,
+        -4.9999999999999964
+      ]
+    },
+    {
+      "center": [
+        150.5,
+        156
+      ],
+      "width": 61,
+      "height": 132,
+      "angle": 0.31,
+      "corner": 0,
+      "grab": [
+        144.587696123753,
+        78.84169597601789
+      ],
+      "pointer": [
+        106.16736591543713,
+        38.81322827259501
+      ],
+      "expectedCenter": [
+        143.37015689900244,
+        98.27335678081434
+      ],
+      "expectedWidth": 109.79999999999998,
+      "expectedHeight": 237.59999999999997,
+      "offset": [
+        2.999999999999993,
+        -4.9999999999999964
+      ]
+    },
+    {
+      "center": [
+        150.5,
+        156
+      ],
+      "width": 61,
+      "height": 132,
+      "angle": 0.31,
+      "corner": 0,
+      "grab": [
+        144.587696123753,
+        78.84169597601789
+      ],
+      "pointer": [
+        177.1987915557661,
+        117.00930599713575
+      ],
+      "expectedCenter": [
+        152.28246077524938,
+        170.43166080479642
+      ],
+      "expectedWidth": 48.80000000000001,
+      "expectedHeight": 105.60000000000002,
+      "offset": [
+        2.999999999999993,
+        -4.9999999999999964
+      ]
+    },
+    {
+      "center": [
+        150.5,
+        156
+      ],
+      "width": 61,
+      "height": 132,
+      "angle": 0.31,
+      "corner": 1,
+      "grab": [
+        202.68004388678153,
+        97.45027279906795
+      ],
+      "pointer": [
+        202.6800438867815,
+        97.45027279906797
+      ],
+      "expectedCenter": [
+        150.5,
+        156
+      ],
+      "expectedWidth": 60.999999999999986,
+      "expectedHeight": 131.99999999999997,
+      "offset": [
+        3.0000000000000067,
+        -4.999999999999992
+      ]
+    },
+    {
+      "center": [
+        150.5,
+        156
+      ],
+      "width": 61,
+      "height": 132,
+      "angle": 0.31,
+      "corner": 1,
+      "grab": [
+        202.68004388678153,
+        97.45027279906795
+      ],
+      "pointer": [
+        257.20747009931125,
+        87.19552801252517
+      ],
+      "expectedCenter": [
+        189.84403510942522,
+        113.16021823925435
+      ],
+      "expectedWidth": 109.80000000000001,
+      "expectedHeight": 237.60000000000002,
+      "offset": [
+        3.0000000000000067,
+        -4.999999999999992
+      ]
+    },
+    {
+      "center": [
+        150.5,
+        156
+      ],
+      "width": 61,
+      "height": 132,
+      "angle": 0.31,
+      "corner": 1,
+      "grab": [
+        202.68004388678153,
+        97.45027279906795
+      ],
+      "pointer": [
+        153.96185245055466,
+        109.56587526791576
+      ],
+      "expectedCenter": [
+        140.6639912226437,
+        166.7099454401864
+      ],
+      "expectedWidth": 48.8,
+      "expectedHeight": 105.6,
+      "offset": [
+        3.0000000000000067,
+        -4.999999999999992
+      ]
+    },
+    {
+      "center": [
+        150.5,
+        156
+      ],
+      "width": 61,
+      "height": 132,
+      "angle": 0.31,
+      "corner": 2,
+      "grab": [
+        162.412303876247,
+        223.1583040239821
+      ],
+      "pointer": [
+        162.412303876247,
+        223.1583040239821
+      ],
+      "expectedCenter": [
+        150.5,
+        156
+      ],
+      "expectedWidth": 61,
+      "expectedHeight": 132,
+      "offset": [
+        3.0000000000000107,
+        -5.000000000000005
+      ]
+    },
+    {
+      "center": [
+        150.5,
+        156
+      ],
+      "width": 61,
+      "height": 132,
+      "angle": 0.31,
+      "corner": 2,
+      "grab": [
+        162.412303876247,
+        223.1583040239821
+      ],
+      "pointer": [
+        200.83263408456287,
+        263.186771727405
+      ],
+      "expectedCenter": [
+        157.62984310099756,
+        213.72664321918566
+      ],
+      "expectedWidth": 109.79999999999998,
+      "expectedHeight": 237.59999999999997,
+      "offset": [
+        3.0000000000000107,
+        -5.000000000000005
+      ]
+    },
+    {
+      "center": [
+        150.5,
+        156
+      ],
+      "width": 61,
+      "height": 132,
+      "angle": 0.31,
+      "corner": 2,
+      "grab": [
+        162.412303876247,
+        223.1583040239821
+      ],
+      "pointer": [
+        129.80120844423394,
+        184.99069400286425
+      ],
+      "expectedCenter": [
+        148.71753922475062,
+        141.56833919520358
+      ],
+      "expectedWidth": 48.80000000000001,
+      "expectedHeight": 105.60000000000002,
+      "offset": [
+        3.0000000000000107,
+        -5.000000000000005
+      ]
+    },
+    {
+      "center": [
+        150.5,
+        156
+      ],
+      "width": 61,
+      "height": 132,
+      "angle": 0.31,
+      "corner": 3,
+      "grab": [
+        104.31995611321847,
+        204.54972720093207
+      ],
+      "pointer": [
+        104.31995611321847,
+        204.5497272009321
+      ],
+      "expectedCenter": [
+        150.5,
+        156
+      ],
+      "expectedWidth": 61,
+      "expectedHeight": 132,
+      "offset": [
+        2.9999999999999885,
+        -4.999999999999983
+      ]
+    },
+    {
+      "center": [
+        150.5,
+        156
+      ],
+      "width": 61,
+      "height": 132,
+      "angle": 0.31,
+      "corner": 3,
+      "grab": [
+        104.31995611321847,
+        204.54972720093207
+      ],
+      "pointer": [
+        49.792529900688734,
+        214.8044719874749
+      ],
+      "expectedCenter": [
+        111.1559648905748,
+        198.83978176074564
+      ],
+      "expectedWidth": 109.79999999999998,
+      "expectedHeight": 237.59999999999997,
+      "offset": [
+        2.9999999999999885,
+        -4.999999999999983
+      ]
+    },
+    {
+      "center": [
+        150.5,
+        156
+      ],
+      "width": 61,
+      "height": 132,
+      "angle": 0.31,
+      "corner": 3,
+      "grab": [
+        104.31995611321847,
+        204.54972720093207
+      ],
+      "pointer": [
+        153.03814754944534,
+        192.4341247320843
+      ],
+      "expectedCenter": [
+        160.33600877735628,
+        145.2900545598136
+      ],
+      "expectedWidth": 48.80000000000001,
+      "expectedHeight": 105.60000000000002,
+      "offset": [
+        2.9999999999999885,
+        -4.999999999999983
+      ]
+    },
+    {
+      "center": [
+        160,
+        130
+      ],
+      "width": 80,
+      "height": 80,
+      "angle": 1.1,
+      "corner": 0,
+      "grab": [
+        180.5044495454343,
+        71.2078607405195
+      ],
+      "pointer": [
+        180.50444954543434,
+        71.20786074051948
+      ],
+      "expectedCenter": [
+        160,
+        130
+      ],
+      "expectedWidth": 80.00000000000001,
+      "expectedHeight": 80.00000000000001,
+      "offset": [
+        2.999999999999986,
+        -5.000000000000009
+      ]
+    },
+    {
+      "center": [
+        160,
+        130
+      ],
+      "width": 80,
+      "height": 80,
+      "angle": 1.1,
+      "corner": 0,
+      "grab": [
+        180.5044495454343,
+        71.2078607405195
+      ],
+      "pointer": [
+        165.73361553518032,
+        6.913051753778367
+      ],
+      "expectedCenter": [
+        174.00355963634746,
+        86.96628859241557
+      ],
+      "expectedWidth": 144.00000000000003,
+      "expectedHeight": 144.00000000000003,
+      "offset": [
+        2.999999999999986,
+        -5.000000000000009
+      ]
+    },
+    {
+      "center": [
+        160,
+        130
+      ],
+      "width": 80,
+      "height": 80,
+      "angle": 1.1,
+      "corner": 0,
+      "grab": [
+        180.5044495454343,
+        71.2078607405195
+      ],
+      "pointer": [
+        191.6465145842837,
+        128.3730108467691
+      ],
+      "expectedCenter": [
+        156.49911009091315,
+        140.7584278518961
+      ],
+      "expectedWidth": 64.00000000000001,
+      "expectedHeight": 64.00000000000001,
+      "offset": [
+        2.999999999999986,
+        -5.000000000000009
+      ]
+    },
+    {
+      "center": [
+        160,
+        130
+      ],
+      "width": 80,
+      "height": 80,
+      "angle": 1.1,
+      "corner": 1,
+      "grab": [
+        216.7921392594805,
+        142.5044495454343
+      ],
+      "pointer": [
+        216.7921392594805,
+        142.50444954543428
+      ],
+      "expectedCenter": [
+        160,
+        130
+      ],
+      "expectedWidth": 80,
+      "expectedHeight": 80,
+      "offset": [
+        2.9999999999999982,
+        -5.000000000000016
+      ]
+    },
+    {
+      "center": [
+        160,
+        130
+      ],
+      "width": 80,
+      "height": 80,
+      "angle": 1.1,
+      "corner": 1,
+      "grab": [
+        216.7921392594805,
+        142.5044495454343
+      ],
+      "pointer": [
+        260.08160879170043,
+        192.28418264655696
+      ],
+      "expectedCenter": [
+        203.03371140758443,
+        144.00355963634746
+      ],
+      "expectedWidth": 144.00000000000006,
+      "expectedHeight": 144.00000000000006,
+      "offset": [
+        2.9999999999999982,
+        -5.000000000000016
+      ]
+    },
+    {
+      "center": [
+        160,
+        130
+      ],
+      "width": 80,
+      "height": 80,
+      "angle": 1.1,
+      "corner": 1,
+      "grab": [
+        216.7921392594805,
+        142.5044495454343
+      ],
+      "pointer": [
+        177.13143869866522,
+        99.85437532480316
+      ],
+      "expectedCenter": [
+        149.2415721481039,
+        126.49911009091315
+      ],
+      "expectedWidth": 64.00000000000001,
+      "expectedHeight": 64.00000000000001,
+      "offset": [
+        2.9999999999999982,
+        -5.000000000000016
+      ]
+    },
+    {
+      "center": [
+        160,
+        130
+      ],
+      "width": 80,
+      "height": 80,
+      "angle": 1.1,
+      "corner": 2,
+      "grab": [
+        145.4955504545657,
+        178.7921392594805
+      ],
+      "pointer": [
+        145.4955504545657,
+        178.7921392594805
+      ],
+      "expectedCenter": [
+        160,
+        130
+      ],
+      "expectedWidth": 80,
+      "expectedHeight": 80,
+      "offset": [
+        3.0000000000000235,
+        -4.9999999999999964
+      ]
+    },
+    {
+      "center": [
+        160,
+        130
+      ],
+      "width": 80,
+      "height": 80,
+      "angle": 1.1,
+      "corner": 2,
+      "grab": [
+        145.4955504545657,
+        178.7921392594805
+      ],
+      "pointer": [
+        160.26638446481968,
+        243.08694824622162
+      ],
+      "expectedCenter": [
+        145.99644036365254,
+        173.0337114075844
+      ],
+      "expectedWidth": 144,
+      "expectedHeight": 144,
+      "offset": [
+        3.0000000000000235,
+        -4.9999999999999964
+      ]
+    },
+    {
+      "center": [
+        160,
+        130
+      ],
+      "width": 80,
+      "height": 80,
+      "angle": 1.1,
+      "corner": 2,
+      "grab": [
+        145.4955504545657,
+        178.7921392594805
+      ],
+      "pointer": [
+        134.35348541571634,
+        121.6269891532309
+      ],
+      "expectedCenter": [
+        163.50088990908685,
+        119.24157214810388
+      ],
+      "expectedWidth": 64,
+      "expectedHeight": 64,
+      "offset": [
+        3.0000000000000235,
+        -4.9999999999999964
+      ]
+    },
+    {
+      "center": [
+        160,
+        130
+      ],
+      "width": 80,
+      "height": 80,
+      "angle": 1.1,
+      "corner": 3,
+      "grab": [
+        109.2078607405195,
+        107.49555045456567
+      ],
+      "pointer": [
+        109.20786074051948,
+        107.49555045456566
+      ],
+      "expectedCenter": [
+        160,
+        130
+      ],
+      "expectedWidth": 80.00000000000001,
+      "expectedHeight": 80.00000000000001,
+      "offset": [
+        2.999999999999992,
+        -4.9999999999999964
+      ]
+    },
+    {
+      "center": [
+        160,
+        130
+      ],
+      "width": 80,
+      "height": 80,
+      "angle": 1.1,
+      "corner": 3,
+      "grab": [
+        109.2078607405195,
+        107.49555045456567
+      ],
+      "pointer": [
+        65.91839120829955,
+        57.715817353443015
+      ],
+      "expectedCenter": [
+        116.96628859241555,
+        115.99644036365252
+      ],
+      "expectedWidth": 144.00000000000006,
+      "expectedHeight": 144.00000000000006,
+      "offset": [
+        2.999999999999992,
+        -4.9999999999999964
+      ]
+    },
+    {
+      "center": [
+        160,
+        130
+      ],
+      "width": 80,
+      "height": 80,
+      "angle": 1.1,
+      "corner": 3,
+      "grab": [
+        109.2078607405195,
+        107.49555045456567
+      ],
+      "pointer": [
+        148.86856130133478,
+        150.1456246751968
+      ],
+      "expectedCenter": [
+        170.7584278518961,
+        133.50088990908688
+      ],
+      "expectedWidth": 64,
+      "expectedHeight": 64,
+      "offset": [
+        2.999999999999992,
+        -4.9999999999999964
+      ]
+    },
+    {
+      "center": [
+        200,
+        122.5
+      ],
+      "width": 160,
+      "height": 65,
+      "angle": 1.1,
+      "corner": 0,
+      "grab": [
+        195.67654948795047,
+        31.4615372487539
+      ],
+      "pointer": [
+        195.67654948795047,
+        31.461537248753896
+      ],
+      "expectedCenter": [
+        200,
+        122.5
+      ],
+      "expectedWidth": 160,
+      "expectedHeight": 65,
+      "offset": [
+        3.0000000000000044,
+        -5.000000000000003
+      ]
+    },
+    {
+      "center": [
+        200,
+        122.5
+      ],
+      "width": 160,
+      "height": 65,
+      "angle": 1.1,
+      "corner": 0,
+      "grab": [
+        195.67654948795047,
+        31.4615372487539
+      ],
+      "pointer": [
+        149.20194162627521,
+        -88.50975441764237
+      ],
+      "expectedCenter": [
+        194.14123959036039,
+        53.66922979900309
+      ],
+      "expectedWidth": 288.00000000000006,
+      "expectedHeight": 117.00000000000001,
+      "offset": [
+        3.0000000000000044,
+        -5.000000000000003
+      ]
+    },
+    {
+      "center": [
+        200,
+        122.5
+      ],
+      "width": 160,
+      "height": 65,
+      "angle": 1.1,
+      "corner": 0,
+      "grab": [
+        195.67654948795047,
+        31.4615372487539
+      ],
+      "pointer": [
+        234.89361940681647,
+        137.1735111541672
+      ],
+      "expectedCenter": [
+        201.4646901024099,
+        139.70769255024922
+      ],
+      "expectedWidth": 128,
+      "expectedHeight": 52,
+      "offset": [
+        3.0000000000000044,
+        -5.000000000000003
+      ]
+    },
+    {
+      "center": [
+        200,
+        122.5
+      ],
+      "width": 160,
+      "height": 65,
+      "angle": 1.1,
+      "corner": 1,
+      "grab": [
+        268.25192891604286,
+        174.05471485858357
+      ],
+      "pointer": [
+        268.25192891604286,
+        174.05471485858357
+      ],
+      "expectedCenter": [
+        200.00000000000003,
+        122.50000000000003
+      ],
+      "expectedWidth": 160.00000000000006,
+      "expectedHeight": 65.00000000000003,
+      "offset": [
+        3.0000000000000235,
+        -4.9999999999999964
+      ]
+    },
+    {
+      "center": [
+        200,
+        122.5
+      ],
+      "width": 160,
+      "height": 65,
+      "angle": 1.1,
+      "corner": 1,
+      "grab": [
+        268.25192891604286,
+        174.05471485858357
+      ],
+      "pointer": [
+        337.89792813931535,
+        282.2325073679148
+      ],
+      "expectedCenter": [
+        252.20154313283427,
+        167.74377188686685
+      ],
+      "expectedWidth": 288,
+      "expectedHeight": 117,
+      "offset": [
+        3.0000000000000235,
+        -4.9999999999999964
+      ]
+    },
+    {
+      "center": [
+        200,
+        122.5
+      ],
+      "width": 160,
+      "height": 65,
+      "angle": 1.1,
+      "corner": 1,
+      "grab": [
+        268.25192891604286,
+        174.05471485858357
+      ],
+      "pointer": [
+        205.86346763557952,
+        80.13624011023532
+      ],
+      "expectedCenter": [
+        186.94961421679142,
+        111.18905702828326
+      ],
+      "expectedWidth": 127.99999999999994,
+      "expectedHeight": 51.99999999999997,
+      "offset": [
+        3.0000000000000235,
+        -4.9999999999999964
+      ]
+    },
+    {
+      "center": [
+        200,
+        122.5
+      ],
+      "width": 160,
+      "height": 65,
+      "angle": 1.1,
+      "corner": 2,
+      "grab": [
+        210.32345051204953,
+        203.5384627512461
+      ],
+      "pointer": [
+        210.32345051204953,
+        203.53846275124613
+      ],
+      "expectedCenter": [
+        200,
+        122.5
+      ],
+      "expectedWidth": 160,
+      "expectedHeight": 65,
+      "offset": [
+        2.9999999999999987,
+        -4.999999999999984
+      ]
+    },
+    {
+      "center": [
+        200,
+        122.5
+      ],
+      "width": 160,
+      "height": 65,
+      "angle": 1.1,
+      "corner": 2,
+      "grab": [
+        210.32345051204953,
+        203.5384627512461
+      ],
+      "pointer": [
+        256.79805837372476,
+        323.5097544176424
+      ],
+      "expectedCenter": [
+        205.85876040963961,
+        191.3307702009969
+      ],
+      "expectedWidth": 288.00000000000006,
+      "expectedHeight": 117.00000000000001,
+      "offset": [
+        2.9999999999999987,
+        -4.999999999999984
+      ]
+    },
+    {
+      "center": [
+        200,
+        122.5
+      ],
+      "width": 160,
+      "height": 65,
+      "angle": 1.1,
+      "corner": 2,
+      "grab": [
+        210.32345051204953,
+        203.5384627512461
+      ],
+      "pointer": [
+        171.10638059318353,
+        97.82648884583283
+      ],
+      "expectedCenter": [
+        198.53530989759008,
+        105.29230744975078
+      ],
+      "expectedWidth": 128,
+      "expectedHeight": 52,
+      "offset": [
+        2.9999999999999987,
+        -4.999999999999984
+      ]
+    },
+    {
+      "center": [
+        200,
+        122.5
+      ],
+      "width": 160,
+      "height": 65,
+      "angle": 1.1,
+      "corner": 3,
+      "grab": [
+        137.74807108395714,
+        60.945285141416434
+      ],
+      "pointer": [
+        137.74807108395714,
+        60.94528514141641
+      ],
+      "expectedCenter": [
+        200,
+        122.5
+      ],
+      "expectedWidth": 160.00000000000003,
+      "expectedHeight": 65.00000000000001,
+      "offset": [
+        2.999999999999986,
+        -5.000000000000009
+      ]
+    },
+    {
+      "center": [
+        200,
+        122.5
+      ],
+      "width": 160,
+      "height": 65,
+      "angle": 1.1,
+      "corner": 3,
+      "grab": [
+        137.74807108395714,
+        60.945285141416434
+      ],
+      "pointer": [
+        68.1020718606846,
+        -47.23250736791483
+      ],
+      "expectedCenter": [
+        147.79845686716573,
+        77.25622811313315
+      ],
+      "expectedWidth": 288,
+      "expectedHeight": 117,
+      "offset": [
+        2.999999999999986,
+        -5.000000000000009
+      ]
+    },
+    {
+      "center": [
+        200,
+        122.5
+      ],
+      "width": 160,
+      "height": 65,
+      "angle": 1.1,
+      "corner": 3,
+      "grab": [
+        137.74807108395714,
+        60.945285141416434
+      ],
+      "pointer": [
+        200.13653236442048,
+        154.86375988976468
+      ],
+      "expectedCenter": [
+        213.05038578320855,
+        133.8109429717167
+      ],
+      "expectedWidth": 128,
+      "expectedHeight": 52,
+      "offset": [
+        2.999999999999986,
+        -5.000000000000009
+      ]
+    },
+    {
+      "center": [
+        150.5,
+        156
+      ],
+      "width": 61,
+      "height": 132,
+      "angle": 1.1,
+      "corner": 0,
+      "grab": [
+        198.48500406057462,
+        93.88083150403811
+      ],
+      "pointer": [
+        198.48500406057462,
+        93.88083150403811
+      ],
+      "expectedCenter": [
+        150.5,
+        156
+      ],
+      "expectedWidth": 61,
+      "expectedHeight": 132,
+      "offset": [
+        2.9999999999999982,
+        -5.000000000000016
+      ]
+    },
+    {
+      "center": [
+        150.5,
+        156
+      ],
+      "width": 61,
+      "height": 132,
+      "angle": 1.1,
+      "corner": 0,
+      "grab": [
+        198.48500406057462,
+        93.88083150403811
+      ],
+      "pointer": [
+        199.87738764062837,
+        38.41497472740484
+      ],
+      "expectedCenter": [
+        186.48800324845968,
+        110.30466520323054
+      ],
+      "expectedWidth": 109.79999999999997,
+      "expectedHeight": 237.5999999999999,
+      "offset": [
+        2.9999999999999982,
+        -5.000000000000016
+      ]
+    },
+    {
+      "center": [
+        150.5,
+        156
+      ],
+      "width": 61,
+      "height": 132,
+      "angle": 1.1,
+      "corner": 0,
+      "grab": [
+        198.48500406057462,
+        93.88083150403811
+      ],
+      "pointer": [
+        194.3256841398249,
+        143.91032338429662
+      ],
+      "expectedCenter": [
+        141.50299918788508,
+        167.4238336991924
+      ],
+      "expectedWidth": 48.800000000000004,
+      "expectedHeight": 105.60000000000001,
+      "offset": [
+        2.9999999999999982,
+        -5.000000000000016
+      ]
+    },
+    {
+      "center": [
+        150.5,
+        156
+      ],
+      "width": 61,
+      "height": 132,
+      "angle": 1.1,
+      "corner": 1,
+      "grab": [
+        226.15436746753485,
+        148.24448046778568
+      ],
+      "pointer": [
+        226.15436746753488,
+        148.24448046778568
+      ],
+      "expectedCenter": [
+        150.5,
+        156
+      ],
+      "expectedWidth": 61,
+      "expectedHeight": 132,
+      "offset": [
+        3.0000000000000235,
+        -4.9999999999999964
+      ]
+    },
+    {
+      "center": [
+        150.5,
+        156
+      ],
+      "width": 61,
+      "height": 132,
+      "angle": 1.1,
+      "corner": 1,
+      "grab": [
+        226.15436746753485,
+        148.24448046778568
+      ],
+      "pointer": [
+        271.8177324987249,
+        179.76046203314849
+      ],
+      "expectedCenter": [
+        208.62349397402787,
+        153.79558437422855
+      ],
+      "expectedWidth": 109.80000000000001,
+      "expectedHeight": 237.60000000000002,
+      "offset": [
+        3.0000000000000235,
+        -4.9999999999999964
+      ]
+    },
+    {
+      "center": [
+        150.5,
+        156
+      ],
+      "width": 61,
+      "height": 132,
+      "angle": 1.1,
+      "corner": 1,
+      "grab": [
+        226.15436746753485,
+        148.24448046778568
+      ],
+      "pointer": [
+        183.25793877704083,
+        122.16486379879763
+      ],
+      "expectedCenter": [
+        135.96912650649304,
+        156.55110390644288
+      ],
+      "expectedWidth": 48.800000000000004,
+      "expectedHeight": 105.60000000000001,
+      "offset": [
+        3.0000000000000235,
+        -4.9999999999999964
+      ]
+    },
+    {
+      "center": [
+        150.5,
+        156
+      ],
+      "width": 61,
+      "height": 132,
+      "angle": 1.1,
+      "corner": 2,
+      "grab": [
+        108.51499593942538,
+        208.1191684959619
+      ],
+      "pointer": [
+        108.51499593942536,
+        208.11916849596193
+      ],
+      "expectedCenter": [
+        150.49999999999997,
+        156.00000000000003
+      ],
+      "expectedWidth": 61.00000000000003,
+      "expectedHeight": 132.00000000000006,
+      "offset": [
+        2.9999999999999987,
+        -4.999999999999984
+      ]
+    },
+    {
+      "center": [
+        150.5,
+        156
+      ],
+      "width": 61,
+      "height": 132,
+      "angle": 1.1,
+      "corner": 2,
+      "grab": [
+        108.51499593942538,
+        208.1191684959619
+      ],
+      "pointer": [
+        107.12261235937163,
+        263.58502527259515
+      ],
+      "expectedCenter": [
+        114.51199675154035,
+        201.69533479676946
+      ],
+      "expectedWidth": 109.79999999999995,
+      "expectedHeight": 237.59999999999988,
+      "offset": [
+        2.9999999999999987,
+        -4.999999999999984
+      ]
+    },
+    {
+      "center": [
+        150.5,
+        156
+      ],
+      "width": 61,
+      "height": 132,
+      "angle": 1.1,
+      "corner": 2,
+      "grab": [
+        108.51499593942538,
+        208.1191684959619
+      ],
+      "pointer": [
+        112.6743158601751,
+        158.08967661570338
+      ],
+      "expectedCenter": [
+        159.49700081211492,
+        144.57616630080764
+      ],
+      "expectedWidth": 48.80000000000001,
+      "expectedHeight": 105.60000000000002,
+      "offset": [
+        2.9999999999999987,
+        -4.999999999999984
+      ]
+    },
+    {
+      "center": [
+        150.5,
+        156
+      ],
+      "width": 61,
+      "height": 132,
+      "angle": 1.1,
+      "corner": 3,
+      "grab": [
+        80.84563253246515,
+        153.75551953221432
+      ],
+      "pointer": [
+        80.84563253246513,
+        153.75551953221432
+      ],
+      "expectedCenter": [
+        150.5,
+        156
+      ],
+      "expectedWidth": 61,
+      "expectedHeight": 132,
+      "offset": [
+        2.999999999999986,
+        -5.000000000000009
+      ]
+    },
+    {
+      "center": [
+        150.5,
+        156
+      ],
+      "width": 61,
+      "height": 132,
+      "angle": 1.1,
+      "corner": 3,
+      "grab": [
+        80.84563253246515,
+        153.75551953221432
+      ],
+      "pointer": [
+        35.182267501275064,
+        122.23953796685151
+      ],
+      "expectedCenter": [
+        92.37650602597213,
+        158.20441562577145
+      ],
+      "expectedWidth": 109.8,
+      "expectedHeight": 237.6,
+      "offset": [
+        2.999999999999986,
+        -5.000000000000009
+      ]
+    },
+    {
+      "center": [
+        150.5,
+        156
+      ],
+      "width": 61,
+      "height": 132,
+      "angle": 1.1,
+      "corner": 3,
+      "grab": [
+        80.84563253246515,
+        153.75551953221432
+      ],
+      "pointer": [
+        123.7420612229592,
+        179.83513620120237
+      ],
+      "expectedCenter": [
+        165.03087349350696,
+        155.44889609355715
+      ],
+      "expectedWidth": 48.8,
+      "expectedHeight": 105.6,
+      "offset": [
+        2.999999999999986,
+        -5.000000000000009
+      ]
+    },
+    {
+      "center": [
+        160,
+        130
+      ],
+      "width": 80,
+      "height": 80,
+      "angle": -0.8,
+      "corner": 0,
+      "grab": [
+        106.43748799013247,
+        125.82597526209429
+      ],
+      "pointer": [
+        106.43748799013247,
+        125.82597526209429
+      ],
+      "expectedCenter": [
+        160,
+        130
+      ],
+      "expectedWidth": 80,
+      "expectedHeight": 80,
+      "offset": [
+        2.9999999999999876,
+        -5.000000000000004
+      ]
+    },
+    {
+      "center": [
+        160,
+        130
+      ],
+      "width": 80,
+      "height": 80,
+      "angle": -0.8,
+      "corner": 0,
+      "grab": [
+        106.43748799013247,
+        125.82597526209429
+      ],
+      "pointer": [
+        50.370561137521506,
+        160.58945773010913
+      ],
+      "expectedCenter": [
+        114.74999039210599,
+        130.66078020967544
+      ],
+      "expectedWidth": 144,
+      "expectedHeight": 144,
+      "offset": [
+        2.9999999999999876,
+        -5.000000000000004
+      ]
+    },
+    {
+      "center": [
+        160,
+        130
+      ],
+      "width": 80,
+      "height": 80,
+      "angle": -0.8,
+      "corner": 0,
+      "grab": [
+        106.43748799013247,
+        125.82597526209429
+      ],
+      "pointer": [
+        156.9307611679661,
+        96.80134152127567
+      ],
+      "expectedCenter": [
+        171.3125024019735,
+        129.83480494758112
+      ],
+      "expectedWidth": 64,
+      "expectedHeight": 64,
+      "offset": [
+        2.9999999999999876,
+        -5.000000000000004
+      ]
+    },
+    {
+      "center": [
+        160,
+        130
+      ],
+      "width": 80,
+      "height": 80,
+      "angle": -0.8,
+      "corner": 1,
+      "grab": [
+        162.1740247379057,
+        68.43748799013247
+      ],
+      "pointer": [
+        162.17402473790574,
+        68.43748799013247
+      ],
+      "expectedCenter": [
+        160,
+        130
+      ],
+      "expectedWidth": 80,
+      "expectedHeight": 80,
+      "offset": [
+        3.0000000000000178,
+        -5.000000000000015
+      ]
+    },
+    {
+      "center": [
+        160,
+        130
+      ],
+      "width": 80,
+      "height": 80,
+      "angle": -0.8,
+      "corner": 1,
+      "grab": [
+        162.1740247379057,
+        68.43748799013247
+      ],
+      "pointer": [
+        195.28555668173195,
+        11.379390823008336
+      ],
+      "expectedCenter": [
+        159.33921979032456,
+        84.74999039210599
+      ],
+      "expectedWidth": 144,
+      "expectedHeight": 144,
+      "offset": [
+        3.0000000000000178,
+        -5.000000000000015
+      ]
+    },
+    {
+      "center": [
+        160,
+        130
+      ],
+      "width": 80,
+      "height": 80,
+      "angle": -0.8,
+      "corner": 1,
+      "grab": [
+        162.1740247379057,
+        68.43748799013247
+      ],
+      "pointer": [
+        134.63614646885682,
+        119.75673643006039
+      ],
+      "expectedCenter": [
+        160.16519505241885,
+        141.31250240197352
+      ],
+      "expectedWidth": 64,
+      "expectedHeight": 64,
+      "offset": [
+        3.0000000000000178,
+        -5.000000000000015
+      ]
+    },
+    {
+      "center": [
+        160,
+        130
+      ],
+      "width": 80,
+      "height": 80,
+      "angle": -0.8,
+      "corner": 2,
+      "grab": [
+        219.56251200986753,
+        124.17402473790571
+      ],
+      "pointer": [
+        219.56251200986753,
+        124.17402473790573
+      ],
+      "expectedCenter": [
+        160,
+        130
+      ],
+      "expectedWidth": 80,
+      "expectedHeight": 80,
+      "offset": [
+        3.000000000000008,
+        -4.999999999999985
+      ]
+    },
+    {
+      "center": [
+        160,
+        130
+      ],
+      "width": 80,
+      "height": 80,
+      "angle": -0.8,
+      "corner": 2,
+      "grab": [
+        219.56251200986753,
+        124.17402473790571
+      ],
+      "pointer": [
+        275.6294388624785,
+        89.4105422698909
+      ],
+      "expectedCenter": [
+        205.25000960789401,
+        129.33921979032456
+      ],
+      "expectedWidth": 144,
+      "expectedHeight": 144,
+      "offset": [
+        3.000000000000008,
+        -4.999999999999985
+      ]
+    },
+    {
+      "center": [
+        160,
+        130
+      ],
+      "width": 80,
+      "height": 80,
+      "angle": -0.8,
+      "corner": 2,
+      "grab": [
+        219.56251200986753,
+        124.17402473790571
+      ],
+      "pointer": [
+        169.0692388320339,
+        153.19865847872435
+      ],
+      "expectedCenter": [
+        148.68749759802648,
+        130.16519505241888
+      ],
+      "expectedWidth": 64,
+      "expectedHeight": 64,
+      "offset": [
+        3.000000000000008,
+        -4.999999999999985
+      ]
+    },
+    {
+      "center": [
+        160,
+        130
+      ],
+      "width": 80,
+      "height": 80,
+      "angle": -0.8,
+      "corner": 3,
+      "grab": [
+        163.8259752620943,
+        181.56251200986753
+      ],
+      "pointer": [
+        163.8259752620943,
+        181.56251200986753
+      ],
+      "expectedCenter": [
+        160,
+        130
+      ],
+      "expectedWidth": 80,
+      "expectedHeight": 80,
+      "offset": [
+        2.9999999999999876,
+        -5.000000000000004
+      ]
+    },
+    {
+      "center": [
+        160,
+        130
+      ],
+      "width": 80,
+      "height": 80,
+      "angle": -0.8,
+      "corner": 3,
+      "grab": [
+        163.8259752620943,
+        181.56251200986753
+      ],
+      "pointer": [
+        130.71444331826808,
+        238.62060917699165
+      ],
+      "expectedCenter": [
+        160.66078020967544,
+        175.25000960789401
+      ],
+      "expectedWidth": 144,
+      "expectedHeight": 144,
+      "offset": [
+        2.9999999999999876,
+        -5.000000000000004
+      ]
+    },
+    {
+      "center": [
+        160,
+        130
+      ],
+      "width": 80,
+      "height": 80,
+      "angle": -0.8,
+      "corner": 3,
+      "grab": [
+        163.8259752620943,
+        181.56251200986753
+      ],
+      "pointer": [
+        191.3638535311432,
+        130.2432635699396
+      ],
+      "expectedCenter": [
+        159.83480494758112,
+        118.6874975980265
+      ],
+      "expectedWidth": 64,
+      "expectedHeight": 64,
+      "offset": [
+        2.9999999999999876,
+        -5.000000000000004
+      ]
+    },
+    {
+      "center": [
+        200,
+        122.5
+      ],
+      "width": 160,
+      "height": 65,
+      "angle": -0.8,
+      "corner": 0,
+      "grab": [
+        123.94939029799228,
+        152.24551921817894
+      ],
+      "pointer": [
+        123.94939029799227,
+        152.2455192181789
+      ],
+      "expectedCenter": [
+        200,
+        122.5
+      ],
+      "expectedWidth": 160.00000000000003,
+      "expectedHeight": 65.00000000000001,
+      "offset": [
+        2.9999999999999973,
+        -5.000000000000015
+      ]
+    },
+    {
+      "center": [
+        200,
+        122.5
+      ],
+      "width": 160,
+      "height": 65,
+      "angle": -0.8,
+      "corner": 0,
+      "grab": [
+        123.94939029799228,
+        152.24551921817894
+      ],
+      "pointer": [
+        25.445302319861295,
+        235.0099116318047
+      ],
+      "expectedCenter": [
+        136.75951223839382,
+        150.29641537454316
+      ],
+      "expectedWidth": 288,
+      "expectedHeight": 117,
+      "offset": [
+        2.9999999999999973,
+        -5.000000000000015
+      ]
+    },
+    {
+      "center": [
+        200,
+        122.5
+      ],
+      "width": 160,
+      "height": 65,
+      "angle": -0.8,
+      "corner": 0,
+      "grab": [
+        123.94939029799228,
+        152.24551921817894
+      ],
+      "pointer": [
+        211.30617092656857,
+        80.95882425894554
+      ],
+      "expectedCenter": [
+        215.8101219404015,
+        115.55089615636422
+      ],
+      "expectedWidth": 128.00000000000006,
+      "expectedHeight": 52.000000000000014,
+      "offset": [
+        2.9999999999999973,
+        -5.000000000000015
+      ]
+    },
+    {
+      "center": [
+        200,
+        122.5
+      ],
+      "width": 160,
+      "height": 65,
+      "angle": -0.8,
+      "corner": 1,
+      "grab": [
+        235.42246379353872,
+        37.4685446742553
+      ],
+      "pointer": [
+        235.42246379353875,
+        37.46854467425527
+      ],
+      "expectedCenter": [
+        200,
+        122.5
+      ],
+      "expectedWidth": 160,
+      "expectedHeight": 65,
+      "offset": [
+        3.000000000000007,
+        -5.000000000000025
+      ]
+    },
+    {
+      "center": [
+        200,
+        122.5
+      ],
+      "width": 160,
+      "height": 65,
+      "angle": -0.8,
+      "corner": 1,
+      "grab": [
+        235.42246379353872,
+        37.4685446742553
+      ],
+      "pointer": [
+        315.27529340828215,
+        -63.41022218239681
+      ],
+      "expectedCenter": [
+        225.937971034831,
+        58.47483573940422
+      ],
+      "expectedWidth": 288.00000000000006,
+      "expectedHeight": 117.00000000000001,
+      "offset": [
+        3.000000000000007,
+        -5.000000000000025
+      ]
+    },
+    {
+      "center": [
+        200,
+        122.5
+      ],
+      "width": 160,
+      "height": 65,
+      "angle": -0.8,
+      "corner": 1,
+      "grab": [
+        235.42246379353872,
+        37.4685446742553
+      ],
+      "pointer": [
+        166.71694152835002,
+        126.86961407651498
+      ],
+      "expectedCenter": [
+        193.51550724129226,
+        138.50629106514896
+      ],
+      "expectedWidth": 128,
+      "expectedHeight": 52,
+      "offset": [
+        3.000000000000007,
+        -5.000000000000025
+      ]
+    },
+    {
+      "center": [
+        200,
+        122.5
+      ],
+      "width": 160,
+      "height": 65,
+      "angle": -0.8,
+      "corner": 2,
+      "grab": [
+        282.0506097020077,
+        82.75448078182106
+      ],
+      "pointer": [
+        282.05060970200765,
+        82.75448078182107
+      ],
+      "expectedCenter": [
+        200,
+        122.5
+      ],
+      "expectedWidth": 160,
+      "expectedHeight": 65,
+      "offset": [
+        2.999999999999968,
+        -4.999999999999984
+      ]
+    },
+    {
+      "center": [
+        200,
+        122.5
+      ],
+      "width": 160,
+      "height": 65,
+      "angle": -0.8,
+      "corner": 2,
+      "grab": [
+        282.0506097020077,
+        82.75448078182106
+      ],
+      "pointer": [
+        380.55469768013864,
+        -0.009911631804710552
+      ],
+      "expectedCenter": [
+        263.2404877616062,
+        94.70358462545684
+      ],
+      "expectedWidth": 288,
+      "expectedHeight": 117,
+      "offset": [
+        2.999999999999968,
+        -4.999999999999984
+      ]
+    },
+    {
+      "center": [
+        200,
+        122.5
+      ],
+      "width": 160,
+      "height": 65,
+      "angle": -0.8,
+      "corner": 2,
+      "grab": [
+        282.0506097020077,
+        82.75448078182106
+      ],
+      "pointer": [
+        194.69382907343137,
+        154.04117574105447
+      ],
+      "expectedCenter": [
+        184.18987805959847,
+        129.44910384363578
+      ],
+      "expectedWidth": 128,
+      "expectedHeight": 52,
+      "offset": [
+        2.999999999999968,
+        -4.999999999999984
+      ]
+    },
+    {
+      "center": [
+        200,
+        122.5
+      ],
+      "width": 160,
+      "height": 65,
+      "angle": -0.8,
+      "corner": 3,
+      "grab": [
+        170.57753620646128,
+        197.5314553257447
+      ],
+      "pointer": [
+        170.57753620646128,
+        197.5314553257447
+      ],
+      "expectedCenter": [
+        200,
+        122.5
+      ],
+      "expectedWidth": 160,
+      "expectedHeight": 65,
+      "offset": [
+        3.0000000000000178,
+        -4.999999999999996
+      ]
+    },
+    {
+      "center": [
+        200,
+        122.5
+      ],
+      "width": 160,
+      "height": 65,
+      "angle": -0.8,
+      "corner": 3,
+      "grab": [
+        170.57753620646128,
+        197.5314553257447
+      ],
+      "pointer": [
+        90.72470659171786,
+        298.41022218239675
+      ],
+      "expectedCenter": [
+        174.06202896516902,
+        186.52516426059574
+      ],
+      "expectedWidth": 288,
+      "expectedHeight": 117,
+      "offset": [
+        3.0000000000000178,
+        -4.999999999999996
+      ]
+    },
+    {
+      "center": [
+        200,
+        122.5
+      ],
+      "width": 160,
+      "height": 65,
+      "angle": -0.8,
+      "corner": 3,
+      "grab": [
+        170.57753620646128,
+        197.5314553257447
+      ],
+      "pointer": [
+        239.28305847165,
+        108.130385923485
+      ],
+      "expectedCenter": [
+        206.48449275870774,
+        106.49370893485106
+      ],
+      "expectedWidth": 128,
+      "expectedHeight": 52,
+      "offset": [
+        3.0000000000000178,
+        -4.999999999999996
+      ]
+    },
+    {
+      "center": [
+        150.5,
+        156
+      ],
+      "width": 61,
+      "height": 132,
+      "angle": -0.8,
+      "corner": 0,
+      "grab": [
+        84.90494336554295,
+        126.89671795552252
+      ],
+      "pointer": [
+        84.90494336554295,
+        126.89671795552253
+      ],
+      "expectedCenter": [
+        150.49999999999997,
+        156
+      ],
+      "expectedWidth": 61.000000000000014,
+      "expectedHeight": 132.00000000000003,
+      "offset": [
+        2.9999999999999973,
+        -5.000000000000015
+      ]
+    },
+    {
+      "center": [
+        150.5,
+        156
+      ],
+      "width": 61,
+      "height": 132,
+      "angle": -0.8,
+      "corner": 0,
+      "grab": [
+        84.90494336554295,
+        126.89671795552252
+      ],
+      "pointer": [
+        31.967455149653883,
+        143.51063806465405
+      ],
+      "expectedCenter": [
+        95.62395469243435,
+        136.71737436441802
+      ],
+      "expectedWidth": 109.8,
+      "expectedHeight": 237.6,
+      "offset": [
+        2.9999999999999973,
+        -5.000000000000015
+      ]
+    },
+    {
+      "center": [
+        150.5,
+        156
+      ],
+      "width": 61,
+      "height": 132,
+      "angle": -0.8,
+      "corner": 0,
+      "grab": [
+        84.90494336554295,
+        126.89671795552252
+      ],
+      "pointer": [
+        133.59252065441433,
+        114.65867000087806
+      ],
+      "expectedCenter": [
+        164.2190113268914,
+        160.8206564088955
+      ],
+      "expectedWidth": 48.8,
+      "expectedHeight": 105.6,
+      "offset": [
+        2.9999999999999973,
+        -5.000000000000015
+      ]
+    },
+    {
+      "center": [
+        150.5,
+        156
+      ],
+      "width": 61,
+      "height": 132,
+      "angle": -0.8,
+      "corner": 1,
+      "grab": [
+        127.40405263572003,
+        83.13799641065164
+      ],
+      "pointer": [
+        127.40405263572005,
+        83.13799641065165
+      ],
+      "expectedCenter": [
+        150.5,
+        156
+      ],
+      "expectedWidth": 61,
+      "expectedHeight": 132,
+      "offset": [
+        2.9999999999999973,
+        -4.999999999999995
+      ]
+    },
+    {
+      "center": [
+        150.5,
+        156
+      ],
+      "width": 61,
+      "height": 132,
+      "angle": -0.8,
+      "corner": 1,
+      "grab": [
+        127.40405263572003,
+        83.13799641065164
+      ],
+      "pointer": [
+        142.4651392521143,
+        29.73796204798976
+      ],
+      "expectedCenter": [
+        129.62324210857602,
+        101.71039712852131
+      ],
+      "expectedWidth": 109.80000000000001,
+      "expectedHeight": 237.60000000000002,
+      "offset": [
+        2.9999999999999973,
+        -4.999999999999995
+      ]
+    },
+    {
+      "center": [
+        150.5,
+        156
+      ],
+      "width": 61,
+      "height": 132,
+      "angle": -0.8,
+      "corner": 1,
+      "grab": [
+        127.40405263572003,
+        83.13799641065164
+      ],
+      "pointer": [
+        116.59287694634348,
+        132.16215861882642
+      ],
+      "expectedCenter": [
+        155.719189472856,
+        169.57240071786967
+      ],
+      "expectedWidth": 48.8,
+      "expectedHeight": 105.6,
+      "offset": [
+        2.9999999999999973,
+        -4.999999999999995
+      ]
+    },
+    {
+      "center": [
+        150.5,
+        156
+      ],
+      "width": 61,
+      "height": 132,
+      "angle": -0.8,
+      "corner": 2,
+      "grab": [
+        222.09505663445705,
+        175.10328204447748
+      ],
+      "pointer": [
+        222.09505663445705,
+        175.10328204447748
+      ],
+      "expectedCenter": [
+        150.50000000000003,
+        156
+      ],
+      "expectedWidth": 61.00000000000003,
+      "expectedHeight": 132.00000000000006,
+      "offset": [
+        3.000000000000008,
+        -4.999999999999985
+      ]
+    },
+    {
+      "center": [
+        150.5,
+        156
+      ],
+      "width": 61,
+      "height": 132,
+      "angle": -0.8,
+      "corner": 2,
+      "grab": [
+        222.09505663445705,
+        175.10328204447748
+      ],
+      "pointer": [
+        275.0325448503461,
+        158.48936193534595
+      ],
+      "expectedCenter": [
+        205.3760453075656,
+        175.28262563558195
+      ],
+      "expectedWidth": 109.79999999999995,
+      "expectedHeight": 237.59999999999988,
+      "offset": [
+        3.000000000000008,
+        -4.999999999999985
+      ]
+    },
+    {
+      "center": [
+        150.5,
+        156
+      ],
+      "width": 61,
+      "height": 132,
+      "angle": -0.8,
+      "corner": 2,
+      "grab": [
+        222.09505663445705,
+        175.10328204447748
+      ],
+      "pointer": [
+        173.40747934558567,
+        187.34132999912194
+      ],
+      "expectedCenter": [
+        136.7809886731086,
+        151.1793435911045
+      ],
+      "expectedWidth": 48.79999999999998,
+      "expectedHeight": 105.59999999999997,
+      "offset": [
+        3.000000000000008,
+        -4.999999999999985
+      ]
+    },
+    {
+      "center": [
+        150.5,
+        156
+      ],
+      "width": 61,
+      "height": 132,
+      "angle": -0.8,
+      "corner": 3,
+      "grab": [
+        179.59594736427997,
+        218.86200358934838
+      ],
+      "pointer": [
+        179.59594736427994,
+        218.8620035893484
+      ],
+      "expectedCenter": [
+        150.5,
+        156.00000000000003
+      ],
+      "expectedWidth": 61.00000000000003,
+      "expectedHeight": 132.00000000000006,
+      "offset": [
+        3.000000000000008,
+        -4.999999999999985
+      ]
+    },
+    {
+      "center": [
+        150.5,
+        156
+      ],
+      "width": 61,
+      "height": 132,
+      "angle": -0.8,
+      "corner": 3,
+      "grab": [
+        179.59594736427997,
+        218.86200358934838
+      ],
+      "pointer": [
+        164.5348607478857,
+        272.26203795201025
+      ],
+      "expectedCenter": [
+        171.37675789142398,
+        210.2896028714787
+      ],
+      "expectedWidth": 109.80000000000001,
+      "expectedHeight": 237.60000000000002,
+      "offset": [
+        3.000000000000008,
+        -4.999999999999985
+      ]
+    },
+    {
+      "center": [
+        150.5,
+        156
+      ],
+      "width": 61,
+      "height": 132,
+      "angle": -0.8,
+      "corner": 3,
+      "grab": [
+        179.59594736427997,
+        218.86200358934838
+      ],
+      "pointer": [
+        190.4071230536565,
+        169.8378413811736
+      ],
+      "expectedCenter": [
+        145.280810527144,
+        142.42759928213033
+      ],
+      "expectedWidth": 48.8,
+      "expectedHeight": 105.6,
+      "offset": [
+        3.000000000000008,
+        -4.999999999999985
+      ]
+    }
+  ],
+  "translations": [
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        200,
+        470
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        20,
+        110
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        275.7323886327107,
+        437.8211614107698
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        95.73238863271068,
+        77.82116141076978
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        281.83676841431134,
+        370.86972144170005
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        101.83676841431135,
+        10.869721441700033
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        212.70080072538804,
+        330.7005252379688
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        32.70080072538805,
+        -29.29947476203118
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        131.88777542228647,
+        354.2449465395472
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        -48.11222457771353,
+        -5.755053460452835
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        113.69681528031754,
+        419.85635298242585
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        -66.30318471968246,
+        59.85635298242583
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        174.85260516209667,
+        467.21192006552565
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        -5.147394837903327,
+        107.21192006552563
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        259.128793884691,
+        452.7731578040313
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        79.12879388469102,
+        92.77315780403131
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        289.0422421961043,
+        389.81499763339707
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        109.04224219610435,
+        29.814997633397052
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        237.09066367175808,
+        336.2208816680726
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        57.090663671758094,
+        -23.779118331927386
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        151.03810001995672,
+        341.26499296464834
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        -28.961899980043277,
+        -18.73500703535167
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        110.00088141043669,
+        400.30979885916355
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        -69.99911858956331,
+        40.30979885916356
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        151.70843737996086,
+        459.06977711127445
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        -28.291562620039144,
+        99.06977711127445
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        237.81503331439768,
+        463.52127470151373
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        57.81503331439768,
+        103.52127470151373
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        289.1546620125383,
+        409.57160527454835
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        109.15466201253834,
+        49.571605274548354
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        258.5259056141405,
+        346.8218460998825
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        78.52590561414051,
+        -13.178153900117493
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        174.0887015001441,
+        332.96383637736307
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        -5.911298499855878,
+        -27.03616362263692
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        113.47422573083989,
+        380.7385663363882
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        -66.52577426916011,
+        20.738566336388214
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        132.41114779054914,
+        446.2221695770856
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        -47.58885220945085,
+        86.22216957708561
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        213.4889488696657,
+        469.20932327306684
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        33.48894886966571,
+        109.20932327306684
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        282.1650725654865,
+        428.5657443269374
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        102.1650725654865,
+        68.56574432693743
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        275.29900746824507,
+        361.6589517843012
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        95.29900746824505,
+        1.658951784301216
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        199.20338216386367,
+        330.0027421523754
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        19.20338216386365,
+        -29.997257847624596
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        123.84016362423465,
+        362.70168857666215
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        -56.15983637576535,
+        2.701688576662171
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        118.49794741940386,
+        429.69253051358976
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        -61.50205258059614,
+        69.69253051358979
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        188.08834249120042,
+        469.38419683044316
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        8.088342491200427,
+        109.38419683044314
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        268.63026054316424,
+        445.2843525630048
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        88.63026054316425,
+        85.28435256300483
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        286.07383355640525,
+        379.55028338863144
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        106.07383355640528,
+        19.550283388631467
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        224.38152094770822,
+        332.61758935805034
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        44.38152094770821,
+        -27.38241064194966
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        140.27295042083293,
+        347.63597292176996
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        -39.72704957916708,
+        -12.36402707823003
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        111.07715383164243,
+        410.79760149213087
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        -68.92284616835757,
+        50.79760149213088
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        163.63661192092414,
+        464.03196504631717
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        -16.363388079075854,
+        104.0319650463172
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        249.62840131175216,
+        458.3956352354557
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        69.62840131175216,
+        98.39563523545571
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        289.99206740965406,
+        399.07062769438585
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        109.99206740965404,
+        39.070627694385834
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        247.61744175080213,
+        340.6000807650776
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        67.61744175080214,
+        -19.399919234922365
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        161.4635597453464,
+        336.7415456435945
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        -18.53644025465359,
+        -23.258454356405473
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        110.73990319011958,
+        391.04254172608165
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        -69.26009680988042,
+        31.042541726081673
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        142.08156799787005,
+        453.57898363617403
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        -37.918432002129954,
+        93.57898363617403
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        226.6731720838447,
+        466.85515508331065
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        46.673172083844676,
+        106.85515508331065
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        286.7415847655679,
+        418.6650052651956
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        106.74158476556791,
+        58.6650052651956
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        267.0601844431414,
+        353.3143356843417
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        87.0601844431414,
+        -6.685664315658329
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        185.7239598075762,
+        330.8862505733322
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        5.7239598075761915,
+        -29.11374942666785
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        117.51306068759295,
+        372.0010279508154
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        -62.486939312407046,
+        12.001027950815413
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        125.14027316342616,
+        438.8579311064438
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        -54.85972683657384,
+        78.8579311064438
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        201.59317325948723,
+        469.98903160533837
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        21.593173259487223,
+        109.98903160533838
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        276.5813172080707,
+        436.7725392172411
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        96.58131720807066,
+        76.77253921724107
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        281.1609512883928,
+        369.7475438580655
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        101.16095128839282,
+        9.74754385806552
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        211.12158104707015,
+        330.536517159435
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        31.12158104707016,
+        -29.463482840565007
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        130.85708048086997,
+        355.189896237156
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        -49.14291951913002,
+        -4.81010376284398
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        114.16226125164754,
+        421.0414780620546
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        -65.83773874835246,
+        61.041478062054594
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        176.38626316664642,
+        467.5476219944479
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        -3.613736833353588,
+        107.54762199444794
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        260.32062582590373,
+        451.95079377696476
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        80.32062582590373,
+        91.95079377696479
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        288.7964832836437,
+        388.59064534430064
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        108.79648328364368,
+        28.59064534430062
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        235.63326351636508,
+        335.72020496515165
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        55.633263516365076,
+        -24.27979503484832
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        149.70898560335453,
+        341.9483116995795
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        -30.291014396645465,
+        -18.051688300420516
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        110.02203439772421,
+        401.5488729383369
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        -69.97796560227579,
+        41.5488729383369
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        153.06040981217794,
+        459.7254075405809
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        -26.93959018782207,
+        99.72540754058087
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        239.25482797230424,
+        462.99067788784356
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        59.25482797230424,
+        102.99067788784356
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        289.35853832760836,
+        408.34260948141736
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        109.35853832760834,
+        48.34260948141735
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        257.3064206425224,
+        346.02438439169083
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        77.3064206425224,
+        -13.975615608309162
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        172.5670441008005,
+        333.3310913709391
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        -7.432955899199502,
+        -26.668908629060937
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        113.04940069924463,
+        381.9328854843213
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        -66.95059930075537,
+        21.93288548432128
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        133.47373730156994,
+        447.14550136265103
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        -46.52626269843006,
+        87.14550136265103
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        215.06201302725262,
+        469.0127607107785
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        35.06201302725262,
+        109.01276071077848
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        282.80234343771116,
+        427.4300061300685
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        102.80234343771116,
+        67.4300061300685
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        274.4145811541093,
+        360.62823041332797
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        94.41458115410931,
+        0.6282304133279553
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        197.610396137843,
+        330.02467808235554
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        17.61039613784299,
+        -29.975321917644493
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        123.003201892221,
+        363.75611401473464
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        -56.996798107779,
+        3.756114014734642
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        119.18650873796378,
+        430.81001157472286
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        -60.81349126203622,
+        70.81001157472285
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        189.66936675951314,
+        469.537326580559
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        9.66936675951315,
+        109.53732658055901
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        269.65016134021005,
+        444.332344216041
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        89.65016134021002,
+        84.33234421604098
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        285.59491879289374,
+        378.368409028375
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        105.59491879289372,
+        18.36840902837505
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        222.84410264858326,
+        332.29245882082824
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        42.84410264858326,
+        -27.70754117917177
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        139.0905238801423,
+        348.46650972408787
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        -40.909476119857686,
+        -11.533490275912115
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        111.33683655785774,
+        412.0202139281544
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        -68.66316344214226,
+        52.020213928154426
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        165.09965281315127,
+        464.5225888807324
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        -14.900347186848741,
+        104.52258888073246
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        250.94968732083623,
+        457.70319317752904
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        70.94968732083623,
+        97.70319317752904
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        289.95681427226583,
+        397.8317477788149
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        109.95681427226582,
+        37.83174777881485
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        246.25806103887817,
+        339.95378347285083
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        66.25806103887817,
+        -20.04621652714915
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        160.02985981632423,
+        337.2820337246326
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        -19.970140183675753,
+        -22.717966275367417
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        110.55002114689623,
+        392.27289293126665
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        -69.44997885310377,
+        32.27289293126667
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        143.31008051529915,
+        454.36801874151416
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        -36.689919484700845,
+        94.36801874151419
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        228.19059041897765,
+        466.477438851778
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        48.19059041897766,
+        106.47743885177802
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        287.1528014990167,
+        417.4678082581337
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        107.15280149901669,
+        57.46780825813367
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        265.9871288065963,
+        352.39835530888627
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        85.9871288065963,
+        -7.601644691113712
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        184.15319420462717,
+        331.09363496241707
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        4.153194204627162,
+        -28.90636503758293
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        116.88873976963463,
+        373.14110885351806
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        -63.111260230365374,
+        13.14110885351807
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        126.03639470322597,
+        439.88252339857183
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        -53.963605296774034,
+        79.88252339857183
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        203.18584724602945,
+        469.95612985865876
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        23.18584724602946,
+        109.95612985865873
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        277.4062465231208,
+        435.71239314591685
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        97.40624652312079,
+        75.71239314591682
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        280.4596997240502,
+        368.6348468709581
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        100.45969972405021,
+        8.634846870958086
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        209.5388760576041,
+        330.39427773502587
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        29.538876057604117,
+        -29.605722264974105
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        129.84805373457758,
+        356.14888864627625
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        -50.151946265422424,
+        -3.8511113537237307
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        114.65460728570474,
+        422.2200091063791
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        -65.34539271429526,
+        62.220009106379116
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        177.92732130791111,
+        467.8621556668991
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        -2.072678692088889,
+        107.86215566689913
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        261.4935543262509,
+        451.11214926963737
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        81.49355432625089,
+        91.11214926963737
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        288.52289708909103,
+        387.36986854962413
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        108.52289708909105,
+        27.369868549624123
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        234.16469651247695,
+        335.23967243825103
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        54.16469651247695,
+        -24.76032756174898
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        148.39563152086194,
+        342.64982282959784
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        -31.60436847913806,
+        -17.350177170402148
+      ]
+    },
+    {
+      "start": [
+        200,
+        400
+      ],
+      "pointer": [
+        110.07138492322817,
+        402.78746162751975
+      ],
+      "original": [
+        20,
+        40
+      ],
+      "expected": [
+        -69.92861507677183,
+        42.787461627519725
+      ]
+    }
+  ],
+  "endpoints": [
+    {
+      "pointer": [
+        0,
+        200
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        -3,
+        202
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        252.44129544236895,
+        108.06046117362796
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        249.44129544236895,
+        110.06046117362796
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        272.7892280477045,
+        -83.22936730942848
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        269.7892280477045,
+        -81.22936730942848
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        42.33600241796017,
+        -197.99849932008908
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        39.33600241796017,
+        -195.99849932008908
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        -227.04074859237846,
+        -130.7287241727224
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        -230.04074859237846,
+        -128.7287241727224
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        -287.67728239894154,
+        56.73243709264525
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        -290.67728239894154,
+        58.73243709264525
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        -83.82464945967776,
+        192.0340573300732
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        -86.82464945967774,
+        194.0340573300732
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        197.0959796156367,
+        150.78045086866092
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        194.0959796156367,
+        152.78045086866092
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        296.80747398701453,
+        -29.100006761722707
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        293.80747398701453,
+        -27.10000676172271
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        123.63554557252698,
+        -182.2260523769354
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        120.63554557252698,
+        -180.2260523769354
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        -163.20633326681093,
+        -167.81430581529048
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        -166.20633326681093,
+        -165.81430581529048
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        -299.99706196521106,
+        0.885139597610157
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        -302.99706196521106,
+        2.885139597610163
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        -160.97187540013047,
+        168.77079174649842
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        -163.97187540013047,
+        170.77079174649842
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        126.05011104799227,
+        181.48935629003924
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        123.05011104799227,
+        183.48935629003924
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        297.1822067084611,
+        27.34744364156672
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        294.1822067084611,
+        29.34744364156672
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        195.08635204713505,
+        -151.93758257176427
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        192.08635204713505,
+        -149.93758257176427
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        -86.3709949995196,
+        -191.53189606467694
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        -89.37099499951961,
+        -189.53189606467697
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        -288.41924756386703,
+        -55.032667610319386
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        -291.41924756386703,
+        -53.03266761031938
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        -225.29617403150286,
+        132.06334164881605
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        -228.29617403150286,
+        134.06334164881605
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        44.963162898885706,
+        197.74092363733385
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        41.963162898885706,
+        199.74092363733385
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        273.8835752182883,
+        81.61641236267839
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        270.8835752182883,
+        83.61641236267839
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        250.99669156081683,
+        -109.54585204485367
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        247.99669156081683,
+        -107.54585204485369
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        -2.655392787121163,
+        -199.99216527892742
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        -5.6553927871211584,
+        -197.99216527892742
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        -253.86612125255118,
+        -106.5666040666795
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        -256.8661212525512,
+        -104.5666040666795
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        -271.6735086019871,
+        84.83580146739939
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        -274.6735086019871,
+        86.83580146739939
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        -39.70552502933191,
+        198.2405623726947
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        -42.70552502933191,
+        200.2405623726947
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        228.76753514388085,
+        129.38386446572807
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        225.76753514388085,
+        131.38386446572807
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        286.9127785213509,
+        -58.42776174676724
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        283.9127785213509,
+        -56.42776174676723
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        81.27173649236072,
+        -192.52117326271332
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        78.27173649236072,
+        -190.52117326271332
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        -199.09016526389027,
+        -149.61150593780008
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        -202.0901652638903,
+        -147.61150593780008
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        -296.40948722785856,
+        30.85028997751681
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        -299.40948722785856,
+        32.85028997751681
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        -121.2112935969195,
+        182.94847156090626
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        -124.21129359691952,
+        184.94847156090626
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        165.4280043725072,
+        166.84467210130205
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        162.4280043725072,
+        168.84467210130205
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        299.97355803218016,
+        -2.655349444611896
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        296.97355803218016,
+        -0.6553494446119004
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        158.72480583600716,
+        -169.71405495692105
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        155.72480583600716,
+        -167.71405495692105
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        -128.4548008488453,
+        -180.73844101830133
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        -131.4548008488453,
+        -178.73844101830133
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        -297.53365603293474,
+        -25.592737925480936
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        -300.53365603293474,
+        -23.592737925480932
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        -193.06144000709986,
+        153.08281038906867
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        -196.06144000709986,
+        155.08281038906867
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        88.9105736128156,
+        191.01472880945897
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        85.9105736128156,
+        193.01472880945897
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        289.13861588522633,
+        53.32858647198745
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        286.13861588522633,
+        55.32858647198745
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        223.53394814380465,
+        -133.38761233045238
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        220.53394814380465,
+        -131.38761233045238
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        -47.586800641412694,
+        -197.46785550476528
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        -50.586800641412694,
+        -195.46785550476528
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        -274.95646437469014,
+        -79.99706299767026
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        -277.95646437469014,
+        -77.99706299767024
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        -249.53242278857948,
+        111.02266030412513
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        -252.53242278857948,
+        113.02266030412513
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        5.310577531624073,
+        199.96866172953824
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        2.3105775316240766,
+        201.96866172953824
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        255.27105736023555,
+        105.06439776354594
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        252.27105736023555,
+        107.06439776354594
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        270.5365042946428,
+        -86.43558897695566
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        267.5365042946428,
+        -84.43558897695567
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        37.0719368235672,
+        -198.46709383018575
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        34.0719368235672,
+        -196.46709383018572
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        -230.47639839710004,
+        -128.02886789383993
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        -233.47639839710007,
+        -126.02886789383993
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        -286.12579582784156,
+        60.118508748727415
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        -289.12579582784156,
+        62.118508748727415
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        -78.71245611117862,
+        192.99320569842266
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        -81.71245611117862,
+        194.99320569842266
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        201.0687527530124,
+        148.43083936275653
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        198.0687527530124,
+        150.43083936275653
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        295.9882776121456,
+        -32.5981561591411
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        292.9882776121456,
+        -30.598156159141098
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        118.77754505455025,
+        -183.6565572424238
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        115.77754505455025,
+        -181.6565572424238
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        -167.6367146554849,
+        -165.86196657263002
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        -170.6367146554849,
+        -163.86196657263002
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        -299.92655200758594,
+        4.425351252391147
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        -302.92655200758594,
+        6.4253512523911525
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        -156.46530062607354,
+        170.64402154451682
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        -159.46530062607354,
+        172.64402154451682
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        130.8494265743475,
+        179.97336539383878
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        127.84942657434749,
+        181.97336539383878
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        297.86179442536115,
+        23.836027089763856
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        294.86179442536115,
+        25.83602708976386
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        191.02140214174136,
+        -154.21604459516905
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        188.02140214174136,
+        -152.21604459516905
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        -91.443186330665,
+        -190.48259608303127
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        -94.44318633066501,
+        -188.48259608303124
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        -289.8353310025179,
+        -51.620327187653494
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        -292.8353310025179,
+        -49.62032718765349
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        -221.75420899476688,
+        134.70143246471724
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        -224.75420899476688,
+        136.70143246471724
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        50.20671009084207,
+        197.17931631650993
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        47.20671009084207,
+        199.17931631650993
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        276.0078114590372,
+        78.37144608591001
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        273.0078114590372,
+        80.37144608591001
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        248.04860384703102,
+        -112.4907702476344
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        245.04860384703102,
+        -110.4907702476344
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        -7.965346207190038,
+        -199.92949119327
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        -10.965346207190038,
+        -197.92949119327
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        -256.65599369259667,
+        -103.55395995790101
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        -259.65599369259667,
+        -101.55395995790101
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        -269.3783042067874,
+        88.02860449920814
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        -272.3783042067874,
+        90.02860449920814
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        -34.435444134956164,
+        198.67807594445432
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        -37.43544413495616,
+        200.67807594445432
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        232.16720446736673,
+        126.66384061725996
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        229.16720446736673,
+        128.66384061725995
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        285.3163959763124,
+        -61.80454563321413
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        282.3163959763124,
+        -59.80454563321413
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        76.14700882861088,
+        -193.45011765477648
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        73.14700882861088,
+        -191.45011765477648
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        -203.0315870661923,
+        -147.23854364546318
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        -206.0315870661923,
+        -145.23854364546318
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        -295.5438781404742,
+        34.34346836615551
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        -298.5438781404742,
+        36.34346836615551
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        -116.33449062282914,
+        184.35025394494986
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        -119.33449062282915,
+        186.35025394494986
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        169.8322910694541,
+        164.86626622151155
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        166.8322910694541,
+        166.86626622151155
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        299.85604757421936,
+        -6.195006346243292
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        296.85604757421936,
+        -4.195006346243289
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        154.19353679626056,
+        -171.56061864899758
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        151.19353679626056,
+        -169.56061864899758
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        -133.2338006122525,
+        -179.19418935819263
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        -136.2338006122525,
+        -177.1941893581926
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        -298.1665961770126,
+        -22.077448767809514
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        -301.1665961770126,
+        -20.077448767809514
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        -188.96639828233614,
+        155.33719640432625
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        -191.96639828233617,
+        157.33719640432625
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        93.96863472992555,
+        189.93553957650863
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        90.96863472992555,
+        191.93553957650863
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        290.5093383300556,
+        49.908023594667625
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        287.5093383300556,
+        51.908023594667625
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        219.95709602198767,
+        -136.00469911746777
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        216.95709602198767,
+        -134.00469911746777
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        -52.822685984576125,
+        -196.87532867880836
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        -55.822685984576125,
+        -194.8753286788084
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        -277.03753410121794,
+        -76.73968898994838
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        -280.03753410121794,
+        -74.73968898994838
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        -246.54535098924677,
+        113.9500668530624
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        -249.5453509892468,
+        115.9500668530624
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        10.619490820098203,
+        199.87465673902494
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        7.619490820098207,
+        201.87465673902494
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        258.02082174373595,
+        102.03540898833378
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        255.02082174373595,
+        104.03540898833378
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        268.19899908016737,
+        -89.61472322583404
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        265.19899908016737,
+        -87.61472322583404
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        31.796253525347055,
+        -198.8734921856403
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        28.796253525347055,
+        -196.87349218564032
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        -233.8398208847414,
+        -125.28888958206781
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        -236.8398208847414,
+        -123.28888958206781
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        -284.48464238098416,
+        63.48574030394033
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        -287.48464238098416,
+        65.48574030394033
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        -73.5755956402963,
+        193.89187333399752
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        -76.57559564029629,
+        195.89187333399752
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        204.9785144208363,
+        146.03471219896394
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        201.9785144208363,
+        148.03471219896394
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        295.0763236303035,
+        -36.08608985821679
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        292.0763236303035,
+        -34.08608985821678
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        113.88232170825651,
+        -185.02950731928277
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        110.88232170825651,
+        -183.02950731928274
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        -172.01456159712686,
+        -163.85764905829186
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        -175.01456159712686,
+        -161.85764905829186
+      ],
+      "start": [
+        20,
+        40
+      ]
+    },
+    {
+      "pointer": [
+        -299.7620502559061,
+        7.96417607862778
+      ],
+      "offset": [
+        3,
+        -2
+      ],
+      "expected": [
+        -302.7620502559061,
+        9.964176078627787
+      ],
+      "start": [
+        20,
+        40
+      ]
+    }
+  ]
+}

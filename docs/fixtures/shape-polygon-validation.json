@@ -1,0 +1,86 @@
+{
+  "date": "2026-10-04",
+  "xcodeProject": "/Users/whans/Documents/IPAD/NoteMargin.xcodeproj",
+  "scope": "Held-shape background preservation; triangle and rotated rectangle fitting. No UI, data-format or authentication changes.",
+  "cause": {
+    "background": "PaperView is a child of PKCanvasView. The previous held preview set canvas.layer.opacity=0 and showed ink only, hiding paper/PDF too.",
+    "triangle": "ShapeKind and candidate generation had no triangle branch.",
+    "rectangle": "The minimum enclosing box was biased by outward edge wobble. A deterministic 160x80 rectangle with an 8-unit localized bulge was rejected by the old fitter; the new edge-line fit accepts it without relaxing residual thresholds."
+  },
+  "replacement": "Reuse immutable cached paper tile CGImages at the native viewport transform underneath transparent fitted ink; prepare before the atomic visibility switch, remove after native rendering. No full-page background snapshot or forced white fill.",
+  "recognition": "Bounded convex-hull corner proposals, interior edge PCA fits and intersections, normalized finite-segment residuals, corner/edge coverage, single traversal, area and orthogonality checks; short terminal excursions require prior loop closure. Compare eligible polygon/curve confidence. Existing native corner controls now also cover triangles.",
+  "migrationRequired": false,
+  "validation": {
+    "pureRecognition": {
+      "passed": 523,
+      "command": "swiftc -O -D DEBUG -D SHAPE_RECOGNITION_STANDALONE -module-cache-path /private/tmp/note-margin-shape-module-cache NoteMargin/Canvas/ShapeRecognition.swift scripts/shape_recognition_checks.swift -o /private/tmp/note-margin-polygon-checks-debug && /private/tmp/note-margin-polygon-checks-debug",
+      "log": "/private/tmp/note-margin-polygon-pure.log"
+    },
+    "engine": {
+      "shapeLifecycleAndAttributes": 298,
+      "spatial": 202,
+      "drawingSnapshots": 48,
+      "persistence": 30,
+      "existingPDFInkSelectionViewport": "passed",
+      "command": "python3 scripts/check_pdf_import.py 188E829C-2789-42CD-A31C-E6296F097D26 --drawing-engine --reuse-work /var/folders/wb/hzygp7510z38b4vblx_m9xh00000gn/T/NoteMarginPDFChecks-b0r5z5n2",
+      "log": "/private/tmp/note-margin-polygon-engine-final.log"
+    },
+    "backgroundRendering": {
+      "cases": 12,
+      "styles": [
+        "ruled",
+        "grid",
+        "colored PDF",
+        "inserted image"
+      ],
+      "zoomFactors": [
+        0.5,
+        1,
+        2
+      ],
+      "stages": [
+        "before",
+        "held preview",
+        "native-render handoff"
+      ],
+      "samplesPerCase": 14784,
+      "tolerance": "Max channel delta 24/255 at isolated edges; global mean <0.1/255. No extra paper tile rasterizations on snap. Old controller fails this same check.",
+      "oldRegressionLog": "/private/tmp/note-margin-polygon-old-background.log",
+      "renderArtifacts": "/private/tmp/NoteMargin-polygon-evidence",
+      "note": "The app has no separate colored-paper style. Colored backgrounds are tested through its existing PDF support."
+    },
+    "liveUITests": {
+      "passed": 4,
+      "failed": 0,
+      "skipped": 0,
+      "tests": [
+        "testShapeSnapsBeforeLiftAndNextStrokeWorks",
+        "testRapidShortStrokesAfterViewportMovement",
+        "testStrokePreviewUntilLift",
+        "testSingleEraserRetapSettingsAndRememberedMode"
+      ],
+      "simulator": "iPad Pro 13-inch (M5), iOS 26.5",
+      "resultBundle": "/var/folders/wb/hzygp7510z38b4vblx_m9xh00000gn/T/NoteMarginLiveInk-233046437caf4172a68c43607d89a1ba.xcresult",
+      "log": "/private/tmp/note-margin-polygon-ui.log",
+      "runtimeWarnings": "3 Publishing changes from within view updates warnings; also present in the prior fixture run. Unrelated UI was not modified."
+    },
+    "deviceTargetBuild": {
+      "exitCode": 0,
+      "signed": false,
+      "command": "xcodebuild -quiet -project /Users/whans/Documents/IPAD/NoteMargin.xcodeproj -scheme NoteMargin -configuration Release -sdk iphoneos -destination generic/platform=iOS -derivedDataPath /private/tmp/NoteMargin-engine-device-build CODE_SIGNING_ALLOWED=NO build",
+      "log": "/private/tmp/note-margin-polygon-device-build.log"
+    },
+    "physicalApplePencil": "Not tested. Live UI uses real simulator finger touch events with a DEBUG-only Pencil observer opt-in; curved/polygon hold input is injected through the same controller in deterministic fixtures.",
+    "latency": "Pure fitting CPU timings only; no physical Pencil input-to-display measurement."
+  },
+  "files": {
+    "NoteMargin/Canvas/ShapeRecognition.swift": "634517ee72e4cfbc5be458cc0f74e148783a89716129b97a45cb86d48e98d327",
+    "NoteMargin/Canvas/ShapeCompletion.swift": "bb09ad653c5634e665df4d6f4b8b97a055b4019e9592a6edd8895b7dd6b99457",
+    "NoteMargin/Canvas/NotebookCanvas.swift": "a098f73df2cca7ffc0c8c85d13342b6ae1b340f69e048376edbe65dcc0f51af3",
+    "NoteMargin/Canvas/PageRenderer.swift": "4de614fe45439306ceecff44c858075e924f860199942ce1be2a226864fb5204",
+    "scripts/shape_completion_checks.swift": "60e1ae6b4402d51b20ab8495e8fbf09627768cc30343a142773b12576073477b",
+    "scripts/shape_recognition_checks.swift": "876334fcb26617c47a0e86c8f9458dcc6ef349160857f6607f4c67bff9d9f7ec",
+    "scripts/pdf_integration_app.swift": "9e78a7de926b11cfdb82b56960e341f76d48c4bdd9d6e4712469f920e00368be"
+  },
+  "workspaceAndXcodeMatch": true
+}

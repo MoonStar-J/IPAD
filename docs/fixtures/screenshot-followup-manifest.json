@@ -1,0 +1,74 @@
+{
+  "approvedTextImages" : [
+
+  ],
+  "contextRevision" : 3,
+  "estimatedImageTokens" : 1280,
+  "estimatedTextTokens" : 350,
+  "httpBytes" : 7014,
+  "images" : [
+    {
+      "hash" : "c78cb116a983894e142f5321afe204adc115ee7e4ab3c9186e3929a5e8a9bd9d",
+      "id" : "23979E4C-F757-40C6-914C-A54B9E41AF4C",
+      "introducedBy" : "23979E4C-F757-40C6-914C-A54B9E41AF4C",
+      "reason" : "원본 증거"
+    }
+  ],
+  "instructionsHash" : "edce30577da729ef79086c23d716e40f546bc25aaaad0e3af3b5d1bd329c3b5d",
+  "messages" : [
+    {
+      "hash" : "c78cb116a983894e142f5321afe204adc115ee7e4ab3c9186e3929a5e8a9bd9d",
+      "id" : "23979E4C-F757-40C6-914C-A54B9E41AF4C",
+      "reason" : "최초 캡처 자료",
+      "revision" : 1,
+      "role" : "user"
+    },
+    {
+      "hash" : "a8360fc3f93e5e3ed2b6058decded02ab3030a4ee47ade571f839f3e9d90a336",
+      "id" : "CBCEDC60-7558-4A78-9426-B4BE64C64F8D",
+      "reason" : "원문 대화",
+      "revision" : 1,
+      "role" : "user"
+    },
+    {
+      "hash" : "250685a74fee6d1d682d056689c97b25ec44e3af6c4b120b0ffc24e3e36703c3",
+      "id" : "68919AEF-A09D-45A9-A71C-CCBC15FEB02B",
+      "reason" : "인용 대상 원문",
+      "revision" : 1,
+      "role" : "assistant"
+    },
+    {
+      "hash" : "aa70afe0f94b9cc427a632c50c6e10dd7486e72abe4003452d3ef0e2f38d3d6e",
+      "id" : "1C0BD80B-A2DE-43B5-B690-D5F3FC0EC00B",
+      "reason" : "원문 대화",
+      "revision" : 1,
+      "role" : "user"
+    }
+  ],
+  "model" : "gpt-6-astra",
+  "omitted" : [
+
+  ],
+  "payloadHash" : "01401d85beb72335ae7561ce66650e6e41ed1620c867255df21058fec5fe6d68",
+  "policy" : {
+    "inputTokens" : 24000,
+    "maxHTTPBytes" : 12000000,
+    "recentTurns" : 2,
+    "reserveTokens" : 4000
+  },
+  "replies" : [
+    {
+      "hash" : "250685a74fee6d1d682d056689c97b25ec44e3af6c4b120b0ffc24e3e36703c3",
+      "id" : "68919AEF-A09D-45A9-A71C-CCBC15FEB02B",
+      "revision" : 1
+    }
+  ],
+  "summaryCoverage" : [
+
+  ],
+  "threadID" : "23979E4C-F757-40C6-914C-A54B9E41AF4C",
+  "transcriptions" : [
+
+  ],
+  "transport" : "siwc-http-sse \/ source-text-and-images-v1"
+}

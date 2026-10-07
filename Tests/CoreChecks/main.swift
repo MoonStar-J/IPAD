@@ -24,11 +24,105 @@ struct CoreCheck {
 func sampleConversation(for note: Notebook) -> MarginConversation {
     MarginConversation(noteID: note.id, pageID: note.pages[0].id, projectID: note.projectID,
                        projectTitle: "학습 프로젝트", rect: CGRect(x: 30, y: 40, width: 120, height: 180),
-                       imageData: Data([137, 80, 78, 71]), extractedText: "선택한 PDF 내용",
+                       imageData: Data(base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4nGP4DwQACfsD/fteaysAAAAASUVORK5CYII=")!, extractedText: "선택한 PDF 내용",
                        sourceDescription: "\(note.title) · 1페이지")
 }
 
-let checks: [CoreCheck] = planChecks + [
+let checks: [CoreCheck] = memoryChecks + planChecks + [
+    CoreCheck(name: "Sidebar tree collapses descendants and reflects moves to root") { repository in
+        let root = NoteProject(title: "수학")
+        let child = NoteProject(title: "전공", parentID: root.id)
+        let leaf = NoteProject(title: "정수론", parentID: child.id)
+        var library = Library(projects: [leaf, root, child])
+        try expect(library.projectTree().map(\.id) == [root.id, child.id, leaf.id])
+        try expect(library.projectTree().map(\.depth) == [0, 1, 2])
+        try expect(library.projectTree(collapsed: [root.id]).map(\.id) == [root.id])
+        try expect(library.projectTree(collapsed: [child.id]).map(\.id) == [root.id, child.id])
+        try expect(library.move(.project(child.id), to: nil))
+        try repository.save(library)
+        let reloaded = try repository.load()
+        try expect(reloaded.projectTree().first { $0.id == child.id }?.depth == 0)
+        try expect(reloaded.projectTree().first { $0.id == leaf.id }?.depth == 1)
+        try expect(reloaded.projectPath(leaf.id).map(\.id) == [child.id, leaf.id])
+    },
+    CoreCheck(name: "Folder migration preserves assets, chat project IDs and an original backup") { repository in
+        let folder = NoteFolder(title: "강의")
+        let project = NoteProject(title: "수학", agentInstructions: "원본 지침")
+        let plain = Notebook(title: "폴더 노트", folderID: folder.id)
+        let member = Notebook(title: "프로젝트 노트", folderID: folder.id, projectID: project.id)
+        var trash = Notebook(title: "삭제된 노트", folderID: folder.id); trash.deletedAt = Date()
+        let original = Library(folders: [folder], projects: [project], notebooks: [plain, member, trash])
+        try repository.save(original)
+        let drawing = Data("unchanged drawing".utf8)
+        try repository.writeDrawing(drawing, noteID: plain.id, pageID: plain.pages[0].id)
+        let migrated = try repository.loadProjectLibrary()
+        try expect(migrated.notebooks[0].projectID == folder.id)
+        try expect(migrated.notebooks[1].projectID == project.id)
+        try expect(migrated.notebooks[2].projectID == folder.id && migrated.notebooks[2].deletedAt == trash.deletedAt)
+        try expect(migrated.projectPath(project.id).map(\.id) == [folder.id, project.id])
+        try expect(migrated.projects.first { $0.id == project.id }?.agentInstructions == project.agentInstructions)
+        try expect(try repository.readDrawing(noteID: plain.id, pageID: plain.pages[0].id) == drawing)
+        let backup = try JSONDecoder().decode(Library.self, from: Data(contentsOf: repository.root.appendingPathComponent("library-before-projects.json")))
+        try expect(backup == original)
+        try expect(try repository.loadProjectLibrary() == migrated, "migration must be idempotent")
+    },
+    CoreCheck(name: "Mixed legacy memberships keep existing project identity") { _ in
+        let folder = NoteFolder(title: "자료"), other = NoteFolder(title: "기타")
+        let project = NoteProject(title: "학습")
+        let first = Notebook(title: "A", folderID: folder.id, projectID: project.id)
+        let second = Notebook(title: "B", folderID: other.id, projectID: project.id)
+        var library = Library(folders: [folder, other], projects: [project], notebooks: [first, second])
+        library.migrateFoldersToProjects()
+        try expect(library.notebooks == [first, second])
+        try expect(library.projects.first { $0.id == project.id }?.parentID == nil)
+        try expect(library.projects.count == 3)
+    },
+    CoreCheck(name: "Nested project moves reject cycles and preserve notes after restart") { repository in
+        let root = NoteProject(title: "A"), other = NoteProject(title: "B")
+        let child = NoteProject(title: "Child", parentID: root.id)
+        let grandchild = NoteProject(title: "Grandchild", parentID: child.id)
+        let note = Notebook(title: "Note", projectID: grandchild.id)
+        var library = Library(projects: [root, other, child, grandchild], notebooks: [note])
+        let original = library
+        try expect(!library.move(.project(root.id), to: grandchild.id))
+        try expect(!library.move(.project(root.id), to: root.id))
+        try expect(!library.move(.project(root.id), to: UUID()))
+        try expect(!library.move(.note(UUID()), to: other.id))
+        try expect(library == original)
+        try expect(library.move(.project(child.id), to: other.id))
+        try expect(library.projectPath(grandchild.id).map(\.id) == [other.id, child.id, grandchild.id])
+        try expect(library.notebooks[0] == note)
+        try expect(library.move(.note(note.id), to: other.id))
+        try repository.save(library)
+        try expect(try repository.load() == library)
+        try expect(library.move(.project(child.id), to: nil))
+        try expect(library.projectPath(grandchild.id).map(\.id) == [child.id, grandchild.id])
+        try expect(library.move(.note(note.id), to: nil))
+        try expect(library.notes(in: .unassigned, query: "", sort: .title).map(\.id) == [note.id])
+    },
+    CoreCheck(name: "Deleting a directory promotes contents without deleting descendants") { _ in
+        let root = NoteProject(title: "Root")
+        let child = NoteProject(title: "Child", parentID: root.id)
+        let leaf = NoteProject(title: "Leaf", parentID: child.id)
+        let note = Notebook(title: "Note", projectID: child.id)
+        var library = Library(projects: [root, child, leaf], notebooks: [note])
+        library.removeProject(child.id)
+        try expect(library.projects.first { $0.id == leaf.id }?.parentID == root.id)
+        try expect(library.notebooks[0].projectID == root.id && library.notebooks[0].pages == note.pages)
+        library.removeProject(root.id)
+        try expect(library.projects[0].parentID == nil && library.notebooks[0].projectID == nil)
+    },
+    CoreCheck(name: "Drag payload validation rejects foreign data and trashed notes") { _ in
+        let note = Notebook(title: "Note")
+        try expect(LibraryItem(payload: LibraryItem.note(note.id).id) == .note(note.id))
+        try expect(LibraryItem(payload: LibraryItem.project(note.id).id) == .project(note.id))
+        for payload in ["file:///private/note", "notemargin:note:bad", "notemargin:unknown:" + note.id.uuidString] {
+            try expect(LibraryItem(payload: payload) == nil)
+        }
+        var trash = note; trash.deletedAt = Date()
+        var library = Library(notebooks: [trash])
+        try expect(!library.move(.note(trash.id), to: nil))
+    },
     CoreCheck(name: "Personal ChatGPT links exclude credentials and authentication URLs") { _ in
         let clean = ChatGPTWebContext.conversationURL(URL(string: "https://chatgpt.com/c/abc-123?token=private#secret"))
         try expect(clean?.absoluteString == "https://chatgpt.com/c/abc-123")

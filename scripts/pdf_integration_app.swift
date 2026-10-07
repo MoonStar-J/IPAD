@@ -11,15 +11,74 @@ struct NoteMarginApp: App {
     var body: some Scene {
         WindowGroup {
             Group {
-                if CommandLine.arguments.contains("--auth-probe") || CommandLine.arguments.contains("--plan-ui") || CommandLine.arguments.contains("--plan-self-check") {
+                if CommandLine.arguments.contains("--library-ui") { LibraryView() }
+                else if CommandLine.arguments.contains("--auth-probe") || CommandLine.arguments.contains("--plan-ui") || CommandLine.arguments.contains("--plan-self-check") {
                     ChatGPTPlanFixtureView()
                 } else { ordinaryContent }
-            }.environmentObject(store).task {
+            }.preferredColorScheme(CommandLine.arguments.contains("--tools-dark") ? .dark : CommandLine.arguments.contains("--tools-light") ? .light : nil).environmentObject(store).task {
                 guard !ran else { return }; ran = true
+                if CommandLine.arguments.contains("--drawing-engine") {
+                    var passed: [String] = [], failures: [String] = []
+                    do { passed.append("\(try checkInkSpatialRevisions()) spatial revision checks") }
+                    catch { failures.append("spatial: \(error)") }
+                    do { passed.append("\(try await checkDrawingSnapshots()) active drawing snapshot checks") }
+                    catch { failures.append("snapshots: \(error)") }
+                    do { passed.append("\(try await checkShapeCompletion()) shape lifecycle/attribute/undo checks") }
+                    catch { failures.append("shape: \(error)") }
+                    do { passed.append("\(try await checkShapeDirectEditing()) direct shape editing checks") }
+                    catch { failures.append("shape editing: \(error)") }
+                    do { _ = try PDFIntegrationChecks.run(store); passed.append("existing PDF/ink/selection/viewport regressions") }
+                    catch { failures.append("canvas: \(error)") }
+                    do { passed.append("\(try await checkInkSavingPerformance(store)) persistence checks") }
+                    catch { failures.append("persistence: \(error)") }
+                    PDFIntegrationChecks.report((failures.isEmpty ? "PASS: " : "FAIL: " + failures.joined(separator: "; ") + "\nPassed: ") + passed.joined(separator: "; "))
+                    return
+                }
+                if let index = CommandLine.arguments.firstIndex(of: "--drawing-performance") {
+                    do {
+                        let label = CommandLine.arguments[index + 1]
+                        var count = try checkDrawingPerformance(reportName: "drawing-performance-" + label + ".json")
+                        if CommandLine.arguments.contains("--profile-drawing") {
+                            // Disposable fixture only: give Instruments time to
+                            // attach to a sustained, reproducible CPU workload.
+                            let deadline = ContinuousClock.now.advanced(by: .seconds(25))
+                            while ContinuousClock.now < deadline {
+                                try await Task.sleep(for: .milliseconds(20))
+                                count = try checkDrawingPerformance(reportName: "drawing-performance-profile.json")
+                            }
+                        }
+                        PDFIntegrationChecks.report("PASS: \(count) drawing performance/correctness checks (" + label + ")")
+                    } catch { PDFIntegrationChecks.report("FAIL: \(error)") }
+                    return
+                }
+                if CommandLine.arguments.contains("--library-ui") {
+                    if CommandLine.arguments.contains("--library-reset"), Bundle.main.bundleIdentifier == "com.notemargin.integrationcheck" {
+                        do {
+                            let documents = try FileManager.default.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+                            let repository = try LibraryRepository.applicationLibrary(in: documents)
+                            let first = NoteProject(id: UUID(uuidString: "11111111-1111-1111-1111-111111111111")!, title: "수학")
+                            let second = NoteProject(id: UUID(uuidString: "22222222-2222-2222-2222-222222222222")!, title: "물리")
+                            let note = Notebook(id: UUID(uuidString: "33333333-3333-3333-3333-333333333333")!, title: "강의 노트")
+                            var library = Library(projects: [first, second], notebooks: [note]); library.projectsMigrated = true
+                            if CommandLine.arguments.contains("--library-tree") {
+                                let child = NoteProject(id: UUID(uuidString: "44444444-4444-4444-4444-444444444444")!, title: "전공", parentID: first.id)
+                                let leaf = NoteProject(id: UUID(uuidString: "55555555-5555-5555-5555-555555555555")!, title: "정수론", parentID: child.id)
+                                library.projects += [child, leaf]
+                            }
+                            try repository.save(library); store.loadLibrary()
+                        } catch { PDFIntegrationChecks.report("FAIL: library fixture") }
+                    }
+                    return
+                }
                 guard !CommandLine.arguments.contains("--auth-probe"), !CommandLine.arguments.contains("--plan-ui"), !CommandLine.arguments.contains("--plan-self-check") else { return }
                 do {
                     let checked = try PDFIntegrationChecks.run(store)
                     noteID = CommandLine.arguments.contains("--page-swap") || CommandLine.arguments.contains("--eraser") ? try PDFIntegrationChecks.pageSwapFixture(store).id : checked
+                    if CommandLine.arguments.contains("--tools-ui"), let noteID, let note = store.note(noteID) {
+                        let image = UIGraphicsImageRenderer(size: CGSize(width: 80, height: 60)).image { ctx in UIColor.white.setFill(); ctx.fill(CGRect(x: 0, y: 0, width: 80, height: 60)) }
+                        let region = CapturedRegion(pageID: note.pages[0].id, rect: CGRect(x: 40, y: 100, width: 80, height: 60), imageData: image.pngData()!, extractedText: "가독성 테스트", sourceDescription: "UI fixture", pdfPageNumbers: [1])
+                        _ = MarginAIStore.shared.create(note: note, project: nil, region: region)
+                    }
                 }
                 catch { PDFIntegrationChecks.report("FAIL: \(error)") }
             }
@@ -31,8 +90,46 @@ struct NoteMarginApp: App {
                 } else if CommandLine.arguments.contains("--live-ink"), noteID != nil,
                    let note = store.library.notebooks.last(where: { $0.title == "Long canvas regression" }) {
                     LiveCanvasRegressionView(note: note)
-                } else if let noteID { NavigationStack { EditorView(noteID: noteID) } }
+                } else if let noteID {
+                    NavigationStack {
+                        EditorView(noteID: noteID)
+                            .overlay {
+                                if CommandLine.arguments.contains("--zoomed-eraser") {
+                                    FixtureZoomControl().frame(width: 100, height: 44)
+                                }
+                            }
+                    }
+                }
                 else { ProgressView("PDF integration checks") }
+    }
+}
+
+// Test setup only: the UI test checks native partial erasing at an actual
+// enlarged canvas scale. This does not claim to validate synthesized pinching.
+private struct FixtureZoomControl: UIViewRepresentable {
+    func makeUIView(context: Context) -> UIButton { FixtureZoomButton(type: .system) }
+    func updateUIView(_ uiView: UIButton, context: Context) { }
+}
+
+private final class FixtureZoomButton: UIButton {
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        setTitle("Zoom 2×", for: .normal)
+        accessibilityIdentifier = "fixture-zoom-2x"
+        addTarget(self, action: #selector(enlarge), for: .touchUpInside)
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    @objc private func enlarge() {
+        guard let window else { return }
+        func findHost(_ view: UIView) -> CanvasHostView? {
+            if let host = view as? CanvasHostView { return host }
+            return view.subviews.lazy.compactMap(findHost).first
+        }
+        guard let host = findHost(window) else { return }
+        let canvas = host.session.canvas
+        canvas.setZoomScale(canvas.minimumZoomScale * 4, animated: false)
+        host.canvasDidZoom()
+        isHidden = true
     }
 }
 
@@ -73,9 +170,12 @@ private struct ChatGPTPlanFixtureView: View {
                     let restored = try vault.read()
                     try vault.write(prior)
                     try PDFIntegrationChecks.check(restored.registrations.first?.tokens?.access_token == "fixture-not-real", "protected Keychain roundtrip")
+                    let memoryChecks = try await checkMemoryStore()
                     try await checkMathRenderer()
-                    _ = try PDFIntegrationChecks.run(NoteStore())
-                    PDFIntegrationChecks.report("PASS: unified native ChatGPT panel, disconnected inference blocked, offline math renderer, answer card Undo/Redo, PDF capture checks")
+                    let drawingStore = NoteStore()
+                    _ = try PDFIntegrationChecks.run(drawingStore)
+                    let savingChecks = try await checkInkSavingPerformance(drawingStore)
+                    PDFIntegrationChecks.report("PASS: \(savingChecks) ink persistence checks; live move/resize pixels, half-fit zoom, cached paper, 0.1pt native pen; PDF/ink/selection regression checks; \(memoryChecks) memory store/wire checks; unified native ChatGPT panel, disconnected inference blocked, offline math renderer, answer card Undo/Redo, PDF capture checks")
                 } catch { PDFIntegrationChecks.report("FAIL: plan fixture: \(error)") }
             }
         }
@@ -108,6 +208,19 @@ private struct ChatGPTPlanFixtureView: View {
     _ = try await web.callAsyncJavaScript("window.drawAnswer(source)", arguments: ["source": #"Before \(x^2\) unfinished \(x"#], in: nil, contentWorld: .page)
     let incompleteOK = try await web.evaluateJavaScript("document.querySelectorAll('.katex').length === 1 && document.getElementById('answer').textContent.includes('unfinished')") as? Bool
     try PDFIntegrationChecks.check(incompleteOK == true, "unfinished streamed math stays readable until closed")
+    let korean = "핵심은 **“큰 가지를 따라가는 구간은 길게 묶는다”**는 것입니다. 그리고**(정의)**를 확인합니다."
+    _ = try await web.callAsyncJavaScript("window.drawAnswer(source)", arguments: ["source": korean], in: nil, contentWorld: .page)
+    let koreanOK = try await web.evaluateJavaScript("Array.from(document.querySelectorAll('strong')).map(e => e.textContent).join('|') === '“큰 가지를 따라가는 구간은 길게 묶는다”|(정의)' && !answer.textContent.includes('**')") as? Bool
+    try PDFIntegrationChecks.check(koreanOK == true, "quoted Korean bold adjacent to particles renders without literal stars")
+    let literal = #"\*\*별표\*\* `**“코드”**는` \(x^{**}\) **일반 강조** **“미완성"#
+    _ = try await web.callAsyncJavaScript("window.drawAnswer(source)", arguments: ["source": literal], in: nil, contentWorld: .page)
+    let literalsOK = try await web.evaluateJavaScript("document.querySelectorAll('strong').length === 1 && document.querySelector('strong').textContent === '일반 강조' && document.querySelector('code').textContent === '**“코드”**는' && answer.textContent.includes('**별표**') && answer.textContent.includes('**“미완성') && document.querySelector('annotation').textContent === 'x^{**}'") as? Bool
+    try PDFIntegrationChecks.check(literalsOK == true, "escaped stars code LaTeX and unfinished emphasis remain unmodified")
+    for source in ["핵심은 **“강조", "핵심은 **“강조”**는 정확합니다."] {
+        _ = try await web.callAsyncJavaScript("window.drawAnswer(source)", arguments: ["source": source], in: nil, contentWorld: .page)
+    }
+    let streamedBold = try await web.evaluateJavaScript("document.querySelector('strong')?.textContent === '“강조”' && !answer.textContent.includes('**')") as? Bool
+    try PDFIntegrationChecks.check(streamedBold == true, "streamed emphasis becomes bold when closing delimiter arrives")
     let hostile = #"<img src='https://example.invalid/secret' onerror='alert(1)'> [link](https://example.invalid) ![alt](https://example.invalid/a.png) \(\href{https://example.invalid}{bad}\)"#
     _ = try await web.callAsyncJavaScript("window.drawAnswer(source)", arguments: ["source": hostile], in: nil, contentWorld: .page)
     let safe = try await web.evaluateJavaScript("document.querySelectorAll('#answer a,#answer img,#answer script,#answer iframe').length === 0") as? Bool
@@ -152,8 +265,8 @@ private struct ChatGPTPlanFixtureView: View {
     }
     static var directory: URL { FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0] }
     static func report(_ text: String) { try? text.write(to: directory.appendingPathComponent("results.txt"), atomically: true, encoding: .utf8) }
-    static func color(_ image: UIImage, y: CGFloat) -> [UInt8] {
-        let crop = image.cgImage!.cropping(to: CGRect(x: 100, y: y, width: 1, height: 1))!
+    static func color(_ image: UIImage, y: CGFloat, x: CGFloat = 100) -> [UInt8] {
+        let crop = image.cgImage!.cropping(to: CGRect(x: x, y: y, width: 1, height: 1))!
         var pixel = [UInt8](repeating: 0, count: 4)
         pixel.withUnsafeMutableBytes { bytes in
             let context = CGContext(data: bytes.baseAddress, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,
@@ -320,6 +433,13 @@ private struct ChatGPTPlanFixtureView: View {
         try check(red[0] > 200 && red[1] < 80, "region crop preserves preceding PDF background")
         try check(green[1] > 200 && green[0] < 80, "region crop preserves following rotated PDF background")
         try check(ink.prefix(3).allSatisfy { $0 < 80 }, "region crop includes ink at its exact PDF seam position")
+        var darkCapture: Result<CapturedRegion, Error>!
+        UITraitCollection(userInterfaceStyle: .dark).performAsCurrent {
+            darkCapture = Result { try RegionContextService.capture(note: joined, page: page, drawing: drawing, store: store, rect: seam.rect) }
+        }
+        let darkImage = UIImage(data: try darkCapture.get().imageData)!
+        let darkInk = try pixel(darkImage, x: 70, y: 80)
+        try check(darkInk.prefix(3).allSatisfy { $0 < 80 }, "dark-mode screenshot keeps black handwritten ink visible")
         try check(seam.pdfPageNumbers == [1, 2], "region cites both crossed PDF pages")
         try check(seam.pageID == page.id && seam.rect == CGRect(x: 100, y: 920, width: 100, height: 100), "region stores original document coordinates")
 
@@ -436,6 +556,17 @@ private struct ChatGPTPlanFixtureView: View {
         try checkViewport(store, prepared: prepared)
         try checkPageReplacement(store)
         try checkEraserPersistence(store)
+        try checkRectangularInk(store)
+        try checkEditorViewport(store)
+        try checkInkToolPreferences()
+        guard let coloredProjectID = store.createProject(title: "Project color regression", cover: .rose) else {
+            throw NSError(domain: "project color fixture", code: 1)
+        }
+        try check(store.updateProject(coloredProjectID, title: "Renamed project", agentInstructions: "Keep the color"), "legacy project editing API succeeds")
+        try check(store.project(coloredProjectID)?.cover == .rose && NoteStore().project(coloredProjectID)?.cover == .rose,
+                  "project color survives legacy rename path and store reopen")
+        store.deleteProject(coloredProjectID)
+        try checkToolDocking()
         let manager = UndoManager(); manager.groupsByEvent = false
         let card = PageElement(kind: .text, text: "Proof: \\(x^2\\)")
         manager.beginUndoGrouping()
@@ -446,7 +577,9 @@ private struct ChatGPTPlanFixtureView: View {
         try check(!store.note(joinedID)!.pages[0].elements.contains(card), "answer card undo")
         manager.redo()
         try check(store.note(joinedID)!.pages[0].elements.contains(card), "answer card redo")
-        report("PASS: bounded region capture; PDF/ink seam alignment; rotated region PDF text; page render replacement; blank and existing ink destinations; stale callback rejection; selected pen preservation; bounded native PencilKit viewport; deep scrolling; zoom/background coordinates; repeated update stability; rotated and mixed-size PDF preparation; prepare without commit; both layouts; joined background pixel order; cross-boundary drawing save/reopen; continuous and paged PDF export; PNG export; duplicated assets")
+        if !CommandLine.arguments.contains("--drawing-engine") && !CommandLine.arguments.contains("--plan-self-check") {
+            report("PASS: rectangle selection checks (hit/mask/move/resize/copy/cut/paste/undo/redo/reopen); bounded region capture; PDF/ink seam alignment; rotated region PDF text; page render replacement; blank and existing ink destinations; stale callback rejection; selected pen preservation; bounded native PencilKit viewport; deep scrolling; zoom/background coordinates; repeated update stability; rotated and mixed-size PDF preparation; prepare without commit; both layouts; joined background pixel order; cross-boundary drawing save/reopen; continuous and paged PDF export; PNG export; duplicated assets")
+        }
         return joinedID
     }
 }
@@ -454,6 +587,8 @@ private struct ChatGPTPlanFixtureView: View {
 // Test-only delegate observes genuine touch strokes without changing their coordinates.
 @MainActor final class LiveInkProbe: NSObject, ObservableObject, PKCanvasViewDelegate {
     @Published var status = "READY"
+    @Published var shapeStatus = "NO SNAP"
+    @Published var shapeEditData = "{}"
     weak var session: DrawingSession?
     weak var host: CanvasHostView?
     private var offset = CGPoint.zero
@@ -461,6 +596,7 @@ private struct ChatGPTPlanFixtureView: View {
     private var previousBounds: [CGRect] = []
     private var startPoint = CGPoint.zero
     private var active = false
+    private var shapeBackgroundBefore: UIImage?
     private var failure: String?
     private var frames = 0
     private var timer: Timer?
@@ -468,6 +604,82 @@ private struct ChatGPTPlanFixtureView: View {
     func attach(session: DrawingSession, host: CanvasHostView) {
         self.session = session; self.host = host
         session.canvas.delegate = self
+        if CommandLine.arguments.contains("--shape-held") {
+            session.shapeCompletionForTesting.acceptsTestTouches = true
+            session.shapeCompletionForTesting.onPreviewForTesting = { [weak self, weak session, weak host] drawing in
+                guard let self, let session, let host else { return }
+                self.shapeStatus = self.active && session.canvas.layer.opacity == 1 ? "SNAPPED WHILE HELD" : "FAIL: not held"
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                    guard self.active else { self.shapeStatus = "FAIL: preview needed lift"; return }
+                    let format = UIGraphicsImageRendererFormat(); format.scale = 1
+                    let image = UIGraphicsImageRenderer(bounds: host.bounds, format: format).image { _ in
+                        host.drawHierarchy(in: host.bounds, afterScreenUpdates: true)
+                    }
+                    if let before=self.shapeBackgroundBefore {
+                        var differences=0
+                        // Probe well outside this test's diagonal stroke, on the
+                        // actual displayed PDF surface while contact remains down.
+                        for fraction in [CGFloat(0.15),0.25,0.7,0.85] {
+                            let y=host.bounds.height*fraction
+                            let a=PDFIntegrationChecks.color(before,y:y,x:host.bounds.midX), b=PDFIntegrationChecks.color(image,y:y,x:host.bounds.midX)
+                            if zip(a,b).contains(where:{abs(Int($0)-Int($1))>3}) { differences += 1 }
+                        }
+                        if differences>0 { self.shapeStatus="FAIL: held background changed" }
+                        // Verify displayed ink itself, not only the controller state
+                        // and paper pixels. Sample the fitted segment on screen.
+                        if let stroke=drawing.strokes.last {
+                            let points=Array(stroke.path)
+                            var visibleInk=0
+                            for n in 1...12 where !points.isEmpty {
+                                let p=points[min(points.count-1,n*(points.count-1)/13)].location.applying(stroke.transform).applying(host.documentToViewport)
+                                guard host.bounds.insetBy(dx:3,dy:3).contains(p) else { continue }
+                                for dx in [-1.0,0,1] {
+                                    let a=PDFIntegrationChecks.color(before,y:p.y,x:p.x+dx),b=PDFIntegrationChecks.color(image,y:p.y,x:p.x+dx)
+                                    if zip(a.prefix(3),b.prefix(3)).map({abs(Int($0)-Int($1))}).reduce(0,+)>50 { visibleInk += 1 }
+                                }
+                            }
+                            if visibleInk<2 { self.shapeStatus="FAIL: snapped ink disappeared while held" }
+                        }
+                        try? before.pngData()?.write(to:PDFIntegrationChecks.directory.appendingPathComponent("shape-live-before.png"))
+                    } else { self.shapeStatus="FAIL: missing background reference" }
+                    try? image.pngData()?.write(to: PDFIntegrationChecks.directory.appendingPathComponent("shape-held.png"))
+                    try? drawing.dataRepresentation().write(to: PDFIntegrationChecks.directory.appendingPathComponent("shape-preview.drawing"))
+                }
+            }
+        }
+    }
+    // Fixture setup uses the production automatic-selection entry point; the
+    // subsequent move/resize/deselect are real XCTest UIKit touches.
+    func seedEditableShape() {
+        guard let session, let host else { return }
+        let center=CGPoint(x:host.bounds.width*0.5,y:host.bounds.height*0.42)
+        let corners=[CGPoint(x:-90,y:-60),CGPoint(x:90,y:-60),CGPoint(x:90,y:60),CGPoint(x:-90,y:60),CGPoint(x:-90,y:-60)]
+        let points=corners.map { p -> CGPoint in
+            let r=ShapeEditMath.rotate(p,angle:0.25)
+            return CGPoint(x:center.x+r.x,y:center.y+r.y).applying(host.documentToViewport.inverted())
+        }
+        let result=ShapeRecognitionResult(kind:.rectangle,confidence:1,normalizedError:0,fittedPoints:points)
+        let native=PKStroke(ink:PKInk(.pen,color:.blue),path:PKStrokePath(controlPoints:points.enumerated().map { i,p in
+            PKStrokePoint(location:p,timeOffset:Double(i),size:CGSize(width:3,height:3),opacity:1,force:1,azimuth:0,altitude:.pi/2)
+        },creationDate:Date()))
+        let fitted=ShapeStrokeCompleter.replacement(source:PKDrawing(strokes:[native]),baseline:PKDrawing(),result:result)!
+        session.commitDrawing(fitted,action:"Fixture")
+        host.activateAutomaticShape(result,ids:Set(fitted.strokes.map(InkStrokeID.init)))
+        inspectEditableShape()
+    }
+    func inspectEditableShape() {
+        guard let session, let host else { return }
+        var data:[String:Any] = ["ready":host.hasAutomaticShapeSelection,"count":session.canvas.drawing.strokes.count,
+                                "preview":host.isShowingInkPreview,"tool":session.selectedTool.rawValue]
+        if let frame=host.automaticShapeFrame {
+            func screen(_ p:CGPoint)->[Double] {
+                let p=host.convert(p.applying(host.documentToViewport),to:nil)
+                return [Double(p.x),Double(p.y)]
+            }
+            data["center"]=screen(frame.center); data["corners"]=frame.corners.map(screen)
+            data["width"]=frame.width;data["height"]=frame.height
+        }
+        shapeEditData=String(data:try! JSONSerialization.data(withJSONObject:data,options:.sortedKeys),encoding:.utf8)!
     }
     func navigate(_ fraction: CGFloat, factor: CGFloat) {
         guard let canvas = session?.canvas else { return }
@@ -483,17 +695,39 @@ private struct ChatGPTPlanFixtureView: View {
         }
     }
     func canvasViewDidBeginUsingTool(_ canvasView: PKCanvasView) {
+        session?.canvasViewDidBeginUsingTool(canvasView)
         guard let host else { return }
         offset = canvasView.contentOffset; zoom = canvasView.zoomScale
         previousBounds = canvasView.drawing.strokes.map(\.renderBounds)
         startPoint = canvasView.drawingGestureRecognizer.location(in: host).applying(host.documentToViewport.inverted())
         failure = nil; frames = 0; active = true; status = "DRAWING"
+        if CommandLine.arguments.contains("--shape-held") {
+            shapeStatus = "WAITING"
+            let format=UIGraphicsImageRendererFormat(); format.scale=1
+            shapeBackgroundBefore=UIGraphicsImageRenderer(bounds:host.bounds,format:format).image { _ in
+                host.drawHierarchy(in:host.bounds,afterScreenUpdates:false)
+            }
+        }
+        if CommandLine.arguments.contains("--native-held-probe") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self, weak canvasView] in
+                guard let self, let canvasView, self.active else { return }
+                let drawing = canvasView.drawing
+                let value: [String: Any] = ["contactActive": self.active,
+                    "beforeCount": self.previousBounds.count, "heldCount": drawing.strokes.count,
+                    "lastPathCount": drawing.strokes.last?.path.count ?? 0,
+                    "lastTime": drawing.strokes.last?.path.last?.timeOffset ?? -1]
+                if let bytes = try? JSONSerialization.data(withJSONObject: value, options: .prettyPrinted) {
+                    try? bytes.write(to: PDFIntegrationChecks.directory.appendingPathComponent("native-held-probe.json"))
+                }
+            }
+        }
         timer?.invalidate()
         timer = Timer.scheduledTimer(withTimeInterval: 1.0 / 60, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.sample() }
         }
     }
     func canvasViewDidEndUsingTool(_ canvasView: PKCanvasView) {
+        session?.canvasViewDidEndUsingTool(canvasView)
         sample(); active = false; timer?.invalidate(); timer = nil
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self, weak canvasView] in
             guard let self, let canvasView else { return }
@@ -505,10 +739,17 @@ private struct ChatGPTPlanFixtureView: View {
                 self.failure = "ink does not begin at touch location"
             }
             if self.frames < 5 { self.failure = "too few live samples" }
+            if CommandLine.arguments.contains("--shape-held"), self.shapeStatus == "SNAPPED WHILE HELD" {
+                let phase = self.session?.shapeCompletionForTesting.phase
+                if phase != .finished || canvasView.layer.opacity != 1 {
+                    self.failure = "held shape did not finish native render handoff: \(self.session?.shapeCompletionForTesting.handoffDiagnostics ?? "missing")"
+                }
+            }
             self.status = self.failure.map { "FAIL: \($0)" } ?? "PASS: \(strokes.count) strokes, \(self.frames) live samples"
         }
     }
     func canvasViewDrawingDidChange(_ canvasView: PKCanvasView) { session?.canvasViewDrawingDidChange(canvasView) }
+    func canvasViewDidFinishRendering(_ canvasView: PKCanvasView) { session?.canvasViewDidFinishRendering(canvasView) }
     func scrollViewDidScroll(_ scrollView: UIScrollView) { session?.scrollViewDidScroll(scrollView); sample() }
     func scrollViewDidZoom(_ scrollView: UIScrollView) { session?.scrollViewDidZoom(scrollView); sample() }
 }
@@ -526,6 +767,16 @@ private struct LiveCanvasRegressionView: View {
                 Button("Bottom") { probe.navigate(0.98, factor: 3) }.accessibilityIdentifier("bottom")
             }.buttonStyle(.bordered).padding()
             Text(probe.status).accessibilityIdentifier("ink-status")
+            if CommandLine.arguments.contains("--shape-held") {
+                Text(probe.shapeStatus).accessibilityIdentifier("shape-status")
+            }
+            if CommandLine.arguments.contains("--shape-edit") {
+                HStack {
+                    Button("Seed shape") { probe.seedEditableShape() }.accessibilityIdentifier("seed-shape")
+                    Button("Inspect shape") { probe.inspectEditableShape() }.accessibilityIdentifier("inspect-shape")
+                }
+                Text(probe.shapeEditData).font(.caption2).lineLimit(1).accessibilityIdentifier("shape-edit-data")
+            }
             LiveCanvasSurface(note: note, store: store, session: session, probe: probe)
         }
     }
@@ -573,8 +824,8 @@ private struct LiveCanvasSurface: UIViewRepresentable {
             }
         } else if gesture.state == .ended {
             timer?.invalidate(); timer = nil
-            if previewSamples < 3 { failure = "no held preview samples" }
-            if whiteTrailSamples < 3 { failure = "no white trail after crossing ink" }
+            if previewSamples < 3 { failure = "too few held preview samples: \(previewSamples)" }
+            else if whiteTrailSamples < 3 { failure = "too few white trail samples after crossing ink: \(whiteTrailSamples)" }
             if cancelWhileHeld {
                 if session.canvas.drawing.dataRepresentation() != original { failure = "cancel deleted ink" }
             } else if !session.canvas.drawing.strokes.isEmpty { failure = "stroke not deleted on lift" }
@@ -597,10 +848,14 @@ private struct LiveCanvasSurface: UIViewRepresentable {
               !preview.fadedDrawing.strokes.isEmpty else { return }
         previewSamples += 1
         if session.canvas.drawing.dataRepresentation() != original { failure = "drawing mutated before lift" }
-        let image = UIGraphicsImageRenderer(bounds: host.bounds).image { _ in
+        // This is a test probe, not the production rendering path. Capturing
+        // and PNG-encoding a full 2x iPad image every timer tick can starve the
+        // held gesture on a busy simulator. Sample at one pixel per point and
+        // persist only the first observed white crossing.
+        let format = UIGraphicsImageRendererFormat(); format.scale = 1
+        let image = UIGraphicsImageRenderer(bounds: host.bounds, format: format).image { _ in
             host.drawHierarchy(in: host.bounds, afterScreenUpdates: false)
         }
-        try? image.pngData()?.write(to: PDFIntegrationChecks.directory.appendingPathComponent("eraser-held.png"))
         func pixel(at point: CGPoint) -> [UInt8] {
             let location = point.applying(host.documentToViewport)
             let crop = image.cgImage!.cropping(to: CGRect(x: location.x * image.scale, y: location.y * image.scale, width: 1, height: 1))!
@@ -618,12 +873,21 @@ private struct LiveCanvasSurface: UIViewRepresentable {
             failure = "held stroke is not translucent: \(faded)"
         }
         let white = pixel(at: CGPoint(x: 384, y: 424))
+        let whitePoint = CGPoint(x: 384, y: 424).applying(host.documentToViewport)
+        let diagnostic = "samples=\(previewSamples) whiteSamples=\(whiteTrailSamples) white=\(white) location=\(whitePoint) transform=\(host.documentToViewport) bounds=\(host.bounds) imageScale=\(image.scale)\n"
+        try? diagnostic.write(to: PDFIntegrationChecks.directory.appendingPathComponent("eraser-probe.txt"), atomically: true, encoding: .utf8)
         // The stroke fades as soon as its edge is touched; its center only turns
         // white after the eraser reaches it. Require several samples after crossing.
-        if white.prefix(3).allSatisfy({ $0 >= 240 }) { whiteTrailSamples += 1 }
+        if white.prefix(3).allSatisfy({ $0 >= 240 }) {
+            if whiteTrailSamples == 0 {
+                try? image.pngData()?.write(to: PDFIntegrationChecks.directory.appendingPathComponent("eraser-held.png"))
+            }
+            whiteTrailSamples += 1
+        }
         if cancelWhileHeld && whiteTrailSamples == 3 { host.cancelStrokeErasing() }
     }
     func canvasViewDrawingDidChange(_ canvasView: PKCanvasView) { session?.canvasViewDrawingDidChange(canvasView) }
+    func canvasViewDidEndUsingTool(_ canvasView: PKCanvasView) { session?.canvasViewDidEndUsingTool(canvasView) }
     func canvasViewDidFinishRendering(_ canvasView: PKCanvasView) { session?.canvasViewDidFinishRendering(canvasView) }
     func scrollViewDidScroll(_ scrollView: UIScrollView) { session?.scrollViewDidScroll(scrollView) }
     func scrollViewDidZoom(_ scrollView: UIScrollView) { session?.scrollViewDidZoom(scrollView) }
@@ -639,10 +903,12 @@ private struct EraserRegressionView: View {
             HStack {
                 Button("Undo") { session.undo() }
                 Button("Redo") { session.redo() }
-                Button("Cancel while held") { probe.cancelWhileHeld = true }
+                Button("Cancel while held") { session.selectTool(.eraser); probe.cancelWhileHeld = true }
+                Button("부분 지우개") { session.selectTool(.pixelEraser) }
                 Button("Fit") { session.fitPage() }
             }.buttonStyle(.bordered).padding()
             Text(probe.status).accessibilityIdentifier("eraser-status")
+            Text(session.selectedTool.rawValue + " · " + String(session.inkWidth)).accessibilityIdentifier("eraser-current-tool")
             EraserSurface(note: note, store: store, session: session, probe: probe)
         }
     }
@@ -660,7 +926,8 @@ private struct EraserSurface: UIViewRepresentable {
         probe.session = session
         session.canvas.delegate = probe
         session.canvas.gestureRecognizers?.compactMap { $0 as? StrokeEraserGestureRecognizer }.first?.addTarget(probe, action: #selector(EraserProbe.track(_:)))
-        session.canvas.tool = PKEraserTool(.vector, width: 24)
+        session.selectTool(.pencil); session.inkColor = .blue; session.inkWidth = 2.5
+        session.selectTool(.eraser); session.eraserWidth = 24; session.applyTool()
         return host
     }
     func updateUIView(_ host: CanvasHostView, context: Context) {

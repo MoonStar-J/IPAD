@@ -1,6 +1,7 @@
 """Run PDF integration checks in a separate simulator-only app (requires Xcode)."""
 from pathlib import Path
 import argparse
+from contextlib import nullcontext
 import json
 import plistlib
 import uuid
@@ -25,9 +26,13 @@ parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('device', nargs='?', help='Available iPad simulator UUID')
 parser.add_argument('--build-setting', action='append', default=[], help='Optional Xcode setting override for the test build')
 parser.add_argument('--plan', '--personal', dest='plan', action='store_true', help='Check unified ChatGPT panel, Keychain and math in the default app target')
+parser.add_argument('--reuse-work', type=Path, help='Reuse a previously retained NoteMarginPDFChecks temporary project/build cache')
+parser.add_argument('--keep-work', action='store_true', help='Keep the isolated temporary Xcode project for incremental test debugging')
 parser.add_argument('--live-ui', action='store_true', help='Exercise real touch strokes with XCUITest')
 parser.add_argument('--only-testing', action='append', default=[], help='UI test class or method, e.g. CanvasLiveInkTests/StrokeEraserVisualTests')
 parser.add_argument('--auth-probe', action='store_true', help='Local system browser callback probe; no OpenAI credentials or requests')
+parser.add_argument('--drawing-performance', choices=['before', 'after'], help='Measure drawing subsystem methods in the isolated simulator fixture')
+parser.add_argument('--drawing-engine', action='store_true', help='Run drawing snapshot, spatial revision, shape, and existing canvas regressions')
 args = parser.parse_args()
 if args.auth_probe: args.plan = True
 if args.plan and args.live_ui and not args.only_testing:
@@ -43,11 +48,18 @@ if device is None:
 if device['state'] != 'Booted':
     run('xcrun', 'simctl', 'boot', device['udid'])
 
-with tempfile.TemporaryDirectory(prefix='NoteMarginPDFChecks-') as temporary:
+if args.reuse_work:
+    reuse = args.reuse_work.resolve()
+    if reuse.parent != Path(tempfile.gettempdir()).resolve() or not reuse.name.startswith('NoteMarginPDFChecks-') or not (reuse / 'NoteMargin.xcodeproj').is_dir():
+        sys.exit('--reuse-work must be a retained temporary test project, never a real checkout.')
+workspace_context = nullcontext(str(args.reuse_work)) if args.reuse_work else nullcontext(tempfile.mkdtemp(prefix='NoteMarginPDFChecks-')) if args.keep_work else tempfile.TemporaryDirectory(prefix='NoteMarginPDFChecks-')
+with workspace_context as temporary:
     work = Path(temporary)
+    if args.keep_work or args.reuse_work: print('Retained test project:', work, flush=True)
     for name in ['NoteMargin', 'NoteMargin.xcodeproj']:
-        shutil.copytree(ROOT / name, work / name, ignore=shutil.ignore_patterns('xcuserdata', '*.xcuserstate'))
-    shutil.copy(ROOT / 'scripts/pdf_integration_app.swift', work / 'NoteMargin/App/NoteMarginApp.swift')
+        shutil.copytree(ROOT / name, work / name, dirs_exist_ok=bool(args.reuse_work), ignore=shutil.ignore_patterns('xcuserdata', '*.xcuserstate'))
+    fixture_sources = ['pdf_integration_app.swift', 'memory_store_checks.swift', 'ink_selection_checks.swift', 'ink_appearance_checks.swift', 'ink_group_checks.swift', 'editor_viewport_checks.swift', 'ink_tool_preferences_checks.swift', 'drawing_performance_checks.swift', 'ink_spatial_revision_checks.swift', 'drawing_snapshot_checks.swift', 'shape_completion_checks.swift']
+    (work / 'NoteMargin/App/NoteMarginApp.swift').write_text('\n'.join((ROOT / 'scripts' / name).read_text() for name in fixture_sources))
     project = work / 'NoteMargin.xcodeproj/project.pbxproj'
     settings = json.loads(run('plutil', '-convert', 'json', '-o', '-', str(project)))
     # Let Xcode package Simulator entitlements into the test executable. Hand
@@ -120,8 +132,8 @@ with tempfile.TemporaryDirectory(prefix='NoteMarginPDFChecks-') as temporary:
     container = Path(run('xcrun', 'simctl', 'get_app_container', device['udid'], BUNDLE, 'data'))
     results = container / 'Documents/results.txt'
     results.unlink(missing_ok=True)
-    run('xcrun', 'simctl', 'launch', device['udid'], BUNDLE, *(['--auth-probe'] if args.auth_probe else ['--plan-self-check'] if args.plan else []))
-    for _ in range(400 if args.auth_probe else 60):
+    run('xcrun', 'simctl', 'launch', device['udid'], BUNDLE, *(['--drawing-performance', args.drawing_performance] if args.drawing_performance else ['--drawing-engine'] if args.drawing_engine else ['--auth-probe'] if args.auth_probe else ['--plan-self-check'] if args.plan else []))
+    for _ in range(400 if args.auth_probe else 240 if args.drawing_performance or args.drawing_engine else 120 if args.plan else 60):
         if results.exists():
             message = results.read_text()
             print(message)

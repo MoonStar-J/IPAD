@@ -11,6 +11,7 @@ import SwiftUI
     @Published var welcome = false
     @Published private(set) var signingOut = false
     private(set) var generation = UUID()
+    private let http: PlanHTTP
     private let vault: PlanVault
     let credentials: PlanCredentialSession
     private var signIn: ChatGPTSignIn?
@@ -19,8 +20,8 @@ import SwiftUI
         let id: String
         let title: String
     }
-    init(vault: PlanVault = KeychainPlanVault()) {
-        self.vault = vault; credentials = PlanCredentialSession(vault: vault)
+    init(vault: PlanVault = KeychainPlanVault(), http: PlanHTTP = .shared) {
+        self.vault = vault; self.http = http; credentials = PlanCredentialSession(vault: vault, http: http)
         reload()
     }
     private func reload() {
@@ -97,7 +98,7 @@ import SwiftUI
             let tokens = try await credentials.credentials(client: client)
             var request = URLRequest(url: URL(string: "https://api.openai.com/v1/models")!)
             request.setValue("Bearer " + tokens.access_token, forHTTPHeaderField: "Authorization")
-            let data = try await PlanHTTP.shared.data(request)
+            let data = try await http.data(request)
             let catalog = try JSONDecoder().decode(ChatGPTModelCatalog.self, from: data)
             guard expected == generation, client == selected else { return }
             models = catalog.visible.filter { !$0.slug.isEmpty && !$0.display_name.isEmpty }

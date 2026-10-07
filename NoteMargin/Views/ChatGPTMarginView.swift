@@ -5,14 +5,17 @@ struct ChatGPTMarginView: View {
     let project: NoteProject?
     var onClose: (() -> Void)? = nil
     var onSave: ((String) -> Void)? = nil
+    var onAttach: (() -> Void)? = nil
     var onSource: (() -> Void)? = nil
-    @ObservedObject private var ai = MarginAIStore.shared
-    @ObservedObject private var connection = ChatGPTPlanConnection.shared
+    @ObservedObject var ai = MarginAIStore.shared
+    @ObservedObject var connection = ChatGPTPlanConnection.shared
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dismiss) private var dismiss
     @State private var settings = false
     @State private var preview = true
     @State private var deleting = false
+    @State private var memory = false
+    @State private var quoting: MarginMessage?
     private var chat: MarginConversation? { conversationID.flatMap { ai.conversation($0) } }
     private var readOnly: Bool { chat.map { $0.projectID != project?.id } ?? false }
     private var sending: Bool { conversationID.map { ai.sending.contains($0) } ?? false }
@@ -25,6 +28,8 @@ struct ChatGPTMarginView: View {
                         Spacer()
                         Button { settings = true } label: { Image(systemName: "person.crop.circle") }.accessibilityLabel("ChatGPT 구독 연결")
                         Menu {
+                            Button("맥락 보기") { memory = true }
+                            if let onAttach { Button("현재 문제에 추가", action: onAttach).disabled(sending || readOnly) }
                             if let onSource { Button("원본 선택 영역으로", action: onSource) }
                             Button("대화 삭제", role: .destructive) { deleting = true }.disabled(sending)
                         } label: { Image(systemName: "ellipsis.circle") }
@@ -37,11 +42,11 @@ struct ChatGPTMarginView: View {
                                 VStack(alignment: .leading, spacing: 10) {
                                 if let image = UIImage(data: chat.imageData) { Image(uiImage: image).resizable().scaledToFit().accessibilityIdentifier("ai-region-preview").frame(maxHeight: 220).clipShape(RoundedRectangle(cornerRadius: 10)) }
                                 Text(chat.sourceDescription).font(.caption)
-                                Text("영역 선택 시점의 PDF·필기 이미지, 추출 텍스트, 이 대화 \(chat.messages.count)개 메시지, 고정 조건, 프로젝트 지침을 OpenAI로 전송합니다. 다른 노트는 포함하지 않습니다.").font(.caption).foregroundStyle(.secondary)
-                                if !chat.extractedText.isEmpty { Text(chat.extractedText).font(.caption).textSelection(.enabled) }
+                                Text("이 문제의 자료와 대화에서 이번 요청에 포함할 맥락을 구성합니다. 정확한 포함·제외 내역은 ‘맥락 보기’에서 확인하세요. 다른 문제는 포함하지 않습니다.").font(.caption).foregroundStyle(.secondary)
+                                Text("선택한 영역의 PDF와 필기가 합쳐진 이미지 자체를 전송합니다.").font(.caption).foregroundStyle(.secondary)
                                 if let project, !project.agentInstructions.isEmpty { Text("프로젝트 지침: " + project.agentInstructions).font(.caption) }
-                                Toggle("선택 이미지 첨부", isOn: Binding(get: { chat.includeImage != false }, set: { if !$0 || PlanModelSupport.acceptsImage(connection.model) { ai.configure(chat.id, includeImage: $0) } })).disabled(sending || (chat.includeImage == false && !PlanModelSupport.acceptsImage(connection.model)))
-                                Text(PlanModelSupport.acceptsImage(connection.model) ? "공식 명세에서 이미지 입력이 확인된 모델입니다. 계정 정책에 따른 거절은 자동 재시도하지 않습니다." : "현재 모델의 이미지 입력을 확인하지 못했습니다. 이미지 입력이 확인된 모델을 선택하거나 첨부를 꺼 주세요.").font(.caption2).foregroundStyle(.secondary)
+                                Button("맥락 보기 · 원본 / 전사문 · 조건 정정") { memory = true }
+                                Text("원본 이미지와 추가 풀이 이미지를 같은 문제 안에서 보존합니다. 실제 포함 항목은 ‘맥락 보기’에서 확인하세요.").font(.caption2).foregroundStyle(.secondary)
                                 TextField("고정할 조건·허용 정리", text: Binding(get: { chat.pinnedConditions ?? "" }, set: { ai.configure(chat.id, conditions: $0) }), axis: .vertical).lineLimit(2...5).disabled(sending)
                                 }
                             }
@@ -59,9 +64,15 @@ struct ChatGPTMarginView: View {
                                                 Button("수식 모아 복사") { UIPasteboard.general.string = AnswerPart.parse(message.text).filter(\.math).map(\.text).joined(separator: "\n\n") }
                                                     .disabled(!AnswerPart.parse(message.text).contains(where: \.math))
                                             }
+                                            Button("이 부분 질문") { quoting = message }.disabled(sending || readOnly || message.text.isEmpty || message.status == .streaming)
                                             if let onSave { Button("노트에 저장") { onSave(message.text) }.disabled(message.text.isEmpty || message.status == .streaming) }
                                         }.font(.caption)
                                     } else { Text(message.text).textSelection(.enabled) }
+                                    if let reply = message.replyTo { Text("인용: " + reply.quote).font(.caption).foregroundStyle(.secondary).textSelection(.enabled) }
+                                    ForEach(chat.sourceAttachments.filter { (message.attachmentIDs ?? []).contains($0.id) }) { attachment in
+                                        if let image = UIImage(data: attachment.data) { Image(uiImage: image).resizable().scaledToFit().frame(maxHeight: 160) }
+                                        Text(attachment.sourceDescription).font(.caption)
+                                    }
                                     if let diagnostic = message.diagnostic {
                                         Text(diagnostic.summary).font(.caption2).foregroundStyle(.secondary).textSelection(.enabled)
                                     }
@@ -103,6 +114,12 @@ struct ChatGPTMarginView: View {
                                 Text((chat.mode ?? .free).defaultQuestion).font(.caption).foregroundStyle(.secondary)
                             }.accessibilityIdentifier("ai-default-question-preview")
                         }
+                        if let reply = chat.draftReply {
+                            HStack {
+                                Text("이 부분 질문: " + reply.quote).font(.caption).lineLimit(3)
+                                Button("인용 해제") { ai.setReply(nil, for: chat.id) }.font(.caption).disabled(sending)
+                            }
+                        }
                         HStack(alignment: .bottom) {
                             TextField("직접 질문 입력 (선택)", text: Binding(get: { chat.draft ?? "" }, set: { ai.setDraft($0, for: chat.id) }), axis: .vertical)
                                 .accessibilityIdentifier("ai-question-input").disabled(readOnly || sending)
@@ -112,19 +129,23 @@ struct ChatGPTMarginView: View {
                                 Button { if ai.sendPlan(chat.draft ?? "", conversationID: chat.id, project: project) { preview = false } }
                                 label: { Image(systemName: "arrow.up.circle.fill").font(.title) }
                                 .accessibilityLabel("확인한 영역과 질문 보내기")
-                                .disabled(readOnly || connection.state != .ready || connection.model.isEmpty || (chat.includeImage != false && !PlanModelSupport.acceptsImage(connection.model)) || ai.needsSaving(chat.id))
+                                .disabled(readOnly || connection.state != .ready || connection.model.isEmpty || ai.needsSaving(chat.id))
                             }
                         }
                     }.padding(12)
                 }
+                .sheet(isPresented: $memory) { ConversationMemoryView(id: chat.id, project: project) }
+                .sheet(item: $quoting) { message in ReplySelectionView(message: message) { ai.setReply($0, for: chat.id) } }
                 .sheet(isPresented: $settings) { ChatGPTPlanSettings() }
                 .confirmationDialog("이 대화를 삭제할까요?", isPresented: $deleting) {
                     Button("대화 삭제", role: .destructive) { ai.delete(chat.id); if ai.conversation(chat.id) == nil { onClose?() } }
                 }
             } else { ChatGPTPlanSettings() }
         }
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20)).clipShape(RoundedRectangle(cornerRadius: 20))
+        .background(Color(uiColor: .systemGroupedBackground), in: RoundedRectangle(cornerRadius: 20)).clipShape(RoundedRectangle(cornerRadius: 20))
         .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(.quaternary)).shadow(color: .black.opacity(0.12), radius: 16)
+        // The store owns accepted requests; closing/switching panels only saves
+        // the draft. The stop button remains the explicit per-answer cancellation.
         .onDisappear { if let conversationID { ai.flushDraft(conversationID) } }
         .onChange(of: scenePhase) { _, phase in
             if phase == .background { connection.cancelSignIn(); ai.cancelPlanRequests() }

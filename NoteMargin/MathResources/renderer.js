@@ -2,6 +2,22 @@
 (() => {
  const answer = document.getElementById('answer');
  const md = window.markdownit({html:false, linkify:false, breaks:false, typographer:false});
+ // Korean particles can follow a quoted/parenthesized strong span without a
+ // space: **“설명”**는. Relax only that CJK punctuation boundary, leaving the
+ // parser's delimiter pairing, escaping, code and math handling intact.
+ const cjk = /[\p{Script=Hangul}\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u;
+ const punctuation = /\p{P}/u;
+ md.inline.State = class extends md.inline.State {
+  scanDelims(start, canSplitWord) {
+   const result = super.scanDelims(start, canSplitWord);
+   if (this.src[start] === '*' && result.length === 2) {
+    const before = this.src[start-1] || '', after = this.src[start+2] || '';
+    if (cjk.test(before) && punctuation.test(after)) result.can_open = true;
+    if (punctuation.test(before) && cjk.test(after)) result.can_close = true;
+   }
+   return result;
+  }
+ };
  let revision = 0;
  const options = {throwOnError:false, trust:false, strict:'error', maxExpand:500, maxSize:15};
  function closing(source, delimiter, start) {

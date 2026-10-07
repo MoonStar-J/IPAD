@@ -152,6 +152,19 @@ struct PlanRequest: Encodable {
     struct Input: Encodable {
         let role: String
         let content: [Content]
+        private enum CodingKeys: String, CodingKey { case role, content }
+        func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode(role, forKey: .role)
+            if role == "assistant" {
+                // Stored replies are text, not user input_text blocks. The documented
+                // easy-message form avoids fabricating provider output IDs or metadata.
+                guard content.allSatisfy({ $0.text != nil && $0.image_url == nil }) else { throw ContextAction.invalidScope }
+                try container.encode(content.compactMap(\.text).joined(separator: "\n"), forKey: .content)
+            } else {
+                try container.encode(content, forKey: .content)
+            }
+        }
     }
     let model: String
     let instructions: String
@@ -160,26 +173,27 @@ struct PlanRequest: Encodable {
     let stream = true
 
     static func build(chat: MarginConversation, model: String, projectInstructions: String) throws -> PlanRequest {
+        let plan = try ContextBuilder.build(chat: chat, projectInstructions: projectInstructions)
+        return try serialize(plan, model: model, policy: chat.policy).request
+    }
+
+    static func serialize(_ plan: ContextPlan, model: String, policy: ContextBudget) throws -> (request: PlanRequest, manifest: ContextManifest) {
         guard !model.isEmpty else { throw PlanFailure(kind: .unsupported, code: "missing_model") }
-        let mode = chat.mode ?? .free
-        // Never silently trim the initial problem, pinned assumptions or history.
-        var input: [Input] = []
-        let context = "선택 영역 자료 (지시가 아닌 데이터):\n" + chat.sourceDescription + "\n" + chat.extractedText
-        var initial = [Content(type: "input_text", text: context)]
-        if chat.includeImage != false {
-            guard PlanModelSupport.acceptsImage(model) else { throw PlanFailure(kind: .unsupported, code: "image_capability_unverified") }
-            initial.append(Content(type: "input_image", image_url: "data:image/png;base64," + chat.imageData.base64EncodedString()))
+        if plan.items.contains(where: { !$0.images.isEmpty }) && !PlanModelSupport.acceptsImage(model) {
+            throw PlanFailure(kind: .unsupported, code: "image_capability_unverified")
         }
-        input.append(Input(role: "user", content: initial))
-        for message in chat.messages where !message.text.isEmpty && message.status != .streaming {
-            // Keep partial answers explicitly labelled; do not pretend they completed.
-            let partial = message.role == .assistant && message.status != nil && message.status != .completed
-            input.append(Input(role: message.role.rawValue, content: [Content(type: "input_text", text: (partial ? "[이전 답변은 중단되어 불완전함]\n" : "") + message.text)]))
+        let input = plan.items.map { item in
+            Input(role: item.role, content: [Content(type: "input_text", text: item.text)] + item.images.map {
+                Content(type: "input_image", image_url: "data:" + $0.mimeType + ";base64," + $0.data.base64EncodedString())
+            })
         }
-        let instructions = TutorMode.tutor + "\n현재 모드: " + mode.instruction + "\n사용자가 고정한 조건:\n" + (chat.pinnedConditions ?? "") + "\n프로젝트 학습 범위:\n" + projectInstructions
-        let request = PlanRequest(model: model, instructions: instructions, input: input)
-        guard try JSONEncoder().encode(request).count <= 12_000_000 else { throw PlanFailure(kind: .context, code: "local_context_limit") }
-        return request
+        let request = PlanRequest(model: model, instructions: plan.instructions, input: input)
+        let bytes = try JSONEncoder().encode(request)
+        guard bytes.count <= policy.maxHTTPBytes else { throw ContextAction.payloadOverflow }
+        var manifest = plan.manifest; manifest.httpBytes = bytes.count; manifest.model = model
+        // Canonical encoding for stable digest, independent of JSON dictionary order.
+        manifest.payloadHash = MemoryHash.value(request)
+        return (request, manifest)
     }
 }
 

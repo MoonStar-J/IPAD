@@ -1,0 +1,47 @@
+{
+  "scope": "12-second Instruments Time Profiler recording of the isolated synthetic drawing benchmark; includes allocation-instrument overhead. Not physical Pencil latency or FPS.",
+  "runtime": "iPadOS Simulator 26.5; Instruments 27.0",
+  "profileRows": 11430,
+  "benchmarkStackRows": 10849,
+  "inclusiveFrameSampleCounts": {
+    "InkGeometryCache.candidates(intersecting:)": 3742,
+    "StrokeEraserTransaction.extend(along:)": 1932,
+    "StrokeEraserTransaction.extend(to:)": 1090,
+    "InkGeometryCache.updated(to:)": 392,
+    "static InkStrokeAppearance.matches(_:_:)": 303,
+    "NativeInkRasterCache.tiles(for:visible:scale:)": 35,
+    "closure #1 in NativeInkRasterCache.tiles(for:visible:scale:)": 33,
+    "InkStrokeGeometry.init(stroke:)": 23,
+    "NativeInkRasterCache.reuseUnchangedStrokes(from:)": 15,
+    "NativeInkRasterCache.__allocating_init(drawing:)": 12,
+    "NativeInkRasterCache.init(drawing:)": 11,
+    "partial apply for closure #1 in InkGeometryCache.candidates(intersecting:)": 11,
+    "append #1 (_:) in InkStrokeGeometry.init(stroke:)": 7,
+    "closure #1 in InkGeometryCache.candidates(intersecting:)": 7,
+    "NativeInkRasterCache.touch(_:)": 1,
+    "getEnumTagSinglePayload for NativeInkRasterCache.Link": 1,
+    "at #1 (_:_:) in append #1 (_:) in InkStrokeGeometry.init(stroke:)": 1
+  },
+  "allocationMeasurement": "Exported existing Instruments Statistics detail: whole fixture process over 12.62 seconds including fixture generation, repeated benchmarks, native framework work and instrument overhead; not per-stroke churn, peak RSS, before/after improvement or leak analysis.",
+  "traceWarning": "One schema table reported no known input source; CPU time-profile rows and Allocations Statistics track detail were separately exported and inspected.",
+  "allocationStatistics": {
+    "All Heap & Anonymous VM": {
+      "persistent-bytes": 16133072,
+      "count-persistent": 43936,
+      "total-bytes": 2082072064,
+      "transient-bytes": 2065906480,
+      "count-events": 41333714,
+      "count-transient": 20646255,
+      "count-total": 20690191
+    },
+    "All Heap Allocations": {
+      "persistent-bytes": 6712272,
+      "count-persistent": 43915,
+      "total-bytes": 2053121536,
+      "transient-bytes": 2046376752,
+      "count-events": 41333551,
+      "count-transient": 20646184,
+      "count-total": 20690099
+    }
+  }
+}
