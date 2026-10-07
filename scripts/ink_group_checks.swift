@@ -48,7 +48,7 @@ import PencilKit
     guard let noteID = store.createNote(title: "Ink group fixture", paper: .plain, cover: .blue, folderID: nil),
           let note = store.note(noteID) else { throw NSError(domain: "ink groups fixture", code: 1) }
     let pageID = note.pages[0].id
-    defer { if store.flushDrawings() { store.permanentlyDelete(noteID) } }
+    defer { if store.flushDrawings() { store.trash(noteID); store.permanentlyDelete(noteID) } }
     let original = PKDrawing(strokes: [stroke(y: 100, seed: 11), stroke(y: 200, seed: 22), stroke(y: 400, seed: 33)])
     let originalIDs = original.strokes.map(identity)
     store.queueDrawing(original, noteID: noteID, pageID: pageID)
@@ -159,7 +159,7 @@ import PencilKit
         guard let legacyID = reopened.createNote(title: "Legacy group collision fixture", paper: .plain, cover: .blue, folderID: nil),
               let legacyNote = reopened.note(legacyID) else { throw NSError(domain: "legacy group fixture", code: 1) }
         let legacyPageID = legacyNote.pages[0].id
-        defer { if reopened.flushDrawings() { reopened.permanentlyDelete(legacyID) } }
+        defer { if reopened.flushDrawings() { reopened.trash(legacyID); reopened.permanentlyDelete(legacyID) } }
         var unrelatedCopy = original.strokes[0]
         unrelatedCopy.transform = CGAffineTransform(translationX: 0, y: 300)
         let legacyDrawing = PKDrawing(strokes: [original.strokes[0], original.strokes[1], unrelatedCopy])

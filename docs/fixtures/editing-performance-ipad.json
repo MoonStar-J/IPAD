@@ -1,0 +1,294 @@
+[
+  {
+    "eraseBatches": 64,
+    "eraseBatchTotalMs": 8.58337500540074,
+    "inkCacheBytes": 208000,
+    "inkRasters": 11,
+    "paperRasters": 0,
+    "phaseMs": {
+      "eraserBegin": [
+        10.01199999882374,
+        0.3134166618110612,
+        0.3064166667172685,
+        0.2970000059576705
+      ],
+      "eraserCommit": [
+        0.7326666673179716,
+        0.5824999971082434,
+        0.5670833343174309,
+        0.5651666724588722
+      ],
+      "save": [
+        2.8772083314834163
+      ],
+      "toolSwitch": [
+        2.418624993879348,
+        1.1066250008298084,
+        1.023833334329538,
+        1.009624989819713
+      ]
+    },
+    "processPeakResidentBytes": 101449728,
+    "shape": false,
+    "shapeHoldToPreviewMs": 0,
+    "strokes": 60,
+    "zoom": 1
+  },
+  {
+    "eraseBatches": 64,
+    "eraseBatchTotalMs": 10.401458377600648,
+    "inkCacheBytes": 582304,
+    "inkRasters": 14,
+    "paperRasters": 0,
+    "phaseMs": {
+      "eraserBegin": [
+        4.4392499985406175,
+        0.27137500001117587,
+        0.2348749985685572,
+        0.22320833522826433
+      ],
+      "eraserCommit": [
+        0.7529583381256089,
+        0.6272500031627715,
+        0.5920416733715683,
+        0.5813750030938536
+      ],
+      "save": [
+        2.8999999922234565
+      ],
+      "toolSwitch": [
+        1.9934166630264372,
+        1.2960833410033956,
+        1.0017500026151538,
+        1.0486666724318638
+      ]
+    },
+    "processPeakResidentBytes": 109101056,
+    "shape": false,
+    "shapeHoldToPreviewMs": 0,
+    "strokes": 60,
+    "zoom": 2.5
+  },
+  {
+    "eraseBatches": 64,
+    "eraseBatchTotalMs": 9.995249929488637,
+    "inkCacheBytes": 887680,
+    "inkRasters": 13,
+    "paperRasters": 0,
+    "phaseMs": {
+      "eraserBegin": [
+        3.7711250042775646,
+        0.332083334797062,
+        0.3362499992363155,
+        0.31858331931289285
+      ],
+      "eraserCommit": [
+        0.7126666605472565,
+        0.7039166666800156,
+        0.6577499880222604,
+        0.6178333278512582
+      ],
+      "save": [
+        2.9812499997206032
+      ],
+      "shapeRaster": [
+        4.315708327339962
+      ],
+      "toolSwitch": [
+        1.9967083353549242,
+        0.9314166672993451,
+        0.9380833216710016,
+        0.9948750084731728
+      ]
+    },
+    "processPeakResidentBytes": 111853568,
+    "shape": true,
+    "shapeHoldToPreviewMs": 14.117750004515983,
+    "strokes": 60,
+    "zoom": 1
+  },
+  {
+    "eraseBatches": 64,
+    "eraseBatchTotalMs": 11.083291727118194,
+    "inkCacheBytes": 1643204,
+    "inkRasters": 18,
+    "paperRasters": 0,
+    "phaseMs": {
+      "eraserBegin": [
+        7.699125009821728,
+        0.26037500356324017,
+        0.2670416724868119,
+        0.28466666117310524
+      ],
+      "eraserCommit": [
+        0.7723333401372656,
+        0.7778333238093182,
+        0.708874998963438,
+        0.685583334416151
+      ],
+      "save": [
+        17.643416664213873
+      ],
+      "shapeRaster": [
+        3.614499990362674
+      ],
+      "toolSwitch": [
+        1.863583325757645,
+        0.9142916678683832,
+        1.006791673717089,
+        0.9891249937936664
+      ]
+    },
+    "processPeakResidentBytes": 118145024,
+    "shape": true,
+    "shapeHoldToPreviewMs": 11.87799999024719,
+    "strokes": 60,
+    "zoom": 2.5
+  },
+  {
+    "eraseBatches": 64,
+    "eraseBatchTotalMs": 33.138041602796875,
+    "inkCacheBytes": 6926400,
+    "inkRasters": 20,
+    "paperRasters": 0,
+    "phaseMs": {
+      "eraserBegin": [
+        52.786874992307276,
+        6.658750004135072,
+        6.634083343669772,
+        6.633166660321876
+      ],
+      "eraserCommit": [
+        4.707333340775222,
+        4.480208343011327,
+        4.41129166574683,
+        4.431208333699033
+      ],
+      "save": [
+        26.939958333969116
+      ],
+      "toolSwitch": [
+        1.9961250072810799,
+        1.0980833321809769,
+        0.9866249893093482,
+        0.9565833315718919
+      ]
+    },
+    "processPeakResidentBytes": 148897792,
+    "shape": false,
+    "shapeHoldToPreviewMs": 0,
+    "strokes": 1500,
+    "zoom": 1
+  },
+  {
+    "eraseBatches": 64,
+    "eraseBatchTotalMs": 15.033166666398756,
+    "inkCacheBytes": 14469364,
+    "inkRasters": 30,
+    "paperRasters": 0,
+    "phaseMs": {
+      "eraserBegin": [
+        32.63891665847041,
+        2.87108332850039,
+        2.686708336113952,
+        2.686333333258517
+      ],
+      "eraserCommit": [
+        4.775416673510335,
+        4.542041671811603,
+        4.530083329882473,
+        4.438541654963046
+      ],
+      "save": [
+        23.01662501122337
+      ],
+      "toolSwitch": [
+        1.7659166624071077,
+        0.9984583302866668,
+        0.9667916601756588,
+        0.9858750127023086
+      ]
+    },
+    "processPeakResidentBytes": 168083456,
+    "shape": false,
+    "shapeHoldToPreviewMs": 0,
+    "strokes": 1500,
+    "zoom": 2.5
+  },
+  {
+    "eraseBatches": 64,
+    "eraseBatchTotalMs": 33.65145830321126,
+    "inkCacheBytes": 6993216,
+    "inkRasters": 20,
+    "paperRasters": 0,
+    "phaseMs": {
+      "eraserBegin": [
+        32.95800001069438,
+        6.679624988464639,
+        6.919083331013098,
+        6.660458340775222
+      ],
+      "eraserCommit": [
+        4.698875010944903,
+        4.573375001200475,
+        4.665708329412155,
+        4.599874999257736
+      ],
+      "save": [
+        27.242333337198943
+      ],
+      "shapeRaster": [
+        21.66229166323319
+      ],
+      "toolSwitch": [
+        6.439416654757224,
+        1.0145416599698365,
+        0.9051666565937921,
+        1.0162499966099858
+      ]
+    },
+    "processPeakResidentBytes": 187973632,
+    "shape": true,
+    "shapeHoldToPreviewMs": 33.674500009510666,
+    "strokes": 1500,
+    "zoom": 1
+  },
+  {
+    "eraseBatches": 64,
+    "eraseBatchTotalMs": 14.992041571531445,
+    "inkCacheBytes": 14963156,
+    "inkRasters": 30,
+    "paperRasters": 0,
+    "phaseMs": {
+      "eraserBegin": [
+        24.044250007136725,
+        2.7396249934099615,
+        2.7039583364967257,
+        2.704874990740791
+      ],
+      "eraserCommit": [
+        4.806791665032506,
+        4.575541664962657,
+        4.587791656376794,
+        4.559833338134922
+      ],
+      "save": [
+        22.787291658460163
+      ],
+      "shapeRaster": [
+        8.370791663764976
+      ],
+      "toolSwitch": [
+        2.10341667116154,
+        1.0339583386667073,
+        0.9465000039199367,
+        0.9479583386564627
+      ]
+    },
+    "processPeakResidentBytes": 212008960,
+    "shape": true,
+    "shapeHoldToPreviewMs": 28.882958329631947,
+    "strokes": 1500,
+    "zoom": 2.5
+  }
+]

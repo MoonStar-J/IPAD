@@ -17,6 +17,7 @@ struct LibraryView: View {
     @State private var createdNoteID: UUID?
     @State private var editingNote: Notebook?
     @State private var deletingNote: Notebook?
+    @State private var emptyingTrash: Set<UUID>?
     @State private var editingProject: NoteProject?
     @State private var creatingProject = false
     @State private var newProjectParentID: UUID?
@@ -168,6 +169,20 @@ struct LibraryView: View {
                         .navigationBarTitleDisplayMode(.inline)
                         .searchable(text: $query, prompt: "프로젝트·노트 이름 또는 텍스트 검색")
                         .toolbar {
+                            if filter == .trash {
+                                ToolbarItem(placement: .topBarTrailing) {
+                                    Button("모두 영구 삭제", role: .destructive) {
+                                        emptyingTrash = Set(store.library.notebooks.filter { $0.deletedAt != nil }.map(\.id))
+                                    }
+                                    .disabled(!store.library.notebooks.contains { $0.deletedAt != nil })
+                                    .accessibilityIdentifier("trash-empty-all")
+                                }
+                                if !(store.library.pendingAssetDeletions ?? []).isEmpty {
+                                    ToolbarItem(placement: .topBarTrailing) {
+                                        Button("첨부 정리 다시 시도") { store.finishPermanentDeletion() }
+                                    }
+                                }
+                            }
                             if filter != .trash && route == nil {
                                 ToolbarItemGroup(placement: .topBarTrailing) {
                                     if let id = currentProjectID, let project = store.project(id) {
@@ -222,6 +237,13 @@ struct LibraryView: View {
             if route != nil { deferredImportURL = url; route = nil }
             else { prepareImport(url, folderID: nil) }
         }
+        .alert("휴지통의 \(emptyingTrash?.count ?? 0)개 노트를 모두 영구 삭제할까요?", isPresented: Binding(get: { emptyingTrash != nil }, set: { if !$0 { emptyingTrash = nil } }), presenting: emptyingTrash) { ids in
+            Button("취소", role: .cancel) { emptyingTrash = nil }
+            Button("모두 영구 삭제", role: .destructive) {
+                store.permanentlyDelete(ids)
+                emptyingTrash = nil
+            }
+        } message: { _ in Text("검색 결과와 관계없이 휴지통 전체가 대상입니다. 노트와 첨부·AI 대화가 삭제되며 복구할 수 없습니다.") }
         .alert("노트를 영구 삭제할까요?", isPresented: Binding(get: { deletingNote != nil }, set: { if !$0 { deletingNote = nil } })) {
             Button("취소", role: .cancel) { }
             Button("영구 삭제", role: .destructive) { if let note = deletingNote { store.permanentlyDelete(note.id) } }

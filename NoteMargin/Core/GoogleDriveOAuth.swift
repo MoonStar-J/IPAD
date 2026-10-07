@@ -24,17 +24,18 @@ struct GoogleDriveOAuth {
     static func base64(_ data: Data) -> String {
         data.base64EncodedString().replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "")
     }
-    func authorization(selectAccount: Bool) -> URL {
+    func authorization(selectAccount: Bool, picking: Bool = true) -> URL {
         var url = URLComponents(string: "https://accounts.google.com/o/oauth2/v2/auth")!
-        let fields = ["client_id": clientID, "redirect_uri": redirect.absoluteString, "response_type": "code",
+        var fields = ["client_id": clientID, "redirect_uri": redirect.absoluteString, "response_type": "code",
                       "scope": Self.scope, "state": state, "code_challenge_method": "S256",
                       "code_challenge": Self.base64(Data(SHA256.hash(data: Data(verifier.utf8)))),
                       "access_type": "offline", "prompt": selectAccount ? "consent select_account" : "consent",
-                      "trigger_onepick": "true", "mimetypes": "application/pdf", "allow_multiple": "false"]
+                      "include_granted_scopes": "false"]
+        if picking { fields.merge(["trigger_onepick": "true", "mimetypes": "application/pdf", "allow_multiple": "false"]) { _, new in new } }
         url.queryItems = fields.sorted { $0.key < $1.key }.map { URLQueryItem(name: $0.key, value: $0.value) }
         return url.url!
     }
-    func callback(_ url: URL) throws -> (code: String, fileID: String) {
+    func callback(_ url: URL, picking: Bool = true) throws -> (code: String, fileID: String) {
         guard url.scheme == redirect.scheme, url.host == redirect.host, url.path == redirect.path,
               url.user == nil, url.password == nil, url.port == nil, url.fragment == nil,
               let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems else { throw DriveImportError.authorization }
@@ -47,6 +48,7 @@ struct GoogleDriveOAuth {
         if values["error"] == "access_denied" { throw DriveImportError.denied }
         guard values["error"] == nil, let code = values["code"], !code.isEmpty else { throw DriveImportError.authorization }
         if let scope = values["scope"], Set(scope.split(separator: " ").map(String.init)) != [Self.scope] { throw DriveImportError.authorization }
+        guard picking else { return (code, "") }
         guard let id = values["picked_file_ids"], !id.isEmpty else { throw CancellationError() }
         guard id.utf8.allSatisfy({ (65...90).contains($0) || (97...122).contains($0) || (48...57).contains($0) || $0 == 45 || $0 == 95 }) else { throw DriveImportError.selection }
         return (code, id)

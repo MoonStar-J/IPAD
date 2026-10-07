@@ -15,15 +15,16 @@ enum RepositoryError: LocalizedError {
 /// keeps an interrupted write from leaving a partially written library or drawing.
 final class LibraryRepository {
     let root: URL
-    private let files = FileManager.default
+    private let files: FileManager
     private let encoder: JSONEncoder = {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         return encoder
     }()
 
-    init(root: URL) throws {
+    init(root: URL, files: FileManager = .default) throws {
         self.root = root
+        self.files = files
         try files.createDirectory(at: root, withIntermediateDirectories: true)
     }
 

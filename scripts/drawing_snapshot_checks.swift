@@ -66,7 +66,7 @@ import Combine
     canvas.delegate = nil
     defer {
         session.stop()
-        if store.flushDrawings() { store.permanentlyDelete(noteID) }
+        if store.flushDrawings() { store.trash(noteID); store.permanentlyDelete(noteID) }
     }
     try check(session.loadError == nil && !store.hasUnsavedChanges, "clean blank note starts with no pending drawing")
     var dirtyPublications: [Bool] = []
@@ -225,7 +225,7 @@ import Combine
             unavailableStore.beginDrawingInteraction(noteID: unavailableNoteID, pageID: unavailablePageID,
                                                     snapshot: { recoveredSource })
             unavailableStore.endDrawingInteraction(noteID: unavailableNoteID, pageID: unavailablePageID)
-            if unavailableStore.flushDrawings() { unavailableStore.permanentlyDelete(unavailableNoteID) }
+            if unavailableStore.flushDrawings() { unavailableStore.trash(unavailableNoteID); unavailableStore.permanentlyDelete(unavailableNoteID) }
         }
         unavailableStore.beginDrawingInteraction(noteID: unavailableNoteID, pageID: unavailablePageID, snapshot: { nil })
         unavailableStore.markActiveDrawingChanged(noteID: unavailableNoteID, pageID: unavailablePageID)

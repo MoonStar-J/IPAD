@@ -23,6 +23,8 @@ struct ShapeRecognizer: ShapeRecognizing {
     struct Configuration: Sendable {
         var minimumConfidence: Double = 0.88
         var maximumSampleCount: Int = 128
+        var maximumPreferredCircleAxisRatio: Double = 1.24
+        var circleFitErrorAllowance: Double = 0.022
     }
     var configuration = Configuration()
 
@@ -35,11 +37,15 @@ struct ShapeRecognizer: ShapeRecognizing {
         var candidates = [Candidate]()
         if let triangle = fitPolygon(contour, sides: 3) { candidates.append(triangle) }
         if let rectangle = fitPolygon(contour, sides: 4) { candidates.append(rectangle) }
-        if let ellipse = fitEllipse(contour) {
-            if ellipse.ratio <= 1.12, let circle = fitCircle(contour), circle.confidence >= configuration.minimumConfidence {
-                candidates.append(circle)
-            } else { candidates.append(ellipse.candidate) }
-        }
+        let ellipse = fitEllipse(contour)
+        let circle = fitCircle(contour)
+        // Prefer the simpler circle only when it explains the contour nearly as
+        // well. The existing closure, coverage, winding and confidence gates stay.
+        if let circle, circle.confidence >= configuration.minimumConfidence,
+           ellipse == nil || (ellipse!.ratio <= configuration.maximumPreferredCircleAxisRatio &&
+               circle.error - ellipse!.candidate.error <= configuration.circleFitErrorAllowance) {
+            candidates.append(circle)
+        } else if let ellipse { candidates.append(ellipse.candidate) }
         let selected = candidates.filter { $0.confidence >= configuration.minimumConfidence }.max { $0.confidence < $1.confidence }
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("--shape-diagnostics") {

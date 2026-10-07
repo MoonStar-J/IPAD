@@ -152,9 +152,28 @@ enum PageRenderer {
     }
 }
 
-/// The PDF is rasterized only when a tile enters the viewport or its content
-/// changes. Pan/pinch moves existing tiles in the same transaction as native ink.
-/// A long stitched PDF never allocates a page-sized bitmap.
+// Only inputs that change paper/PDF/element pixels invalidate background tiles.
+// Viewport, shape identities and groups are owned by the editing path.
+struct PaperContent: Equatable {
+    let paper: PaperStyle
+    let width: Double
+    let height: Double
+    let infinite: Bool
+    let pdfPage: Int?
+    let pdfSegments: [PDFSegment]?
+    let pdfFit: Bool?
+    let elements: [PageElement]
+}
+
+extension NotePage {
+    var backgroundContent: PaperContent {
+        PaperContent(paper: paper, width: width, height: height, infinite: isInfinite,
+                     pdfPage: pdfPageIndex, pdfSegments: pdfSegments, pdfFit: pdfFitToPage, elements: elements)
+    }
+}
+
+/// Rasterizes paper/PDF tiles on visibility or pixel-input changes. Pan/pinch
+/// moves existing tiles with native ink, without a page-sized bitmap.
 final class PaperView: UIView {
     var render: ((CGContext) -> Void)? { didSet { invalidateTiles() } }
     var documentBounds = CGRect.zero
@@ -165,7 +184,6 @@ final class PaperView: UIView {
     private var lastTransform = CGAffineTransform.identity
     private var lastViewport = CGRect.zero
     private var lastDocumentBounds = CGRect.zero
-    private var refinement: Task<Void, Never>?
     private var drawingActive = false
     private(set) var rasterizationCount = 0
     private(set) var viewportTransform = CGAffineTransform.identity
@@ -179,7 +197,6 @@ final class PaperView: UIView {
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
     private func invalidateTiles() {
-        refinement?.cancel()
         tiles.values.forEach { $0.removeFromSuperlayer() }
         tiles.removeAll()
         rasterScale = 0
@@ -188,8 +205,7 @@ final class PaperView: UIView {
     func updateViewport(_ transform: CGAffineTransform, viewport: CGRect, interacting: Bool) {
         guard !viewport.isEmpty, !documentBounds.isEmpty, transform.a > 0 else { return }
         let changed = transform != lastTransform || viewport != lastViewport || documentBounds != lastDocumentBounds || tiles.isEmpty
-        lastTransform = transform; lastViewport = viewport
-        lastDocumentBounds = documentBounds
+        lastTransform = transform; lastViewport = viewport; lastDocumentBounds = documentBounds
         viewportTransform = transform
         CATransaction.begin(); CATransaction.setDisableActions(true)
         // Native UIScrollView bounds already supplies -contentOffset. Paper is
@@ -205,16 +221,11 @@ final class PaperView: UIView {
         // A large zoom-out must not retain hundreds of high-resolution tiles.
         let area = viewport.width * viewport.height / (transform.a * transform.a)
         if rasterScale == 0 || area * rasterScale * rasterScale / (768 * 768) > 64 { rasterScale = desired }
-        if changed { fillVisibleTiles() }
-        refinement?.cancel()
-        if rasterScale != desired && !drawingActive {
-            refinement = Task { [weak self] in
-                do { try await Task.sleep(for: .milliseconds(interacting ? 180 : 80)) } catch { return }
-                guard let self else { return }
-                self.rasterScale = desired
-                self.fillVisibleTiles()
-            }
-        }
+        // Gesture/end-of-inking boundaries determine refinement. A delayed
+        // timer must not swap paper resolution during the following shape edit.
+        let refine = rasterScale != desired && !drawingActive && !interacting
+        if refine { rasterScale = desired }
+        if changed || refine { fillVisibleTiles() }
     }
 
     /// Share immutable tile CGImages with interaction overlays. No image render
@@ -236,8 +247,7 @@ final class PaperView: UIView {
 
     func setDrawingActive(_ active: Bool) {
         drawingActive = active
-        if active { refinement?.cancel() }
-        else { updateViewport(lastTransform, viewport: lastViewport, interacting: false) }
+        if !active { updateViewport(lastTransform, viewport: lastViewport, interacting: false) }
     }
 
     private func fillVisibleTiles() {
@@ -256,9 +266,8 @@ final class PaperView: UIView {
                 let rect = CGRect(x: CGFloat(column) * side, y: CGFloat(row) * side, width: side, height: side).intersection(documentBounds)
                 guard !rect.isEmpty, !rect.isNull else { continue }
                 retained.insert(key)
-                // Expanding an infinite range can enlarge an old boundary tile.
-                // Full interior tiles remain reusable at the same resolution.
-                if tiles[key]?.frame == rect { continue }
+                if let existing = tiles[key], existing.frame == rect { continue }
+                // Expanding an infinite boundary only replaces its partial tile.
                 tiles.removeValue(forKey: key)?.removeFromSuperlayer()
                 let format = UIGraphicsImageRendererFormat(); format.scale = rasterScale; format.opaque = true
                 let image = UIGraphicsImageRenderer(size: rect.size, format: format).image { output in

@@ -145,6 +145,9 @@ struct Library: Codable, Equatable {
     var folders: [NoteFolder] = []
     var projects: [NoteProject] = []
     var notebooks: [Notebook] = []
+    // IDs already removed from the library whose files still need cleanup.
+    // Retained across failures/relaunch; never includes a live notebook.
+    var pendingAssetDeletions: [UUID]?
 
     init(version: Int = 1, folders: [NoteFolder] = [], projects: [NoteProject] = [], notebooks: [Notebook] = []) {
         self.version = version
@@ -153,11 +156,12 @@ struct Library: Codable, Equatable {
         self.notebooks = notebooks
     }
 
-    private enum CodingKeys: String, CodingKey { case version, folders, projects, notebooks, projectsMigrated }
+    private enum CodingKeys: String, CodingKey { case version, folders, projects, notebooks, projectsMigrated, pendingAssetDeletions }
 
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         projectsMigrated = try values.decodeIfPresent(Bool.self, forKey: .projectsMigrated)
+        pendingAssetDeletions = try values.decodeIfPresent([UUID].self, forKey: .pendingAssetDeletions)
         version = try values.decode(Int.self, forKey: .version)
         folders = try values.decode([NoteFolder].self, forKey: .folders)
         projects = try values.decodeIfPresent([NoteProject].self, forKey: .projects) ?? []

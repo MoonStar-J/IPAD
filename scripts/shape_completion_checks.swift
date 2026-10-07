@@ -345,7 +345,7 @@ import PencilKit
         host.configure(note:note,page:page,store:fixtureStore,fingerDrawing:false,editingObjects:false,toolsVisible:false,
                        onSelect:{_ in},onMove:{_,_,_ in},onTurnPage:{_ in false})
         host.layoutIfNeeded()
-        defer { session.stop(); fixtureStore.permanentlyDelete(id) }
+        defer { session.stop(); fixtureStore.trash(id); fixtureStore.permanentlyDelete(id) }
         for factor in [CGFloat(0.5),1,2] {
             session.canvas.zoomScale=host.bounds.width / page.width * factor
             host.canvasDidZoom()
@@ -455,7 +455,7 @@ import PencilKit
     let preferences = UserDefaults(suiteName: suite)!
     defer {
         preferences.removePersistentDomain(forName: suite)
-        if store.flushDrawings() { store.permanentlyDelete(noteID) }
+        if store.flushDrawings() { store.trash(noteID); store.permanentlyDelete(noteID) }
     }
     store.queueDrawing(source, noteID: noteID, pageID: page.id)
     try check(store.flushDrawings(), "original freehand drawing reaches the actual repository")
@@ -644,7 +644,7 @@ private final class ShapeCompletionBlockingRecognizer: ShapeRecognizing, @unchec
         host.configure(note:note,page:page,store:store,fingerDrawing:false,editingObjects:false,toolsVisible:true,onSelect:{_ in},onMove:{_,_,_ in},onTurnPage:{_ in false})
         host.layoutIfNeeded()
         try? await Task.sleep(for:.milliseconds(100))
-        defer { session.stop();window.isHidden=true;store.permanentlyDelete(id) }
+        defer { session.stop();window.isHidden=true;store.trash(id); store.permanentlyDelete(id) }
         let selectedTool=session.selectedTool,controller=session.shapeCompletionForTesting
         var points=[CGPoint]()
         let vertices = kind == .triangle ? [CGPoint(x:-80,y:65),CGPoint(x:-45,y:-70),CGPoint(x:100,y:65),CGPoint(x:-80,y:65)] :

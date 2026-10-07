@@ -42,6 +42,16 @@ func checkShapeRecognition() throws {
     let fixtures: [(ShapeKind, [CGPoint])] = [(.line, line), (.circle, curve(a: 60, b: 60)),
         (.circle, curve(a: 60, b: 60, noise: 0.014)), (.ellipse, curve(a: 100, b: 44)),
         (.ellipse, curve(a: 110, b: 24, noise: 0.008)), (.rectangle, rectangle), (.rectangle, square)]
+    // Regression: a slightly flattened hand circle was previously forced to an ellipse.
+    for ratio in [1.0, 1.08, 1.14, 1.18, 1.35, 1.7, 2.4] {
+        let expected: ShapeKind = ratio <= 1.18 ? .circle : .ellipse
+        for noise in [0.0, 0.008] { for angle in [0.0, 0.51, 1.7] { for scale in [0.2, 1.0, 8.0] {
+            var points = curve(a: 80 * ratio, b: 80, noise: noise)
+            points[points.count - 1] = CGPoint(x: points[0].x + 0.6, y: points[0].y + 0.3)
+            let result = recognizer.recognize(documentPoints: transformed(points, scale: scale, angle: angle, offset: CGPoint(x: -1800, y: 2900)))
+            try check(result?.kind == expected, "near-circle ratio=\(ratio), noise=\(noise), angle=\(angle), scale=\(scale)")
+        } } }
+    }
     for (kind, points) in fixtures {
         for scale in [0.003, 1.0, 120.0] {
             for angle in [0.0, 0.37, 1.57, 2.8] {

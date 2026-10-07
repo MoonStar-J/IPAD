@@ -114,7 +114,7 @@ final class MarginAIStore: ObservableObject {
             conversations.removeAll { $0.id == id }; failures[id] = nil; unsaved.remove(id)
         } catch { errorMessage = "대화를 삭제하지 못했습니다. \(error.localizedDescription)" }
     }
-    func deleteNote(_ noteID: UUID) {
+    func deleteNote(_ noteID: UUID) throws {
         let ids = conversations.filter { $0.noteID == noteID }.map(\.id)
         for id in ids {
             requests[id]?.cancel(); requests[id] = nil; sending.remove(id); failures[id] = nil
@@ -122,8 +122,8 @@ final class MarginAIStore: ObservableObject {
         }
         // Remove from memory first so a late, cancelled response cannot restore it.
         conversations.removeAll { $0.noteID == noteID }; loaded.remove(noteID)
-        do { try repository?.deleteNote(noteID) }
-        catch { errorMessage = "삭제된 노트의 AI 대화를 정리하지 못했습니다. \(error.localizedDescription)" }
+        guard let repository else { throw CocoaError(.fileWriteUnknown) }
+        try repository.deleteNote(noteID)
     }
 
     func configure(_ id: UUID, mode: TutorMode? = nil, conditions: String? = nil, includeImage: Bool? = nil) {

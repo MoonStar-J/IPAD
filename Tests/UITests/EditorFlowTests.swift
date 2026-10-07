@@ -1,8 +1,108 @@
 import XCTest
 
 final class EditorFlowTests: XCTestCase {
-    @MainActor func makeNote(_ app: XCUIApplication, infinite: Bool = false, finger: Bool = true) -> String {
-        app.launchArguments = ["-fingerDrawing", finger ? "YES" : "NO", "--pencil-test-touch", "--shape-diagnostics", "-app.appearance", "light"]
+    @MainActor func testFirstShapeDragAndCornerResize() throws { try checkShapeEditing(infinite: false) }
+    @MainActor func testInfiniteShapeDragAndCornerResize() throws { try checkShapeEditing(infinite: true) }
+    @MainActor private func checkShapeEditing(infinite: Bool) throws {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchEnvironment["NOTEMARGIN_UI_FIXTURE"] = UUID().uuidString
+        app.launchArguments = ["-fingerDrawing", infinite ? "NO" : "YES", "--editing-diagnostics", "-app.appearance", "dark"]
+        if infinite { app.launchArguments.append("--infinite-editing-fixture") }
+        app.launch()
+        XCTAssertTrue(app.staticTexts["Editing fixture"].firstMatch.waitForExistence(timeout: 20))
+        app.staticTexts["Editing fixture"].firstMatch.tap()
+        let canvas = app.scrollViews["notebook-canvas"].firstMatch
+        XCTAssertTrue(canvas.waitForExistence(timeout: 10), app.debugDescription)
+        func frame() throws -> CGRect {
+            let numbers = (canvas.value as? String ?? "").split(separator: ",").compactMap { Double($0) }
+            XCTAssertEqual(numbers.count, 7, canvas.debugDescription)
+            XCTAssertEqual(numbers[4], 1, "drag/resize must not add a native tail stroke")
+            XCTAssertEqual(numbers[6], 0, "native rendering must take over the edit preview")
+            return CGRect(x: numbers[0], y: numbers[1], width: numbers[2], height: numbers[3])
+        }
+        func coordinate(_ p: CGPoint) -> XCUICoordinate {
+            canvas.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: p.x, dy: p.y))
+        }
+        let initial = try frame()
+        coordinate(CGPoint(x: initial.midX, y: initial.midY)).press(forDuration: 0.05,
+            thenDragTo: coordinate(CGPoint(x: initial.midX + 85, y: initial.midY + 45)), withVelocity: .slow, thenHoldForDuration: 0.1)
+        let moved = try frame()
+        XCTAssertEqual(moved.midX - initial.midX, 85, accuracy: 8, canvas.value as? String ?? "")
+        XCTAssertEqual(moved.midY - initial.midY, 45, accuracy: 8)
+        let corner = CGPoint(x: moved.maxX, y: moved.maxY)
+        coordinate(corner).press(forDuration: 0.05,
+            thenDragTo: coordinate(CGPoint(x: corner.x + moved.width * 0.25, y: corner.y + moved.height * 0.25)), withVelocity: .slow, thenHoldForDuration: 0.1)
+        let resized = try frame()
+        XCTAssertGreaterThan(resized.width, moved.width * 1.18)
+        XCTAssertEqual(resized.minX, moved.minX, accuracy: 3)
+        XCTAssertEqual(resized.minY, moved.minY, accuracy: 3)
+        XCTAssertEqual(resized.width / resized.height, moved.width / moved.height, accuracy: 0.01)
+        coordinate(CGPoint(x: resized.maxX + 55, y: resized.maxY + 55)).tap()
+        XCTAssertFalse(app.buttons["ink-selection-action-copy"].exists)
+        try XCTUnwrap(app.buttons.matching(identifier: "실행 취소").allElementsBoundByIndex.first(where: \.isHittable)).tap()
+        XCTAssertEqual(try frame().width, moved.width, accuracy: 4)
+        try XCTUnwrap(app.buttons.matching(identifier: "다시 실행").allElementsBoundByIndex.first(where: \.isHittable)).tap()
+        XCTAssertEqual(try frame().width, resized.width, accuracy: 4)
+        app.buttons["ink-tool-selection"].tap()
+        app.buttons["ink-selection-mode"].tap(); app.buttons["ink-selection-mode-box"].tap()
+        coordinate(CGPoint(x: resized.minX - 16, y: resized.minY - 16)).press(forDuration: 0.05,
+            thenDragTo: coordinate(CGPoint(x: resized.maxX + 16, y: resized.maxY + 16)), withVelocity: .slow, thenHoldForDuration: 0.1)
+        XCTAssertTrue(app.buttons["ink-selection-action-copy"].waitForExistence(timeout: 5))
+        XCTAssertEqual(try frame().width, resized.width, accuracy: 4)
+        let attachment = XCTAttachment(screenshot: app.screenshot()); attachment.name = "Shape-direct-edit-dark"; attachment.lifetime = .keepAlways; add(attachment)
+        app.buttons["editor-library-back"].tap()
+        app.terminate(); app.launch()
+        app.staticTexts["Editing fixture"].firstMatch.tap()
+        XCTAssertTrue(canvas.waitForExistence(timeout: 10))
+        XCTAssertEqual(try frame().width, resized.width, accuracy: 3)
+        if !infinite {
+            app.buttons["ink-tool-eraser"].tap()
+            let rect = try frame()
+            coordinate(CGPoint(x: rect.midX, y: rect.minY - 10)).press(forDuration: 0.05,
+                thenDragTo: coordinate(CGPoint(x: rect.midX, y: rect.minY + 10)), withVelocity: .slow, thenHoldForDuration: 0.1)
+            func count() -> Int { Int((canvas.value as? String ?? "").split(separator: ",")[4]) ?? -1 }
+            XCTAssertEqual(count(), 0)
+            try XCTUnwrap(app.buttons.matching(identifier: "실행 취소").allElementsBoundByIndex.first(where: \.isHittable)).tap(); XCTAssertEqual(count(), 1)
+            try XCTUnwrap(app.buttons.matching(identifier: "다시 실행").allElementsBoundByIndex.first(where: \.isHittable)).tap(); XCTAssertEqual(count(), 0)
+            try XCTUnwrap(app.buttons.matching(identifier: "실행 취소").allElementsBoundByIndex.first(where: \.isHittable)).tap(); XCTAssertEqual(count(), 1)
+        }
+    }
+    @MainActor func testTrashAllIgnoresSearchAndCanCancel() {
+        continueAfterFailure = false
+        executionTimeAllowance = 120
+        let app = XCUIApplication()
+        app.launchEnvironment["NOTEMARGIN_UI_FIXTURE"] = UUID().uuidString
+        app.launchArguments = ["-app.appearance", "light", "--trashed-editing-fixture"]
+        app.launch()
+        let trash = app.buttons.matching(NSPredicate(format: "label CONTAINS '최근 삭제된 항목'")).firstMatch
+        XCTAssertTrue(trash.waitForExistence(timeout: 15)); trash.tap()
+        let empty = app.buttons["trash-empty-all"]
+        XCTAssertTrue(empty.waitForExistence(timeout: 5)); XCTAssertTrue(empty.isEnabled)
+        let search = app.searchFields.firstMatch
+        search.tap(); search.typeText("no matching note")
+        empty.tap()
+        XCTAssertTrue(app.alerts.staticTexts.matching(NSPredicate(format: "label CONTAINS '1개'")).firstMatch.waitForExistence(timeout: 5))
+        app.alerts.buttons["취소"].tap()
+        XCTAssertTrue(empty.isEnabled)
+        empty.tap(); app.alerts.buttons["모두 영구 삭제"].tap()
+        XCTAssertFalse(empty.isEnabled)
+        let attachment = XCTAttachment(screenshot: app.screenshot()); attachment.name = "Trash-empty"; attachment.lifetime = .keepAlways; add(attachment)
+    }
+    @MainActor func testDriveConnectionEntryExplainsMissingConfiguration() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchEnvironment["NOTEMARGIN_UI_FIXTURE"] = UUID().uuidString
+        app.launch()
+        XCTAssertTrue(app.buttons["library-import-pdf"].waitForExistence(timeout: 15)); app.buttons["library-import-pdf"].tap()
+        XCTAssertTrue(app.buttons["pdf-import-google-drive"].waitForExistence(timeout: 5)); app.buttons["pdf-import-google-drive"].tap()
+        XCTAssertTrue(app.staticTexts["앱 설정 필요"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'GOOGLE_CLIENT_ID'")).firstMatch.exists)
+        app.buttons["완료"].tap()
+        XCTAssertTrue(app.buttons["pdf-import-files"].isHittable)
+    }
+    @MainActor func makeNote(_ app: XCUIApplication, infinite: Bool = false, finger: Bool = true, appearance: String = "light") -> String {
+        app.launchArguments = ["-fingerDrawing", finger ? "YES" : "NO", "--pencil-test-touch", "--shape-diagnostics", "-app.appearance", appearance]
         app.launch()
         XCTAssertTrue(app.buttons["library-create-note"].waitForExistence(timeout:20),app.debugDescription)
         app.buttons["library-create-note"].tap()
@@ -15,8 +115,16 @@ final class EditorFlowTests: XCTestCase {
         return String(title)
     }
     @MainActor func testRealAppLineHoldNextStrokeAndReopen() {
+        checkLineHold(appearance: "light")
+    }
+    @MainActor func testDarkLineHoldNextStrokeAndReopen() {
+        checkLineHold(appearance: "dark")
+    }
+    @MainActor private func checkLineHold(appearance: String) {
         continueAfterFailure=false
-        let app=XCUIApplication();let title=makeNote(app)
+        let app=XCUIApplication()
+        app.launchEnvironment["NOTEMARGIN_UI_FIXTURE"] = UUID().uuidString
+        let title=makeNote(app, appearance: appearance)
         let canvas=app.scrollViews["notebook-canvas"].firstMatch
         let surface=canvas.exists ? canvas : app.otherElements["notebook-canvas"].firstMatch
         XCTAssertTrue(surface.waitForExistence(timeout:5),app.debugDescription)
@@ -25,7 +133,7 @@ final class EditorFlowTests: XCTestCase {
         start.press(forDuration:0.05,thenDragTo:end,withVelocity:.slow,thenHoldForDuration:1.0)
         let next=surface.coordinate(withNormalizedOffset:CGVector(dx:0.3,dy:0.55))
         next.press(forDuration:0.01,thenDragTo:surface.coordinate(withNormalizedOffset:CGVector(dx:0.50,dy:0.6)),withVelocity:.fast,thenHoldForDuration:0.05)
-        let screenshot=XCTAttachment(screenshot:app.screenshot());screenshot.name="Actual-app-line-and-next-stroke";screenshot.lifetime = .keepAlways;add(screenshot)
+        let screenshot=XCTAttachment(screenshot:app.screenshot());screenshot.name="Actual-app-line-and-next-stroke-" + appearance;screenshot.lifetime = .keepAlways;add(screenshot)
         XCTAssertGreaterThan(darkPixels(app),100,"white paper must retain visible native ink after snap")
         app.buttons["editor-library-back"].tap()
         XCTAssertTrue(app.staticTexts[title].firstMatch.waitForExistence(timeout:5));app.staticTexts[title].firstMatch.tap()

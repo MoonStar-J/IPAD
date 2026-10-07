@@ -356,6 +356,27 @@ final class InkGeometryCache {
         #if DEBUG
         result.updatedIndexEntryCount = changes; result.reusedEntryCount = retained.count; result.reusedPrefixEntryCount = prefix
         #endif
+        inheritRaster(into: result, retained: retained)
+        return result
+    }
+
+    /// A stroke eraser knows exactly which immutable entries it removes. Avoid
+    /// comparing/hash-matching every survivor again at the next pointer-down.
+    @MainActor func removing(_ indices: Set<Int>) -> InkGeometryCache {
+        guard !indices.isEmpty else { return self }
+        var kept = [Entry](), retained = [Int: Int]()
+        var revisedRoot = root
+        for (index, entry) in entries.enumerated() {
+            if indices.contains(index) {
+                if Self.valid(entry.bounds) { revisedRoot = Node.removing(Key(entry), from: revisedRoot) }
+            } else { retained[index] = kept.count; kept.append(entry) }
+        }
+        let result = InkGeometryCache(drawing: PKDrawing(strokes: kept.map(\.stroke)), entries: kept, root: revisedRoot, nextToken: nextToken)
+        inheritRaster(into: result, retained: retained)
+        return result
+    }
+
+    @MainActor private func inheritRaster(into result: InkGeometryCache, retained: [Int: Int]) {
         // Do not force a raster cache to exist merely to update the index, and
         // never retain a chain of old document/cache revisions. If an inherited
         // raster is still lazy, compose its proven mapping into this revision.
@@ -367,7 +388,6 @@ final class InkGeometryCache {
                 if let newIndex = retained[current] { result.retainedRasterIndices[source] = newIndex }
             }
         }
-        return result
     }
 
     private static func valid(_ rect: CGRect) -> Bool {

@@ -284,7 +284,7 @@ private final class MemoryFixtureProtocol: URLProtocol {
     let previousError = store.errorMessage
     defer {
         store.endDrawingInteraction(noteID: noteID, pageID: pageID)
-        if store.flushDrawings() { store.permanentlyDelete(noteID) }
+        if store.flushDrawings() { store.trash(noteID); store.permanentlyDelete(noteID) }
         store.errorMessage = previousError
     }
     let seed = ink(90), first = ink(150), latest = ink(210, lines: 2)

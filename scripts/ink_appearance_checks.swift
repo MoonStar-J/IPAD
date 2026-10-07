@@ -180,6 +180,9 @@ import PencilKit
         try check(nativeOverlap > 100 && (0.94...1.06).contains(overlapRatio),
                   "\(suffix) per-stroke cache matches the native full-drawing blend inside overlapping marker ink")
         markerPreview.clear()
+        // Ordinary visible ink can be a composite tile. Explicitly prepare a
+        // standalone texture before checking standalone reuse across reindexing.
+        _ = cache.nativeRasterCache.tiles(for: 1, visible: documentViewport, scale: UIScreen.main.scale)
         let remaining = PKDrawing(strokes: Array(drawing.strokes.dropFirst()))
         let reused = NativeInkRasterCache(drawing: remaining)
         reused.reuseUnchangedStrokes(from: cache.nativeRasterCache)

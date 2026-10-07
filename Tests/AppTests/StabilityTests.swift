@@ -1,6 +1,7 @@
 import XCTest
 import PencilKit
 import PDFKit
+import Security
 @testable import NoteMargin
 
 @MainActor final class StabilityTests: XCTestCase {
@@ -8,10 +9,246 @@ import PDFKit
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("Stability-"+UUID().uuidString)
         return try NoteStore(repository: LibraryRepository(root: root))
     }
-    func stroke(_ points: [CGPoint], color: UIColor = .black) -> PKStroke {
+    func stroke(_ points: [CGPoint], color: UIColor = .black, date: Date = Date()) -> PKStroke {
         PKStroke(ink: PKInk(.pen, color: color), path: PKStrokePath(controlPoints: points.enumerated().map { i,p in
             PKStrokePoint(location: p, timeOffset: Double(i)*0.01, size: CGSize(width: 2,height: 2), opacity: 1, force: 1, azimuth: 0, altitude: .pi/2)
-        }, creationDate: Date()))
+        }, creationDate: date))
+    }
+    func testTrashBatchValidationFailureAndRetry() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let files = CleanupFailureFileManager()
+        let repository = try LibraryRepository(root: root, files: files)
+        let store = try NoteStore(repository: repository)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let active = try XCTUnwrap(store.createNote(title: "active", paper: .plain, cover: .blue, folderID: nil))
+        let restored = try XCTUnwrap(store.createNote(title: "restored", paper: .plain, cover: .blue, folderID: nil))
+        let deleted = try XCTUnwrap(store.createNote(title: "deleted", paper: .plain, cover: .blue, folderID: nil))
+        let failed = try XCTUnwrap(store.createNote(title: "retry", paper: .plain, cover: .blue, folderID: nil))
+        for id in [active, restored, deleted, failed] {
+            try repository.writeAsset(Data([1,2,3]), noteID: id, name: "attachment.bin")
+        }
+        store.trash(restored); store.trash(deleted); store.trash(failed)
+        let confirmation = Set([active, restored, deleted, failed])
+        store.restore(restored)
+        files.blocked = repository.noteDirectory(failed)
+        XCTAssertFalse(store.permanentlyDelete(confirmation))
+        XCTAssertNotNil(store.errorMessage)
+        XCTAssertNotNil(store.note(active)); XCTAssertNotNil(store.note(restored))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: repository.noteDirectory(active).path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: repository.noteDirectory(restored).path))
+        XCTAssertNil(store.note(deleted)); XCTAssertNil(store.note(failed))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: repository.noteDirectory(deleted).path))
+        XCTAssertEqual(Set(store.library.pendingAssetDeletions ?? []), [failed])
+        let reopened = try NoteStore(repository: repository)
+        files.blocked = nil
+        XCTAssertTrue(reopened.finishPermanentDeletion())
+        XCTAssertNil(reopened.library.pendingAssetDeletions)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: repository.noteDirectory(failed).path))
+        XCTAssertTrue(reopened.permanentlyDelete(confirmation), "repeated taps cannot delete restored notes")
+        XCTAssertEqual(reopened.library.notebooks.count, 2)
+    }
+    func testTrashSaveFailurePreservesAllFiles() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let repository = try LibraryRepository(root: root)
+        let store = try NoteStore(repository: repository)
+        defer { try? FileManager.default.removeItem(at: root) }
+        XCTAssertTrue(store.permanentlyDelete(Set<UUID>()))
+        let id = try XCTUnwrap(store.createNote(title: "safe", paper: .plain, cover: .blue, folderID: nil))
+        try repository.writeAsset(Data([4,5,6]), noteID: id, name: "keep.bin")
+        store.trash(id)
+        let manifest = root.appendingPathComponent("library.json")
+        try FileManager.default.moveItem(at: manifest, to: root.appendingPathComponent("library.backup"))
+        try FileManager.default.createDirectory(at: manifest, withIntermediateDirectories: false)
+        XCTAssertFalse(store.permanentlyDelete(id))
+        XCTAssertNotNil(store.note(id)?.deletedAt)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: repository.noteDirectory(id).appendingPathComponent("keep.bin").path))
+    }
+    func testDriveCredentialRestoreRefreshAndDisconnect() async throws {
+        let service = "DriveTest-" + UUID().uuidString
+        let client = "123.apps.googleusercontent.com"
+        let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: "selected-account"]
+        defer { SecItemDelete(query as CFDictionary) }
+        let tokens = GoogleDriveImport.Tokens(access_token: "fixture-expired", refresh_token: "fixture-refresh", expires_in: 1, token_type: "Bearer", scope: GoogleDriveOAuth.scope)
+        let credential = GoogleDriveImport.Credential(clientID: client, tokens: tokens, expires: .distantPast)
+        var add = query; add[kSecValueData as String] = try JSONEncoder().encode(credential)
+        XCTAssertEqual(SecItemAdd(add as CFDictionary, nil), errSecSuccess)
+        let config = URLSessionConfiguration.ephemeral; config.protocolClasses = [DriveFixtureProtocol.self]
+        let http = URLSession(configuration: config)
+        defer { http.invalidateAndCancel() }
+        let drive = GoogleDriveImport(configuration: (client, "com.googleusercontent.apps.123"), service: service, session: http)
+        XCTAssertTrue(drive.isConnected)
+        await drive.restoreConnection()
+        XCTAssertNil(drive.errorMessage)
+        XCTAssertEqual(drive.account, "fixture@example.invalid")
+        let restored = GoogleDriveImport(configuration: (client, "com.googleusercontent.apps.123"), service: service, session: http)
+        XCTAssertTrue(restored.isConnected)
+        XCTAssertEqual(restored.account, drive.account)
+        try restored.disconnect()
+        XCTAssertFalse(restored.isConnected)
+        XCTAssertFalse(GoogleDriveImport(configuration: (client, "com.googleusercontent.apps.123"), service: service, session: http).isConnected)
+    }
+    func testDriveConnectAndPickerScopeIsolation() throws {
+        let oauth = try GoogleDriveOAuth(clientID: "123.apps.googleusercontent.com", scheme: "com.googleusercontent.apps.123")
+        let connect = URLComponents(url: oauth.authorization(selectAccount: true, picking: false), resolvingAgainstBaseURL: false)!.queryItems!
+        XCTAssertNil(connect.first { $0.name == "trigger_onepick" })
+        XCTAssertEqual(connect.first { $0.name == "scope" }?.value, GoogleDriveOAuth.scope)
+        XCTAssertEqual(connect.first { $0.name == "include_granted_scopes" }?.value, "false")
+        let callback = URL(string: oauth.redirect.absoluteString + "?state=\(oauth.state)&code=fixture")!
+        XCTAssertEqual(try oauth.callback(callback, picking: false).code, "fixture")
+        XCTAssertThrowsError(try oauth.callback(callback))
+        XCTAssertThrowsError(try oauth.callback(URL(string: oauth.redirect.absoluteString + "?state=\(oauth.state)&error=access_denied")!, picking: false))
+    }
+    func testDriveRevokedAndOfflineRefresh() async throws {
+        for revoked in [false, true] {
+            let service = "DriveFailure-" + UUID().uuidString
+            let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
+                kSecAttrService as String: service, kSecAttrAccount as String: "selected-account"]
+            defer { SecItemDelete(query as CFDictionary) }
+            let tokens = GoogleDriveImport.Tokens(access_token: "fixture", refresh_token: "fixture", expires_in: 1, token_type: "Bearer", scope: GoogleDriveOAuth.scope)
+            let credential = GoogleDriveImport.Credential(clientID: "123.apps.googleusercontent.com", tokens: tokens, expires: .distantPast)
+            var item = query; item[kSecValueData as String] = try JSONEncoder().encode(credential)
+            XCTAssertEqual(SecItemAdd(item as CFDictionary, nil), errSecSuccess)
+            let config = URLSessionConfiguration.ephemeral
+            config.protocolClasses = revoked ? [RevokedDriveProtocol.self] : [OfflineDriveProtocol.self]
+            let http = URLSession(configuration: config)
+            defer { http.invalidateAndCancel() }
+            let drive = GoogleDriveImport(configuration: (credential.clientID, "com.googleusercontent.apps.123"), service: service, session: http)
+            await drive.restoreConnection()
+            XCTAssertNotNil(drive.errorMessage)
+            XCTAssertEqual(drive.isConnected, !revoked, "network failure preserves the account; revoked access requires login")
+            XCTAssertEqual(GoogleDriveImport(configuration: (credential.clientID, "com.googleusercontent.apps.123"), service: service, session: http).isConnected, !revoked)
+        }
+    }
+    func testEditingBoundaryPerformance() async throws {
+        var reports = [[String: Any]]()
+        for count in [60, 1500] { for shaped in [false, true] { for zoom in [1.0, 2.5] {
+            let store = try store()
+            let id = try XCTUnwrap(store.createNote(title: "Performance fixture", paper: .ruled, cover: .blue, folderID: nil))
+            let note = store.note(id)!, page = note.pages[0]
+            var now = 0.0; var fire: (@MainActor () -> Void)?
+            let scheduler = ShapeHoldScheduler(now: { now }, schedule: { _, action in fire = action; return { fire = nil } })
+            let preferences = UserDefaults(suiteName: "Performance-" + UUID().uuidString)!
+            let session = DrawingSession(preferences: preferences, shapeHoldScheduler: scheduler)
+            session.load(noteID: id, pageID: page.id, store: store)
+            let host = CanvasHostView(session: session); session.host = host
+            host.frame = CGRect(x: 0, y: 0, width: 800, height: 1000)
+            let window = UIWindow(frame: host.frame); let vc = UIViewController(); window.rootViewController = vc
+            vc.view.addSubview(host); window.makeKeyAndVisible()
+            host.configure(note: note, page: page, store: store, fingerDrawing: false, editingObjects: false, toolsVisible: true, onSelect: { _ in }, onMove: { _,_,_ in }, onTurnPage: { _ in false })
+            host.layoutIfNeeded(); session.canvas.zoomScale = zoom
+            session.canvas.contentOffset = CGPoint(x: 0, y: 100 * zoom)
+            host.canvasDidScroll()
+            let strokes = (0..<count).map { i in
+                stroke((0..<24).map { j in CGPoint(x: 50 + Double(i % 30) * 22 + Double(j) * 0.35, y: 160 + Double(i / 30) * 14 + sin(Double(j) * 0.2)) }, date: Date(timeIntervalSince1970: Double(i)))
+            }
+            session.commitDrawing(PKDrawing(strokes: strokes), action: "fixture")
+            XCTAssertTrue(store.flushDrawings())
+            DrawingEngineMetrics.reset()
+            let paperBefore = host.backgroundRasterizationCount
+            var creationMilliseconds = 0.0
+            if shaped {
+                let points = (0...100).map { i in CGPoint(x: 280 + 50 * cos(Double(i) * .pi / 50), y: 260 + 50 * sin(Double(i) * .pi / 50)) }
+                let controller = session.shapeCompletionForTesting
+                controller.inputBegan(.init(documentPoint: points[0], timestamp: 0, expectingUpdates: 0), zoom: zoom, offset: session.canvas.contentOffset)
+                controller.nativeBegan(previousStrokeCount: count)
+                for i in 1..<points.count { now = Double(i) * 0.01; controller.inputMoved(.init(documentPoint: points[i], timestamp: now, expectingUpdates: 0)) }
+                let started = CACurrentMediaTime(); now = 1.6; fire?()
+                for _ in 0..<500 where controller.phase != .snapped { try await Task.sleep(for: .milliseconds(2)) }
+                XCTAssertEqual(controller.phase, .snapped)
+                creationMilliseconds = (CACurrentMediaTime() - started) * 1000
+                let original = PKDrawing(strokes: strokes + [stroke(points)])
+                session.canvas.drawing = original
+                controller.nativeEnded(drawing: original, revision: session.drawingRevision)
+                controller.inputEnded(.init(documentPoint: points.last!, timestamp: 1.7, expectingUpdates: 0))
+                for _ in 0..<100 where controller.phase == .snapped { await Task.yield() }
+                XCTAssertTrue(host.hasAutomaticShapeSelection)
+                let updated = store.note(id)!
+                host.configure(note: updated, page: updated.pages[0], store: store, fingerDrawing: false, editingObjects: false, toolsVisible: true, onSelect: { _ in }, onMove: { _,_,_ in }, onTurnPage: { _ in false })
+            }
+            for contact in 0..<4 {
+                DrawingEngineMetrics.measure(.toolSwitch) { session.selectTool(.eraser) }
+                host.beginStrokeErasing()
+                for step in 0..<16 { host.extendStrokeErasing(along: [CGPoint(x: 50 + Double(contact) * 22 + Double(step) * 0.3, y: 160)]) }
+                host.endStrokeErasing()
+            }
+            DrawingEngineMetrics.measure(.save) { XCTAssertTrue(store.flushDrawings()) }
+            var usage = rusage(); getrusage(RUSAGE_SELF, &usage)
+            reports.append(["strokes": count, "shape": shaped, "zoom": zoom,
+                "shapeHoldToPreviewMs": creationMilliseconds, "phaseMs": DrawingEngineMetrics.phaseMilliseconds,
+                "eraseBatches": DrawingEngineMetrics.eraseBatches, "eraseBatchTotalMs": DrawingEngineMetrics.eraseMilliseconds,
+                "paperRasters": host.backgroundRasterizationCount - paperBefore,
+                "inkRasters": DrawingEngineMetrics.inkTileRasters, "inkCacheBytes": host.cachedInkBytes,
+                "processPeakResidentBytes": usage.ru_maxrss])
+            session.stop(); window.isHidden = true
+        } } }
+        let data = try JSONSerialization.data(withJSONObject: reports, options: [.sortedKeys, .prettyPrinted])
+        let attachment = XCTAttachment(data: data, uniformTypeIdentifier: "public.json")
+        attachment.name = "editing-boundary-performance"; attachment.lifetime = .keepAlways; add(attachment)
+        print("EDITING_PERFORMANCE " + String(data: try JSONSerialization.data(withJSONObject: reports, options: [.sortedKeys]), encoding: .utf8)!)
+    }
+    func testCompositeTilesPreserveOverlapMasksAndFade() throws {
+        let viewport = CGRect(x: 0, y: 0, width: 384, height: 384)
+        var strokes = [PKStroke]()
+        for i in 0..<5 {
+            let points = (0..<40).map { j in PKStrokePoint(location: CGPoint(x: 25 + Double(j) * 8, y: 165 + sin(Double(j) * 0.18 + Double(i)) * 30), timeOffset: Double(j) * 0.01, size: CGSize(width: 12, height: 7), opacity: 1.4, force: 0.7, azimuth: 0.4, altitude: 1) }
+            var value = PKStroke(ink: PKInk(i % 2 == 0 ? .marker : .pencil, color: i % 2 == 0 ? .systemBlue : .black), path: PKStrokePath(controlPoints: points, creationDate: Date(timeIntervalSince1970: Double(i))), randomSeed: UInt32(40 + i))
+            if i == 2 { value.mask = UIBezierPath(rect: CGRect(x: 85, y: 100, width: 210, height: 170)) }
+            strokes.append(value)
+        }
+        let drawing = PKDrawing(strokes: strokes), paper = PaperView()
+        paper.documentBounds = viewport
+        paper.render = { $0.setFillColor(UIColor.white.cgColor); $0.fill(viewport) }
+        paper.updateViewport(.identity, viewport: viewport, interacting: false)
+        let format = UIGraphicsImageRendererFormat(); format.scale = 2; format.opaque = true; format.preferredRange = .standard
+        func image(_ body: (UIGraphicsImageRendererContext) -> Void) -> UIImage {
+            UIGraphicsImageRenderer(bounds: viewport, format: format).image { c in UIColor.white.setFill(); c.fill(viewport); body(c) }
+        }
+        func difference(_ expected: UIImage, _ actual: UIImage) -> Double {
+            func bytes(_ value: UIImage) -> [UInt8] {
+                let cg = value.cgImage!, width = cg.width, height = cg.height
+                var data = [UInt8](repeating: 0, count: width * height * 4)
+                data.withUnsafeMutableBytes { b in
+                    CGContext(data: b.baseAddress, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!.draw(cg, in: CGRect(x: 0, y: 0, width: width, height: height))
+                }
+                return data
+            }
+            let a = bytes(expected), b = bytes(actual)
+            return Double(zip(a,b).reduce(0) { $0 + abs(Int($1.0) - Int($1.1)) }) / Double(a.count)
+        }
+        for style in [UIUserInterfaceStyle.light, .dark] {
+            let selection = RectangularInkSelection(drawing: drawing, indices: [1,3])
+            let preview = InkTransformPreview(frame: viewport); preview.overrideUserInterfaceStyle = style
+            preview.prepare(selection: selection, paper: paper, viewport: viewport, transform: .identity)
+            let expected = image { _ in drawing.image(from: viewport, scale: 2).draw(in: viewport) }
+            XCTAssertLessThan(difference(expected, image { preview.layer.render(in: $0.cgContext) }), 0.5)
+            let transform = CGAffineTransform(translationX: 12, y: 8)
+            preview.moveSelection(transform, viewportTransform: .identity)
+            let moved = image { _ in selection.transformed(transform).image(from: viewport, scale: 2).draw(in: viewport) }
+            XCTAssertLessThan(difference(moved, image { preview.layer.render(in: $0.cgContext) }), 0.5)
+            var distant = strokes
+            for i in [1,3] { distant[i].transform = CGAffineTransform(translationX: 900, y: 0) }
+            let distantSelection = RectangularInkSelection(drawing: PKDrawing(strokes: distant), indices: [1,3])
+            preview.prepare(selection: distantSelection, paper: paper, viewport: viewport, transform: .identity)
+            let bringIntoView = CGAffineTransform(translationX: -888, y: 8)
+            preview.moveSelection(bringIntoView, viewportTransform: .identity)
+            let brought = image { _ in distantSelection.transformed(bringIntoView).image(from: viewport, scale: 2).draw(in: viewport) }
+            XCTAssertLessThan(difference(brought, image { preview.layer.render(in: $0.cgContext) }), 0.5, "moving from another tile retains stroke stacking and clears the previous preview")
+            let erase = StrokeEraserPreviewView(frame: viewport); erase.overrideUserInterfaceStyle = style
+            erase.begin(transaction: StrokeEraserTransaction(drawing: drawing, width: 12), paper: paper, viewport: viewport, transform: .identity)
+            erase.setErased([1,3])
+            let faded = image { _ in
+                for (i, stroke) in strokes.enumerated() { PKDrawing(strokes: [stroke]).image(from: viewport, scale: 2).draw(in: viewport, blendMode: .normal, alpha: [1,3].contains(i) ? 0.35 : 1) }
+            }
+            XCTAssertLessThan(difference(faded, image { erase.layer.render(in: $0.cgContext) }), 0.5)
+            erase.setErased([1,3], committed: true)
+            let removed = image { _ in PKDrawing(strokes: [strokes[0],strokes[2],strokes[4]]).image(from: viewport, scale: 2).draw(in: viewport) }
+            XCTAssertLessThan(difference(removed, image { erase.layer.render(in: $0.cgContext) }), 0.5)
+        }
+        let cache = InkGeometryCache(drawing: drawing)
+        let remaining = cache.removing([1,3])
+        XCTAssertEqual(remaining.drawing.strokes.count, 3)
+        XCTAssertTrue(remaining.hasBalancedIndex)
+        XCTAssertEqual(remaining.candidates(intersecting: viewport).count, 3)
     }
     func testStationaryJitterDoesNotEnterShapeFit() {
         var contact = ShapeCompletionContact(zoom: 2, offset: .zero)
@@ -162,7 +399,7 @@ import PDFKit
         let id = try XCTUnwrap(store.createNote(title: "shape",paper:.ruled,cover:.blue,folderID:nil,infinite:infinite))
         let note=store.note(id)!,page=note.pages[0]
         let session=DrawingSession();session.load(noteID:id,pageID:page.id,store:store)
-        let host=CanvasHostView(session:session);host.frame=CGRect(x:0,y:0,width:800,height:1000)
+        let host=CanvasHostView(session:session);session.host=host;host.frame=CGRect(x:0,y:0,width:800,height:1000)
         host.configure(note:note,page:page,store:store,fingerDrawing:false,editingObjects:false,toolsVisible:true,onSelect:{_ in},onMove:{_,_,_ in},onTurnPage:{_ in false})
         host.layoutIfNeeded()
         let points=(0...100).map { i in CGPoint(x:300+cos(Double(i)*2 * .pi/100)*90,y:350+sin(Double(i)*2 * .pi/100)*90) }
@@ -205,6 +442,66 @@ import PDFKit
         XCTAssertNil(session.shape(for:erased),"broken geometry is not still a semantic shape")
         let pageBytes=try JSONEncoder().encode(store.note(id)!.pages[0])
         XCTAssertEqual(try JSONDecoder().decode(NotePage.self,from:pageBytes).inkShapes,session.inkShapes)
+    }
+    func testFractionalShapeFingerprintSurvivesArchive() throws {
+        let source = stroke((0...64).map { i in CGPoint(x: 350 + 90 * cos(Double(i) * .pi / 32), y: 410 + 90 * sin(Double(i) * .pi / 32)) })
+        let moved = PKDrawing(strokes: [source]).transformed(using: CGAffineTransform(a: 1.251337, b: 0, c: 0, d: 1.251337, tx: 68.424934, ty: -16.777331))
+        let reopened = try PKDrawing(data: moved.dataRepresentation())
+        XCTAssertEqual(DrawingSession.fingerprint(moved.strokes[0]), DrawingSession.fingerprint(reopened.strokes[0]))
+    }
+    func testShapeMetadataSaveFailurePreservesDrawing() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = try NoteStore(repository: LibraryRepository(root: root))
+        let id = try XCTUnwrap(store.createNote(title: "Save failure", paper: .plain, cover: .blue, folderID: nil))
+        let page = store.note(id)!.pages[0]
+        let session = DrawingSession(); session.load(noteID: id, pageID: page.id, store: store)
+        let original = PKDrawing(strokes: [stroke([CGPoint(x: 40, y: 40), CGPoint(x: 140, y: 80)])])
+        XCTAssertTrue(session.commitDrawing(original, action: "Original")); XCTAssertTrue(store.flushDrawings())
+        let manifest = root.appendingPathComponent("library.json")
+        try FileManager.default.moveItem(at: manifest, to: root.appendingPathComponent("library.backup"))
+        try FileManager.default.createDirectory(at: manifest, withIntermediateDirectories: false)
+        XCTAssertFalse(session.commitDrawing(original.transformed(using: CGAffineTransform(translationX: 100, y: 40)), action: "Move", shapes: []))
+        XCTAssertEqual(session.drawing, original)
+        XCTAssertEqual(try store.drawing(noteID: id, pageID: page.id), original)
+        XCTAssertNotNil(store.errorMessage)
+    }
+    func testMetadataChangesReusePaperTiles() throws {
+        let store = try store()
+        let id = try XCTUnwrap(store.createNote(title: "tiles", paper: .ruled, cover: .blue, folderID: nil))
+        let note = store.note(id)!, page = note.pages[0]
+        let session = DrawingSession(); session.load(noteID: id, pageID: page.id, store: store)
+        let host = CanvasHostView(session: session); host.frame = CGRect(x: 0, y: 0, width: 800, height: 1000)
+        func configure(_ value: NotePage) {
+            host.configure(note: note, page: value, store: store, fingerDrawing: false, editingObjects: false, toolsVisible: true, onSelect: { _ in }, onMove: { _,_,_ in }, onTurnPage: { _ in false })
+            host.layoutIfNeeded()
+        }
+        configure(page)
+        let count = host.backgroundRasterizationCount
+        XCTAssertGreaterThan(count, 0)
+        var updated = page
+        updated.inkShapes = []; updated.inkGroups = []; updated.viewport = CanvasViewport(center: CGPoint(x: 400, y: 500), zoom: 1)
+        configure(updated)
+        XCTAssertEqual(host.backgroundRasterizationCount, count)
+        updated.paper = .grid; configure(updated)
+        XCTAssertGreaterThan(host.backgroundRasterizationCount, count)
+    }
+    func testUncommittedShapePreviewClearsOnOriginChange() throws {
+        let store = try store()
+        let id = try XCTUnwrap(store.createNote(title: "Pending shape", paper: .plain, cover: .blue, folderID: nil, infinite: true))
+        let note = store.note(id)!, page = note.pages[0]
+        let session = DrawingSession(); session.load(noteID: id, pageID: page.id, store: store)
+        let host = CanvasHostView(session: session); session.host = host
+        host.frame = CGRect(x: 0, y: 0, width: 800, height: 1000)
+        host.configure(note: note, page: page, store: store, fingerDrawing: false, editingObjects: false, toolsVisible: true, onSelect: { _ in }, onMove: { _,_,_ in }, onTurnPage: { _ in false })
+        host.layoutIfNeeded()
+        let points = (0...64).map { i in CGPoint(x: 350 + 90 * cos(Double(i) * .pi / 32), y: 410 + 90 * sin(Double(i) * .pi / 32)) }
+        host.showAutomaticShape(try XCTUnwrap(ShapeRecognizer().recognize(documentPoints: points)))
+        let outline = try XCTUnwrap(host.layer.sublayers?.compactMap { $0 as? CAShapeLayer }.first { $0.lineDashPattern != nil && $0.path != nil })
+        XCTAssertNotNil(outline.path)
+        session.setCanvasOrigin(CGPoint(x: 8192, y: 8192))
+        XCTAssertNil(outline.path, "only committed selections survive an origin change")
+        XCTAssertTrue(session.canvas.drawingGestureRecognizer.isEnabled)
     }
     func testCanvasReplacementPreservesInputPolicy() throws {
         let store = try store()
@@ -249,7 +546,7 @@ import PDFKit
         XCTAssertEqual(eraser.erasedIndices,[0])
         XCTAssertEqual(eraser.remainingDrawing.strokes.count,1)
         let session=DrawingSession();session.load(noteID:id,pageID:page.id,store:store)
-        let host=CanvasHostView(session:session);host.frame=CGRect(x:0,y:0,width:800,height:900)
+        let host=CanvasHostView(session:session);session.host=host;host.frame=CGRect(x:0,y:0,width:800,height:900)
         host.configure(note:store.note(id)!,page:page,store:store,fingerDrawing:false,editingObjects:false,toolsVisible:true,onSelect:{_ in},onMove:{_,_,_ in},onTurnPage:{_ in false})
         host.layoutIfNeeded()
         for point in [CGPoint(x:-4000,y:-4000),CGPoint(x:6000,y:7000),CGPoint(x:-7000,y:7000)] {
@@ -295,4 +592,41 @@ import PDFKit
         XCTAssertTrue(reopened.pages[0].isInfinite)
         XCTAssertEqual(reopened.pages[0].viewport,store.note(id)!.pages[0].viewport)
     }
+}
+
+private final class CleanupFailureFileManager: FileManager, @unchecked Sendable {
+    var blocked: URL?
+    override func removeItem(at URL: URL) throws {
+        if URL == blocked { throw CocoaError(.fileWriteNoPermission) }
+        try super.removeItem(at: URL)
+    }
+}
+private final class DriveFixtureProtocol: URLProtocol, @unchecked Sendable {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        let text: String
+        if request.url!.host == "oauth2.googleapis.com" {
+            text = #"{"access_token":"fixture-new","expires_in":3600,"token_type":"Bearer","scope":"https://www.googleapis.com/auth/drive.file"}"#
+        } else { text = #"{"user":{"emailAddress":"fixture@example.invalid"}}"# }
+        client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(text.utf8)); client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
+private final class RevokedDriveProtocol: URLProtocol, @unchecked Sendable {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: 400, httpVersion: nil, headerFields: nil)!, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(#"{"error":"invalid_grant"}"#.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
+private final class OfflineDriveProtocol: URLProtocol, @unchecked Sendable {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() { client?.urlProtocol(self, didFailWithError: URLError(.notConnectedToInternet)) }
+    override func stopLoading() {}
 }

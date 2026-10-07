@@ -49,16 +49,16 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
     private var retainedGeometry: InkGeometryCache?
     private var previewWarmup: Task<Void, Never>?
     private var drawingActive = false
-    private var waitingForEraserRender = false
+    private var waitingForEraserRender: Bool { eraserCommitDrawing != nil }
     private var eraserCommitDrawing: PKDrawing?
-    private var eraserHandoff: Task<Void, Never>?
+    private var eraserHandoffGeneration: UInt64 = 0
+    private var eraserHandoffScheduled = false
     private var canErase = true
     private let inkSelectionLayer = CAShapeLayer()
     private let inkPreview = InkTransformPreview()
-    private var waitingForInkRender = false
+    private var waitingForInkRender: Bool { inkCommitDrawing != nil }
     private var inkCommitDrawing: PKDrawing?
     private var inkHandoffScheduled = false
-    private var inkCommitEcho = false
     private var inkRenderGeneration: UInt64 = 0
     private var automaticShape: (ids: Set<InkStrokeID>, frame: ShapeEditFrame, points: [CGPoint])?
     private var shapeSelectionPending = false
@@ -178,6 +178,16 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
         }
         canvas.accessibilityLabel = "필기 용지"
         canvas.accessibilityIdentifier = "notebook-canvas"
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("--editing-diagnostics") {
+            canvas.editingDiagnostics = { [weak self] in
+                guard let self else { return "" }
+                let documentRect = self.automaticShape?.frame.corners.reduce(CGRect.null) { $0.union(CGRect(origin: $1, size: .zero)) } ?? self.session.drawing.bounds
+                let rect = documentRect.applying(self.documentToViewport)
+                return "\(rect.minX),\(rect.minY),\(rect.width),\(rect.height),\(self.session.drawing.strokes.count),\(self.inkPan.state.rawValue),\(self.inkPreview.isHidden ? 0 : 1)"
+            }
+        }
+        #endif
         canvas.accessibilityHint = "Apple Pencil로 필기합니다. 손가락으로 화면을 확대하거나 이동할 수 있습니다."
     }
 
@@ -203,7 +213,7 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
                    selectingRegion: Bool = false, onRegionChange: ((CGRect?) -> Void)? = nil,
                    onViewportChange: ((CGAffineTransform, CGRect) -> Void)? = nil) {
         let pageChanged = currentPage?.id != page.id
-        let contentChanged = currentPage != page || currentNote?.pdfAssetName != note.pdfAssetName
+        let contentChanged = currentPage?.backgroundContent != page.backgroundContent || currentNote?.id != note.id || currentNote?.pdfAssetName != note.pdfAssetName
         currentNote = note
         currentPage = page
         self.onSelect = onSelect
@@ -246,15 +256,22 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
         if canvas.drawingPolicy != policy { canvas.drawingPolicy = policy }
         let rectangular = session.selectedTool.isSelection && !editingObjects && !selectingRegion && toolsVisible && session.loadError == nil
         if pageChanged || (!rectangular && automaticShape == nil) || editingObjects || selectingRegion { clearInkSelection() }
+        #if DEBUG
+        if pageChanged, ProcessInfo.processInfo.environment["NOTEMARGIN_UI_FIXTURE"] != nil,
+           let stroke = session.drawing.strokes.first, let result = session.shape(for: stroke) {
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.currentPage?.id == page.id else { return }
+                self.activateAutomaticShape(result, ids: [InkStrokeID(stroke)])
+            }
+        }
+        #endif
         let selectionInput = rectangular || hasAutomaticShapeSelection
         if inkPan.isEnabled != selectionInput { inkPan.isEnabled = selectionInput }
         if inkTap.isEnabled != selectionInput { inkTap.isEnabled = selectionInput }
         let canDraw = !editingObjects && !selectingRegion && session.loadError == nil && !rectangular
         canErase = canDraw
         if !canDraw { cancelStrokeErasing() }
-        if canvas.drawingGestureRecognizer.isEnabled != canDraw {
-            canvas.drawingGestureRecognizer.isEnabled = canDraw
-        }
+        updateNativeDrawingPermission()
         if objectPan.isEnabled != (editingObjects && !selectingRegion) { objectPan.isEnabled = editingObjects && !selectingRegion }
         if objectTap.isEnabled != (editingObjects && !selectingRegion) { objectTap.isEnabled = editingObjects && !selectingRegion }
         canvas.panGestureRecognizer.minimumNumberOfTouches = (fingerDrawing || editingObjects || rectangular) ? 2 : 1
@@ -475,9 +492,24 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
         guard gesture === strokeEraser else { return }
         switch gesture.state {
         case .began:
+            beginStrokeErasing()
+            consumeEraserSamples(gesture)
+        case .changed:
+            consumeEraserSamples(gesture)
+        case .ended:
+            consumeEraserSamples(gesture)
+            endStrokeErasing()
+        case .cancelled, .failed:
+            cancelStrokeErasing()
+        default: break
+        }
+    }
+
+    func beginStrokeErasing() {
+        DrawingEngineMetrics.measure(.eraserBegin) {
             previewWarmup?.cancel(); previewWarmup = nil
             guard let tool = canvas.tool as? PKEraserTool, tool.eraserType == .vector else { return }
-            waitingForEraserRender = false
+            eraserCommitDrawing = nil
             // PencilKit vector erasers report width 0 and ignore a supplied
             // width. Our deferred stroke eraser must use its own saved radius.
             eraserTransaction = StrokeEraserTransaction(drawing: session.drawing, width: session.eraserWidth, geometryCache: geometry(for: session.drawing))
@@ -486,25 +518,21 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
                                 viewport: bounds, transform: documentToViewport)
             // Reuse native PencilKit textures and paper tiles; never replace ink
             // appearance with hit-test geometry or rerender on each sample.
-            consumeEraserSamples(gesture)
-        case .changed:
-            consumeEraserSamples(gesture)
-        case .ended:
-            consumeEraserSamples(gesture)
+        }
+    }
+    func endStrokeErasing() {
+        DrawingEngineMetrics.measure(.eraserCommit) {
             guard let transaction = eraserTransaction else { return }
             eraserTransaction = nil
             if transaction.erasedIndices.isEmpty { cancelStrokeErasing(); session.finishErasing(); return }
             eraserPreview.clearTrail()
             eraserPreview.setErased(transaction.erasedIndices, committed: true)
             paper.setDrawingActive(false)
-            waitingForEraserRender = true
-            let remaining = transaction.remainingDrawing
-            eraserCommitDrawing = remaining
-            session.commitStrokeErasing(remaining)
+            let remaining = transaction.geometryCache.removing(transaction.erasedIndices)
+            eraserCommitDrawing = remaining.drawing
+            if session.commitStrokeErasing(remaining.drawing) { retainedGeometry = remaining }
+            else { cancelStrokeErasing() }
             session.finishErasing()
-        case .cancelled, .failed:
-            cancelStrokeErasing()
-        default: break
         }
     }
 
@@ -532,13 +560,13 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
             let cache = self.geometry(for: drawing)
             let transform = self.documentToViewport
             let scale = max(0.01, transform.a) * UIScreen.main.scale
-            let visible = self.bounds.applying(transform.inverted()).insetBy(dx: -512 / scale, dy: -512 / scale)
+            let visible = self.bounds.applying(transform.inverted()).insetBy(dx: -128 / scale, dy: -128 / scale)
             let frameBudget = 0.25 / Double(max(1, self.window?.screen.maximumFramesPerSecond ?? 60))
             var batchStart = CACurrentMediaTime()
-            for index in cache.candidates(intersecting: visible) {
+            for cell in NativeInkRasterCache.cells(in: visible, scale: scale) {
                 guard !Task.isCancelled, self.canvas === target, self.session.drawingRevision == sourceRevision,
                       !self.drawingActive, self.eraserTransaction == nil, !self.inkDragging else { return }
-                _ = cache.nativeRasterCache.tiles(for: index, visible: visible, scale: scale)
+                _ = cache.nativeRasterCache.composite(cache.candidates(intersecting: cell).sorted(), cell: cell, scale: scale)
                 // Yield between small main-actor batches so native Pencil input
                 // can interrupt warming; never render PencilKit off-thread.
                 if CACurrentMediaTime() - batchStart >= frameBudget {
@@ -550,29 +578,28 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
     }
 
     private func consumeEraserSamples(_ gesture: StrokeEraserGestureRecognizer) {
+        let viewToDocument = documentToViewport.inverted()
+        extendStrokeErasing(along: gesture.takeSamples(in: self).map { $0.applying(viewToDocument) })
+    }
+    func extendStrokeErasing(along points: [CGPoint]) {
         guard let transaction = eraserTransaction else { return }
         guard let tool = canvas.tool as? PKEraserTool, tool.eraserType == .vector else {
             cancelStrokeErasing()
             return
         }
         let previousCount = transaction.erasedIndices.count
-        let viewToDocument = documentToViewport.inverted()
-        let points = gesture.takeSamples(in: self).map { $0.applying(viewToDocument) }
         DrawingEngineMetrics.erasing {
             transaction.extend(along: points)
             eraserPreview.extend(along: points)
-        }
-        if transaction.erasedIndices.count != previousCount {
-            eraserPreview.setErased(transaction.erasedIndices)
+            if transaction.erasedIndices.count != previousCount { eraserPreview.setErased(transaction.erasedIndices) }
         }
     }
 
     func cancelStrokeErasing() {
         if eraserTransaction != nil { paper.setDrawingActive(false) }
         eraserTransaction = nil
-        waitingForEraserRender = false
         eraserCommitDrawing = nil
-        eraserHandoff?.cancel(); eraserHandoff = nil
+        eraserHandoffGeneration &+= 1; eraserHandoffScheduled = false
         eraserPreview.end()
     }
 
@@ -587,17 +614,20 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
     }
 
     func finishEraserRendering() {
-        guard waitingForEraserRender, eraserHandoff == nil, let committed = eraserCommitDrawing,
-              session.drawing == committed else { return }
-        let target = canvas
-        eraserHandoff = Task { [weak self] in
-            // A render callback can precede presentation of its CA transaction.
-            // Keep feedback through that display handoff; a new page/tool cancels it.
-            do { try await Task.sleep(for: .milliseconds(34)) } catch { return }
-            guard let self, self.canvas === target, self.waitingForEraserRender,
-                  self.session.drawing == committed else { return }
-            self.cancelStrokeErasing()
+        guard waitingForEraserRender, !eraserHandoffScheduled, let committed = eraserCommitDrawing,
+              session.drawing == committed, !drawingActive else { return }
+        let target = canvas, generation = eraserHandoffGeneration
+        eraserHandoffScheduled = true
+        CATransaction.begin()
+        CATransaction.setCompletionBlock { [weak self, weak target] in
+            MainActor.assumeIsolated {
+                guard let self, self.canvas === target, self.eraserHandoffGeneration == generation else { return }
+                self.eraserHandoffScheduled = false
+                guard self.waitingForEraserRender, self.session.drawing == committed, !self.drawingActive else { return }
+                self.cancelStrokeErasing()
+            }
         }
+        CATransaction.commit()
     }
 
     func setDrawingActive(_ active: Bool) {
@@ -608,7 +638,18 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
             if waitingForInkRender { endInkPreview() }
         }
         paper.setDrawingActive(active)
+        if !active { updateNativeDrawingPermission() }
         if !active { schedulePreviewWarmup() }
+    }
+
+    private func updateNativeDrawingPermission() {
+        // A committed shape owns the next editing contact. Do not toggle
+        // PencilKit while it still owns the held freehand stroke.
+        guard !drawingActive else { return }
+        let enabled = canErase && !hasAutomaticShapeSelection
+        if canvas.drawingGestureRecognizer.isEnabled != enabled {
+            canvas.drawingGestureRecognizer.isEnabled = enabled
+        }
     }
 
     func canvasDidScroll() {
@@ -644,6 +685,7 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
         inkSelection = RectangularInkSelection(drawing: drawing, indices: indices, geometryCache: geometry(for: drawing))
         inkSelectionRect = inkSelection?.bounds
         inkPan.isEnabled = true; inkTap.isEnabled = true
+        updateNativeDrawingPermission()
         session.selectedStrokeCount = indices.count
         updateInkOutline()
     }
@@ -677,6 +719,7 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
         inkDragging = false; inkResizing = false
         inkDragTransform = .identity
         inkSelectionLayer.path = nil
+        updateNativeDrawingPermission()
         publishSelectionActions()
         // configure can run during a SwiftUI update.
         if session.selectedStrokeCount != 0 {
@@ -754,6 +797,9 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
     }
 
     @objc private func selectInk(_ gesture: UIPanGestureRecognizer) {
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("--editing-diagnostics") { print("Ink pan state=\(gesture.state.rawValue) selection=\(hasAutomaticShapeSelection)") }
+        #endif
         let point = gesture.location(in: self).applying(documentToViewport.inverted())
         switch gesture.state {
         case .began:
@@ -882,21 +928,18 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
     var previewGeometryBuildCount: Int { inkPreview.geometryBuildCount }
     var previewRasterizationCount: Int { inkPreview.rasterizationCount }
     var backgroundRasterizationCount: Int { paper.rasterizationCount }
+    var cachedInkBytes: Int { retainedGeometry?.nativeRasterCache.cachedBytes ?? 0 }
     var backgroundViewportTransform: CGAffineTransform { paper.viewportTransform }
 
     private func endInkPreview() {
-        waitingForInkRender = false
         inkCommitDrawing = nil
-        inkRenderGeneration &+= 1; inkHandoffScheduled = false; inkCommitEcho = false
+        inkRenderGeneration &+= 1; inkHandoffScheduled = false
         CATransaction.begin(); CATransaction.setDisableActions(true)
         inkPreview.clear()
         CATransaction.commit()
     }
-    func nativeInkDrawingChanged(_ drawing: PKDrawing) {
-        if waitingForInkRender, drawing == inkCommitDrawing { inkCommitEcho = true }
-    }
     func finishInkRendering() {
-        guard waitingForInkRender, !inkHandoffScheduled, inkCommitEcho, let committed = inkCommitDrawing,
+        guard waitingForInkRender, !inkHandoffScheduled, let committed = inkCommitDrawing,
               session.drawing == committed, !drawingActive else { return }
         let target = canvas, generation = inkRenderGeneration, viewport = documentToViewport
         inkHandoffScheduled = true
@@ -910,7 +953,6 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
                 self.endInkPreview()
             }
         }
-        canvas.layer.setNeedsDisplay()
         CATransaction.commit()
     }
 
@@ -953,18 +995,21 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
         let editedShape = automaticShape.map { (ids: $0.ids, frame: $0.frame.applying(transform), points: $0.points.map { $0.applying(transform) }) }
         let rect = (inkSelectionRect ?? selected.bounds).applying(transform)
         committingInk = true
-        waitingForInkRender = !inkPreview.isHidden
         // A menu transform also gets a preview so commit cannot flash old ink.
         if inkPreview.isHidden {
             inkPreview.frame = bounds
             inkPreview.prepare(selection: selected, paper: paper,
                                viewport: bounds, transform: documentToViewport)
-            waitingForInkRender = true
         }
         inkPreview.moveSelection(transform, viewportTransform: documentToViewport)
         clearInkSelection()
-        inkCommitDrawing = drawing; inkCommitEcho = false; inkRenderGeneration &+= 1
-        session.commitDrawing(drawing, action: action, shapes: session.transformedShapes(drawing: drawing, indices: selected.indices, transform: transform))
+        inkCommitDrawing = drawing; inkRenderGeneration &+= 1
+        guard session.commitDrawing(drawing, action: action, shapes: session.transformedShapes(drawing: drawing, indices: selected.indices, transform: transform)) else {
+            committingInk = false
+            endInkPreview()
+            restoreInkSelection(indices: selected.indices)
+            return
+        }
         committingInk = false
         inkSelection = RectangularInkSelection(drawing: drawing, indices: selected.indices, geometryCache: geometry(for: drawing))
         automaticShape = editedShape; shapeResize = nil; inkDragTransform = .identity
@@ -1182,8 +1227,14 @@ final class RectangleSelectionGestureRecognizer: UIPanGestureRecognizer {
 /// on physical devices when called concurrently from a background queue.
 @MainActor
 final class NativeInkRasterCache {
-    struct Key: Hashable { let index: Int; let scale: CGFloat; let x: Int; let y: Int }
-    struct Tile { let key: Key; let rect: CGRect; let image: CGImage }
+    struct Key: Hashable {
+        let index: Int; let scale: CGFloat; let x: Int; let y: Int
+        var lastIndex: Int? = nil
+    }
+    struct Tile {
+        let key: Key; let rect: CGRect; let image: CGImage
+        var members: [Int] = []
+    }
     private let strokes: [PKStroke]
     private var tiles: [Key: Tile] = [:]
     private struct Link { var previous: Key?; var next: Key? }
@@ -1191,6 +1242,7 @@ final class NativeInkRasterCache {
     private var oldest: Key?
     private var newest: Key?
     private var bytes = 0
+    var cachedBytes: Int { bytes }
     private let byteLimit = 32 * 1024 * 1024
     private(set) var rasterizationCount = 0
     init(drawing: PKDrawing) { strokes = drawing.strokes }
@@ -1204,7 +1256,7 @@ final class NativeInkRasterCache {
         }
         // Only cached strokes need appearance comparison. An uncached stroke
         // cannot contribute pixels; inspecting its control points is wasted work.
-        let cachedIndices = Set(previous.tiles.keys.map(\.index))
+        let cachedIndices = Set(previous.tiles.values.flatMap { $0.members.isEmpty ? [$0.key.index] : $0.members })
         let oldIndices = Dictionary(grouping: cachedIndices, by: { id(previous.strokes[$0]) })
         var mapping: [Int: Int] = [:]
         for index in strokes.indices {
@@ -1222,12 +1274,13 @@ final class NativeInkRasterCache {
         var cursor = previous.oldest
         while let oldKey = cursor {
             cursor = previous.links[oldKey]?.next
-            guard let index = retainedIndices[oldKey.index], let tile = previous.tiles[oldKey] else { continue }
-            let key = Key(index: index, scale: oldKey.scale, x: oldKey.x, y: oldKey.y)
+            guard let tile = previous.tiles[oldKey], let index = retainedIndices[oldKey.index] else { continue }
+            let members = tile.members.compactMap { retainedIndices[$0] }
+            guard members.count == tile.members.count, members == members.sorted() else { continue }
+            let key = Key(index: index, scale: oldKey.scale, x: oldKey.x, y: oldKey.y,
+                          lastIndex: oldKey.lastIndex.flatMap { retainedIndices[$0] })
             guard tiles[key] == nil else { continue }
-            tiles[key] = Tile(key: key, rect: tile.rect, image: tile.image)
-            bytes += tile.image.bytesPerRow * tile.image.height
-            touch(key)
+            insert(Tile(key: key, rect: tile.rect, image: tile.image, members: members))
         }
     }
 
@@ -1242,6 +1295,50 @@ final class NativeInkRasterCache {
         links[key] = Link(previous: newest, next: nil)
         if let newest { links[newest]?.next = key } else { oldest = key }
         newest = key
+    }
+
+    private func insert(_ tile: Tile) {
+        let key = tile.key, cost = tile.image.bytesPerRow * tile.image.height
+        if let old = tiles.removeValue(forKey: key) { bytes -= old.image.bytesPerRow * old.image.height; unlink(key) }
+        while bytes + cost > byteLimit, let oldest {
+            if let removed = tiles.removeValue(forKey: oldest) { bytes -= removed.image.bytesPerRow * removed.image.height }
+            unlink(oldest)
+        }
+        tiles[key] = tile; touch(key); bytes += cost
+    }
+
+    static func cells(in visible: CGRect, scale: CGFloat) -> [CGRect] {
+        guard !visible.isEmpty, !visible.isNull, scale.isFinite, scale > 0 else { return [] }
+        let side = 512 / scale
+        return (Int(floor(visible.minY / side))..<Int(ceil(visible.maxY / side))).flatMap { y in
+            (Int(floor(visible.minX / side))..<Int(ceil(visible.maxX / side))).map { x in
+                CGRect(x: CGFloat(x) * side, y: CGFloat(y) * side, width: side, height: side)
+            }
+        }
+    }
+
+    /// One native render per visible tile/run, instead of one per untouched stroke.
+    /// Runs stop at edited/faded strokes, preserving the original blending order.
+    func composite(_ indices: [Int], cell: CGRect, scale: CGFloat) -> Tile? {
+        guard let first = indices.first, let last = indices.last else { return nil }
+        let side = 512 / scale
+        let key = Key(index: first, scale: scale, x: Int((cell.minX / side).rounded()), y: Int((cell.minY / side).rounded()), lastIndex: last)
+        if let cached = tiles[key], cached.members == indices { touch(key); return cached }
+        let bounds = indices.reduce(CGRect.null) { $0.union(strokes[$1].renderBounds) }.insetBy(dx: -2 / scale, dy: -2 / scale).intersection(cell)
+        guard !bounds.isNull, !bounds.isEmpty else { return nil }
+        let crop = CGRect(x: floor(bounds.minX * scale) / scale, y: floor(bounds.minY * scale) / scale,
+                          width: (ceil(bounds.maxX * scale) - floor(bounds.minX * scale)) / scale,
+                          height: (ceil(bounds.maxY * scale) - floor(bounds.minY * scale)) / scale)
+        var image: CGImage?
+        UITraitCollection(userInterfaceStyle: .light).performAsCurrent {
+            image = PKDrawing(strokes: indices.map { strokes[$0] }).image(from: crop, scale: scale).cgImage
+        }
+        guard let image else { return nil }
+        rasterizationCount += 1
+        DrawingEngineMetrics.inkTileRendered()
+        let tile = Tile(key: key, rect: crop, image: image, members: indices)
+        insert(tile)
+        return tile
     }
 
     func tiles(for index: Int, visible: CGRect, scale: CGFloat) -> [Tile] {
@@ -1271,13 +1368,9 @@ final class NativeInkRasterCache {
             }
             guard let image = rendered?.cgImage else { continue }
             rasterizationCount += 1
+            DrawingEngineMetrics.inkTileRendered()
             let tile = Tile(key: key, rect: rect, image: image)
-            let cost = image.bytesPerRow * image.height
-            while bytes + cost > byteLimit, let oldest {
-                if let removed = tiles.removeValue(forKey: oldest) { bytes -= removed.image.bytesPerRow * removed.image.height }
-                unlink(oldest)
-            }
-            tiles[key] = tile; touch(key); bytes += cost
+            insert(tile)
             result.append(tile)
         } }
         return result
@@ -1339,19 +1432,46 @@ private final class InkInteractionScene {
         let selectedZoom = max(hypot(selectionTransform.a, selectionTransform.b),
                                hypot(selectionTransform.c, selectionTransform.d))
         let selectedScale = scale * min(1, pow(2, ceil(log2(max(0.01, selectedZoom)))))
-        // One tile of look-ahead lets ordinary pointer updates reuse existing
+        // A small look-ahead lets ordinary pointer updates reuse existing
         // textures. New source areas are loaded only when they enter this region.
         let requested = viewport.applying(transform.inverted())
         let requestedSource = requested.applying(selectionTransform.inverted())
         if scale == loadedScale && selectedScale == loadedSelectedScale &&
             loadedViewport.contains(requested) && loadedSource.contains(requestedSource) { return }
-        let visible = requested.insetBy(dx: -512 / scale, dy: -512 / scale)
-        let sourceVisible = requestedSource.insetBy(dx: -512 / selectedScale, dy: -512 / selectedScale)
+        let visible = requested.insetBy(dx: -128 / scale, dy: -128 / scale)
+        let sourceVisible = requestedSource.insetBy(dx: -128 / selectedScale, dy: -128 / selectedScale)
         loadedViewport = visible; loadedSource = sourceVisible; loadedScale = scale; loadedSelectedScale = selectedScale
-        let normal = Set(cache.candidates(intersecting: visible)).subtracting(selected)
         let moving = Set(cache.candidates(intersecting: sourceVisible)).intersection(selected)
-        let needed = normal.union(moving)
+        let fading = Set(cache.candidates(intersecting: visible)).intersection(faded)
+        let needed = moving.union(fading)
+        let separate = selected.union(faded)
+        let boundaries = separate.sorted()
         var keys = Set<NativeInkRasterCache.Key>()
+        for cell in NativeInkRasterCache.cells(in: visible, scale: scale) {
+            var run = [Int]()
+            var boundary = 0
+            func appendRun() {
+                defer { run.removeAll(keepingCapacity: true) }
+                guard let tile = rasterCache.composite(run, cell: cell, scale: scale) else { return }
+                keys.insert(tile.key)
+                let layer = tileLayers[tile.key] ?? CALayer()
+                layer.anchorPoint = .zero; layer.frame = tile.rect
+                layer.contents = tile.image; layer.contentsScale = scale
+                layer.zPosition = CGFloat(tile.key.index)
+                if layer.superlayer == nil { inkLayer.addSublayer(layer) }
+                tileLayers[tile.key] = layer
+            }
+            for index in cache.candidates(intersecting: cell).sorted() {
+                // A moved stroke can enter this tile from outside. Split at its
+                // original stacking position even if its source misses the tile.
+                while boundary < boundaries.count && boundaries[boundary] < index {
+                    appendRun(); boundary += 1
+                }
+                if separate.contains(index) { appendRun() }
+                else { run.append(index) }
+            }
+            appendRun()
+        }
         for index in needed.sorted() {
             let container: CALayer
             if let existing = strokeLayers[index] { container = existing }
@@ -1388,8 +1508,13 @@ private final class InkInteractionScene {
     }
     func setErased(_ indices: Set<Int>, committed: Bool) {
         let changed = self.committed == committed ? faded.symmetricDifference(indices) : faded.union(indices)
+        let membershipChanged = faded != indices
         faded = indices; self.committed = committed
         CATransaction.begin(); CATransaction.setDisableActions(true)
+        if membershipChanged {
+            loadedViewport = .null
+            prepareVisibleInk()
+        }
         for index in changed {
             // Native PNG already contains the true per-point opacity and texture.
             strokeLayers[index]?.opacity = indices.contains(index) ? (committed ? 0 : 0.35) : 1
@@ -1397,6 +1522,7 @@ private final class InkInteractionScene {
         CATransaction.commit()
     }
     func clear() {
+        tileLayers.values.forEach { $0.removeFromSuperlayer() }
         strokeLayers.values.forEach { $0.removeFromSuperlayer() }
         strokeLayers.removeAll(); tileLayers.removeAll()
         paperLayer.sublayers?.forEach { $0.removeFromSuperlayer() }

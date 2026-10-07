@@ -169,7 +169,7 @@ final class ShapeCompletionController {
         latestDrawing = canvas.drawing
         canvas.addGestureRecognizer(observer); observer.isEnabled = isEnabled
     }
-    func invalidate(preservingCommittedSelection: Bool = false) {
+    func invalidate(preservingSelection: Bool = false) {
         epoch &+= 1; request &+= 1; cancelDeadline?(); cancelDeadline = nil
         work?.cancel(); work = nil
         contact = nil; baseline = nil; previousStrokeCount = nil
@@ -178,7 +178,7 @@ final class ShapeCompletionController {
         // Cancellation keeps PencilKit's original, as before. Never cancel its
         // drawing recognizer or assign drawing while a native contact is active.
         clearPreview()
-        if !preservingCommittedSelection { onPreviewCancelled?() }
+        if !preservingSelection { onPreviewCancelled?() }
     }
     func nativeBegan(previousStrokeCount: Int) {
         guard isEnabled else { return }
@@ -300,45 +300,49 @@ final class ShapeCompletionController {
         // A held PKCanvasView may contain only committed strokes (verified by
         // the real-touch probe). Do not read/guess drawing.strokes.last here.
         let provisional = Self.provisionalStroke(samples, tool: tool)
-        let source = PKDrawing(strokes: baseline.strokes + [provisional])
+        // The provisional source is ours, so fitting needs only this stroke.
+        let source = PKDrawing(strokes: [provisional])
         let viewport = CGRect(x: canvas.bounds.minX / contact.zoom, y: canvas.bounds.minY / contact.zoom,
                               width: canvas.bounds.width / contact.zoom, height: canvas.bounds.height / contact.zoom)
         let scale = contact.zoom * (canvas.window?.screen.scale ?? UIScreen.main.scale)
         // Recognition excludes stationary jitter; Undo retains every real
         // sample received before the visible snap, excluding later editing.
         let frozenCutoff = (contact.samples.last?.timestamp ?? 0) - (contact.samples.first?.timestamp ?? 0)
-        let computation = Task.detached(priority: .userInitiated) { () -> (ShapeRecognitionResult, PKDrawing, UIImage, UIImage)? in
+        let computation = Task.detached(priority: .userInitiated) { () -> (ShapeRecognitionResult, PKDrawing)? in
             guard !Task.isCancelled, baseline.strokes.count == previousStrokeCount,
                   let recognized = recognizer.recognize(documentPoints: points) else { return nil }
             let result = recognized.kind == .line ? ShapeRecognitionResult(kind: .line, confidence: recognized.confidence,
                 normalizedError: recognized.normalizedError, fittedPoints: [points.first!, points.last!]) : recognized
-            guard let fitted = ShapeStrokeCompleter.replacement(source: source, baseline: baseline, result: result),
+            guard let fitted = ShapeStrokeCompleter.replacement(source: source, baseline: PKDrawing(), result: result),
                   !Task.isCancelled, viewport.width > 0, viewport.height > 0 else { return nil }
-            var image: UIImage?, backgroundInk: UIImage?
-            UITraitCollection(userInterfaceStyle: .light).performAsCurrent {
-                image = PKDrawing(strokes: [fitted.strokes[previousStrokeCount]]).image(from: viewport, scale: scale)
-                backgroundInk = baseline.image(from: viewport, scale: scale)
-            }
-            guard let image, let backgroundInk else { return nil }
-            return (result, fitted, image, backgroundInk)
+            return (result, PKDrawing(strokes: baseline.strokes + fitted.strokes))
         }
         work = Task { [weak self, weak canvas] in
             let output = await withTaskCancellationHandler(operation: { await computation.value },
                                                           onCancel: { computation.cancel() })
             guard let self, self.epoch == token, self.request == attempt else { return }
             self.work = nil
-            guard let (result, fitted, image, backgroundInk) = output, let canvas, self.canvas === canvas,
+            guard let (result, fitted) = output, let canvas, self.canvas === canvas,
                   let container = canvas.superview,
                   self.phase == .recognizing, self.nativeActive, self.isEnabled,
                   self.contact?.ended == false, self.viewportMatches(contact, canvas) else {
                 if self.phase == .recognizing { self.phase = .tracking }
                 return
             }
+            // Pure fitting runs off-thread. PKDrawing rasterization shares the
+            // native canvas renderer and the main-actor interaction raster cache.
+            var image: UIImage!, backgroundInk: UIImage!
+            DrawingEngineMetrics.measure(.shapeRaster) {
+                UITraitCollection(userInterfaceStyle: .light).performAsCurrent {
+                    image = PKDrawing(strokes: [fitted.strokes[previousStrokeCount]]).image(from: viewport, scale: scale)
+                    backgroundInk = baseline.image(from: viewport, scale: scale)
+                }
+            }
             // Keep PencilKit visible/renderable underneath an opaque composition
             // of the EXISTING cached paper, committed ink and current shape. No
             // private native layers, parent opacity changes, or white ink cover.
             let preview = ShapeHeldPreview(frame: canvas.frame)
-            preview.backgroundColor = container.backgroundColor
+            preview.backgroundColor = container.backgroundColor?.resolvedColor(with: container.traitCollection)
             (container as? CanvasHostView)?.copyShapePreviewBackground(to: preview.layer)
             preview.install(backgroundInk: backgroundInk, shape: image)
             CATransaction.begin(); CATransaction.setDisableActions(true)
@@ -496,7 +500,6 @@ final class ShapeCompletionController {
                 self.clearPreview(); self.contact = nil; self.result = nil
             }
         }
-        canvas.layer.setNeedsDisplay()
         CATransaction.commit()
     }
     private func trace(_ event: String) {
@@ -577,7 +580,10 @@ final class ShapeCompletionGestureRecognizer: UIGestureRecognizer {
             if let sample = owner?.sample(touch) { owner?.inputEstimated(sample) }
         }
     }
-    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) { owner?.invalidate(); state = .cancelled }
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) {
+        guard let pencil, touches.contains(pencil) else { return }
+        owner?.invalidate(); state = .cancelled
+    }
     override func reset() { super.reset(); pencil = nil }
 }
 
@@ -676,7 +682,6 @@ private final class ShapeHeldPreview: UIView {
     override init(frame: CGRect) {
         super.init(frame: frame)
         isUserInteractionEnabled = false; isOpaque = true; clipsToBounds = true
-        overrideUserInterfaceStyle = .light
         accessibilityIdentifier = "shape-held-preview"
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }

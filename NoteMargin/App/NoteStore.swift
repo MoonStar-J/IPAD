@@ -18,6 +18,7 @@ final class NoteStore: ObservableObject {
     @Published private(set) var loadingError: String?
     @Published private(set) var hasUnsavedChanges = false
     private var repository: LibraryRepository?
+    private var aiStore = MarginAIStore.shared
     // PKDrawing is a value snapshot. Do not serialize the entire drawing on the
     // PencilKit callback thread; late pressure updates may replace this value.
     private var pending: [DrawingKey: PendingDrawing] = [:]
@@ -41,6 +42,7 @@ final class NoteStore: ObservableObject {
     init() { loadLibrary() }
     init(repository: LibraryRepository) throws {
         self.repository = repository
+        aiStore = MarginAIStore(repository: MarginChatRepository(root: repository.root.appendingPathComponent("MarginChats")))
         library = try repository.loadProjectLibrary()
     }
 
@@ -48,7 +50,32 @@ final class NoteStore: ObservableObject {
         do {
             let documents = try FileManager.default.url(for: .documentDirectory, in: .userDomainMask,
                                                        appropriateFor: nil, create: true)
-            let repository = try LibraryRepository.applicationLibrary(in: documents)
+            let repository: LibraryRepository
+            #if DEBUG
+            if let fixture = ProcessInfo.processInfo.environment["NOTEMARGIN_UI_FIXTURE"], UUID(uuidString: fixture) != nil {
+                repository = try LibraryRepository(root: documents.appendingPathComponent("UITestLibraries/" + fixture))
+                aiStore = MarginAIStore(repository: MarginChatRepository(root: repository.root.appendingPathComponent("MarginChats")))
+                if try repository.load().notebooks.isEmpty {
+                    var note = Notebook(title: "Editing fixture", cover: .blue, folderID: nil)
+                    let points = (0...64).map { i in
+                        CGPoint(x: 350 + 90 * cos(Double(i) * .pi / 32), y: 410 + 90 * sin(Double(i) * .pi / 32))
+                    }
+                    let result = ShapeRecognizer().recognize(documentPoints: points)!
+                    let stroke = PKStroke(ink: PKInk(.pen, color: .black), path: PKStrokePath(controlPoints: points.enumerated().map { i, p in
+                        PKStrokePoint(location: p, timeOffset: Double(i) * 0.01, size: CGSize(width: 2, height: 2), opacity: 1, force: 1, azimuth: 0, altitude: .pi / 2)
+                    }, creationDate: Date()))
+                    note.pages = [NotePage(paper: .ruled, canvasMode: ProcessInfo.processInfo.arguments.contains("--infinite-editing-fixture") ? "infinite" : nil, inkShapes: [InkShape(strokeID: InkStrokeID(stroke), kind: result.kind.rawValue, points: result.fittedPoints, fingerprint: DrawingSession.fingerprint(stroke))])]
+                    var fixtureLibrary = Library(); fixtureLibrary.notebooks = [note]
+                    if ProcessInfo.processInfo.arguments.contains("--trashed-editing-fixture") {
+                        fixtureLibrary.notebooks[0].deletedAt = Date()
+                    }
+                    try repository.writeDrawing(PKDrawing(strokes: [stroke]).dataRepresentation(), noteID: note.id, pageID: note.pages[0].id)
+                    try repository.save(fixtureLibrary)
+                }
+            } else { repository = try LibraryRepository.applicationLibrary(in: documents) }
+            #else
+            repository = try LibraryRepository.applicationLibrary(in: documents)
+            #endif
             guard (pending.isEmpty && dirtyActiveDrawings.isEmpty) || flushDrawings() else { return }
             library = try DrawingPersistence.queue.sync { try repository.loadProjectLibrary() }
             self.repository = repository
@@ -225,11 +252,43 @@ final class NoteStore: ObservableObject {
     }
     func restore(_ id: UUID) { updateNote(id) { $0.deletedAt = nil } }
 
-    func permanentlyDelete(_ id: UUID) {
-        guard flushDrawings(), commit({ $0.notebooks.removeAll { $0.id == id } }) else { return }
-        MarginAIStore.shared.deleteNote(id)
-        do { try repository?.deleteAssets(noteID: id) }
-        catch { errorMessage = "노트는 삭제했지만 첨부 파일을 정리하지 못했습니다. \(error.localizedDescription)" }
+    @discardableResult
+    func permanentlyDelete(_ id: UUID) -> Bool { permanentlyDelete([id]) }
+
+    @discardableResult
+    func permanentlyDelete(_ requested: Set<UUID>) -> Bool {
+        // Revalidate at confirmation time. A restored/live note is never eligible.
+        let ids = Set(library.notebooks.filter { $0.deletedAt != nil && requested.contains($0.id) }.map(\.id))
+        guard !ids.isEmpty else { return true }
+        guard flushDrawings(), commit({ library in
+            library.notebooks.removeAll { ids.contains($0.id) && $0.deletedAt != nil }
+            library.pendingAssetDeletions = Array(Set(library.pendingAssetDeletions ?? []).union(ids))
+        }) else { return false }
+        return finishPermanentDeletion()
+    }
+
+    @discardableResult
+    func finishPermanentDeletion() -> Bool {
+        guard let repository else { return false }
+        let pending = Set(library.pendingAssetDeletions ?? [])
+        guard !pending.isEmpty else { return true }
+        var remaining = Set<UUID>()
+        for id in pending where note(id) == nil {
+            do {
+                try aiStore.deleteNote(id)
+                try DrawingPersistence.queue.sync { try repository.deleteAssets(noteID: id) }
+            } catch { remaining.insert(id) }
+        }
+        // One library write for the batch, not one per note. If it fails, the
+        // persisted IDs make an idempotent retry possible after restarting.
+        if remaining != pending {
+            guard commit({ $0.pendingAssetDeletions = remaining.isEmpty ? nil : Array(remaining) }) else { return false }
+        }
+        if !remaining.isEmpty {
+            errorMessage = "노트 목록에서는 삭제했지만 \(remaining.count)개 노트의 첨부·대화 정리를 완료하지 못했습니다. 최근 삭제된 항목에서 ‘첨부 정리 다시 시도’를 눌러 주세요."
+            return false
+        }
+        return true
     }
 
     func duplicate(_ id: UUID) -> UUID? {
