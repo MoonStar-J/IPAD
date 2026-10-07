@@ -18,7 +18,7 @@ struct CapturedRegion {
               page.width.isFinite, page.height.isFinite, page.width > 0, page.height > 0 else {
             throw CocoaError(.fileReadCorruptFile)
         }
-        let rect = requested.standardized.intersection(CGRect(x: 0, y: 0, width: page.width, height: page.height))
+        let rect = page.isInfinite ? requested.standardized : requested.standardized.intersection(CGRect(x: 0, y: 0, width: page.width, height: page.height))
         guard !rect.isNull, rect.width >= 8, rect.height >= 8,
               rect.width.isFinite, rect.height.isFinite,
               PageRenderer.hasValidPDFBackground(page: page, note: note, store: store) else { throw CocoaError(.fileReadCorruptFile) }

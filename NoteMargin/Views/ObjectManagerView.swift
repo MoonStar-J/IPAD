@@ -71,10 +71,17 @@ struct ElementForm: View {
                 }
             }
             Section {
+                if page.isInfinite {
+                    coordinateField("가로 위치", value: $element.x)
+                    coordinateField("세로 위치", value: $element.y)
+                    coordinateField("너비", value: $element.width)
+                    coordinateField("높이", value: $element.height)
+                } else {
                 valueSlider("가로 위치", value: $element.x, range: 0...max(1, page.width - element.width))
                 valueSlider("세로 위치", value: $element.y, range: 0...max(1, page.height - element.height))
                 valueSlider("너비", value: $element.width, range: 40...max(40, page.width))
                 valueSlider("높이", value: $element.height, range: 40...max(40, page.height))
+                }
             } header: { Text("위치와 크기") } footer: {
                 Text("용지에서 ‘텍스트·사진 이동’을 켜면 항목을 끌어서 옮길 수 있습니다. 텍스트가 잘리면 높이를 늘려주세요.")
             }
@@ -86,10 +93,13 @@ struct ElementForm: View {
             if !embedded { ToolbarItem(placement: .cancellationAction) { Button("취소") { dismiss() } } }
             ToolbarItem(placement: .confirmationAction) {
                 Button("저장") {
+                    guard [element.x, element.y, element.width, element.height].allSatisfy(\.isFinite), element.width > 0, element.height > 0 else { return }
+                    if !page.isInfinite {
                     element.width = min(element.width, page.width)
                     element.height = min(element.height, page.height)
                     element.x = min(max(0, element.x), max(0, page.width - element.width))
                     element.y = min(max(0, element.y), max(0, page.height - element.height))
+                    }
                     if onSave(element) { dismiss() }
                 }.bold().disabled(element.kind == .text && element.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
@@ -100,6 +110,13 @@ struct ElementForm: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack { Text(title); Spacer(); Text("\(Int(value.wrappedValue))").foregroundStyle(.secondary).monospacedDigit() }
             Slider(value: value, in: range).accessibilityLabel(title)
+        }
+    }
+    private func coordinateField(_ title: String, value: Binding<Double>) -> some View {
+        HStack {
+            Text(title)
+            TextField(title, value: value, format: .number).multilineTextAlignment(.trailing)
+                .keyboardType(.numbersAndPunctuation)
         }
     }
 }

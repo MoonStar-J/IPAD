@@ -18,13 +18,24 @@ enum ExportService {
                 throw CocoaError(.fileReadCorruptFile)
             }
         }
+        let regions = try zip(note.pages, drawings).map { page, drawing in
+            page.isInfinite ? try CanvasExtent.exportPages(CanvasExtent.usedBounds(ink: drawing.bounds, elements: page.elements)) : [CGRect(x: 0,y: 0,width: page.width,height: page.height)]
+        }
         try UIGraphicsPDFRenderer(bounds: defaultBounds, format: format).writePDF(to: url) { output in
-            for (page, drawing) in zip(note.pages, drawings) {
-                let bounds = CGRect(x: 0, y: 0, width: page.width, height: page.height)
-                output.beginPage(withBounds: bounds, pageInfo: [:])
-                PageRenderer.drawBackground(page: page, note: note, store: store, context: output.cgContext)
-                let scale = min(2, 4096 / max(page.width, page.height))
-                drawing.image(from: bounds, scale: scale).draw(in: bounds)
+            for (index, page) in note.pages.enumerated() {
+                let drawing = drawings[index]
+                for region in regions[index] {
+                    let outputBounds = CGRect(origin: .zero, size: region.size)
+                    output.beginPage(withBounds: outputBounds, pageInfo: [:])
+                    output.cgContext.saveGState()
+                    output.cgContext.translateBy(x: -region.minX, y: -region.minY)
+                    PageRenderer.drawBackground(page: page, note: note, store: store, context: output.cgContext)
+                    let scale = min(2, 4096 / max(region.width, region.height))
+                    UITraitCollection(userInterfaceStyle: .light).performAsCurrent {
+                        drawing.image(from: region, scale: scale).draw(in: region)
+                    }
+                    output.cgContext.restoreGState()
+                }
             }
         }
         return url

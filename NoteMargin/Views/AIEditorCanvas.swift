@@ -14,6 +14,7 @@ struct AIEditorCanvas: View {
     let onSelectElement: (UUID?) -> Void
     let onMoveElement: (UUID, Double, Double) -> Void
     var editorControlsInset: CGFloat = 0
+    var toolObstacles: [CGRect] = []
     var onOverlayVisibilityChange: (Bool) -> Void = { _ in }
     @ObservedObject private var ai = MarginAIStore.shared
     @Environment(\.scenePhase) private var scenePhase
@@ -43,9 +44,14 @@ struct AIEditorCanvas: View {
                                if !pageChats.isEmpty && transform != next { transform = next }
                                if let focus = sourceFocus, focus.pageID == page.id {
                                    sourceFocus = nil
-                                   session.canvas.zoom(to: focus.rect, animated: true)
+                                   session.canvas.zoom(to: focus.rect.offsetBy(dx: session.canvasOrigin.x,dy: session.canvasOrigin.y), animated: true)
                                }
                            })
+            .overlay {
+                if toolsVisible && activeChatID == nil && !selecting && !showingHistory && !editingObjects && session.loadError == nil {
+                    DockedDrawingTools(session: session, obstacles: toolObstacles)
+                }
+            }
             .overlay {
                 if !selecting && !editingObjects {
                     ForEach(Array(pageChats.filter { $0.belongs(to: note) }.enumerated()), id: \.element.id) { index, chat in
@@ -55,13 +61,13 @@ struct AIEditorCanvas: View {
                                 ZStack(alignment: .bottomTrailing) {
                                     Circle().fill(activeChatID == chat.id ? Color.accentColor : Color(uiColor: .secondarySystemBackground))
                                     Image(systemName: ai.sending.contains(chat.id) ? "ellipsis" : "sparkles")
-                                        .foregroundStyle(activeChatID == chat.id ? Color.white : Color.accentColor)
+                                        .foregroundStyle(activeChatID == chat.id ? Color(uiColor: .systemBackground) : Color.accentColor)
                                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                                     Text("\(index + 1)").font(.system(size: 9, weight: .bold)).padding(3)
                                         .background(Color(uiColor: .secondarySystemGroupedBackground), in: Circle()).offset(x: 2, y: 2)
                                 }.frame(width: 40, height: 40).shadow(color: .black.opacity(0.12), radius: 3, y: 1)
                             }
-                            .buttonStyle(.plain).position(x: geometry.size.width - 25, y: anchor.y)
+                            .buttonStyle(.plain).toolObstacle().position(x: geometry.size.width - 25, y: anchor.y)
                             .accessibilityLabel("여백 대화 \(index + 1): \(chat.title)")
                             .accessibilityIdentifier("ai-margin-pin-\(index)")
                         }
@@ -75,7 +81,7 @@ struct AIEditorCanvas: View {
                             Text("모서리를 끌어 질문할 영역을 조절하세요").font(.caption).foregroundStyle(.primary)
                             HStack {
                                 Button("취소") { selecting = false; selection = nil }.foregroundStyle(.primary)
-                                Button(captureTarget == nil ? "이 영역으로 질문" : "현재 문제에 추가") { if captureTarget != nil || noteChats.isEmpty { capture() } else { choosingTarget = true } }.buttonStyle(.borderedProminent).foregroundStyle(.white)
+                                Button(captureTarget == nil ? "이 영역으로 질문" : "현재 문제에 추가") { if captureTarget != nil || noteChats.isEmpty { capture() } else { choosingTarget = true } }.buttonStyle(.borderedProminent).foregroundStyle(Color(uiColor: .systemBackground))
                                     .disabled(selection == nil).accessibilityIdentifier("ai-region-confirm")
                                     .popover(isPresented: $choosingTarget) { captureDestinationPicker }
                             }
@@ -110,21 +116,17 @@ struct AIEditorCanvas: View {
                             }
                         }.padding(.horizontal, 14).padding(.vertical, 10)
                             .foregroundStyle(.primary)
-                            .background(.regularMaterial, in: Capsule()).padding(12)
+                            .background(.regularMaterial, in: Capsule()).toolObstacle().padding(12)
                             .padding(.top, overlayActive ? 0 : editorControlsInset)
                     }
-                }
-            }
-            .overlay {
-                if toolsVisible && activeChatID == nil && !selecting && !showingHistory && !editingObjects && session.loadError == nil {
-                    DockedDrawingTools(session: session)
                 }
             }
             .overlay(alignment: .topTrailing) {
                 if let id = activeChatID, !selecting, !editingObjects {
                     ChatGPTMarginView(conversationID: id, project: note.projectID.flatMap { store.project($0) }, onClose: { activeChatID = nil }, onSave: { text in
-                        let element = PageElement(kind: .text, text: text, x: 24, y: max(24, min(page.height - 200, selection?.maxY ?? 100)), width: min(600, page.width - 48), height: 180, fontSize: 18)
-                        store.setAIElement(noteID: note.id, pageID: page.id, element: element, present: true, undoManager: session.canvas.undoManager)
+                        let source = selection ?? ai.conversation(id)?.rect
+                        let element = PageElement(kind: .text, text: text, x: page.isInfinite ? Double(source?.minX ?? 24) : 24, y: page.isInfinite ? Double(source?.maxY ?? 100) : max(24, min(page.height - 200, selection?.maxY ?? 100)), width: min(600, page.width - 48), height: 180, fontSize: 18)
+                        store.setAIElement(noteID: note.id, pageID: page.id, element: element, present: true, undoManager: session.undoManager)
                         session.refreshUndo()
                     }, onAttach: {
                         session.host?.cancelStrokeErasing()
@@ -227,7 +229,7 @@ struct AIEditorCanvas: View {
     private func capture() {
         guard let selection, store.flushDrawings(), session.loadError == nil else { return }
         do {
-            let region = try RegionContextService.capture(note: note, page: page, drawing: session.canvas.drawing, store: store, rect: selection)
+            let region = try RegionContextService.capture(note: note, page: page, drawing: session.drawing, store: store, rect: selection)
             if let target = captureTarget {
                 if ai.addCapture(region, to: target, note: note) { selecting = false; activeChatID = target; captureTarget = nil }
             } else if let id = ai.create(note: note, project: note.projectID.flatMap { store.project($0) }, region: region) {

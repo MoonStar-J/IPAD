@@ -135,7 +135,7 @@ import PencilKit
         controller.attach(to: canvas); controller.isEnabled = true
         var count = 0, previews = 0
         controller.onPreviewForTesting = { _ in previews += 1 }
-        controller.onCompletion = { before, original, after in
+        controller.onCompletion = { before, original, after, _ in
             count += 1; canvas.drawing = after
             return before == source && original.strokes.count == 2 && after.strokes.count == 2
         }
@@ -162,7 +162,7 @@ import PencilKit
         let completed = await settle { count == 1 }
         try check(completed, "one existing replacement operation after native end")
         controller.nativeFinishedRendering()
-        try check(controller.phase == .committing, "unrelated render callback before native drawing echo cannot clear preview")
+        try check(controller.phase == .committing, "render handoff completes at the presentation transaction boundary")
         controller.nativeChanged(drawing: canvas.drawing, revision: 3)
         // PKCanvasView may echo synchronously inside its setter, before the
         // session records the same value for persistence. That is not new ink.
@@ -175,12 +175,13 @@ import PencilKit
             let next=stroke(offset:CGPoint(x:0,y:100))
             canvas.drawing=PKDrawing(strokes:canvas.drawing.strokes+[next])
             controller.nativeChanged(drawing:canvas.drawing,revision:5)
+            controller.inputEnded(ended)
             controller.nativeEnded(drawing:canvas.drawing,revision:5)
             controller.nativeChanged(drawing:canvas.drawing,revision:6)
         }
         controller.nativeFinishedRendering()
         _ = await settle { controller.phase == .finished }
-        try check(count == 1 && canvas.layer.opacity == 1 && controller.phase == .finished, "one handoff and no double commit")
+        try check(count == 1 && canvas.layer.opacity == 1 && (controller.phase == .finished || (nativeFirst && controller.phase == .idle)), "one handoff and no double commit")
         try check(canvas.drawing.strokes.count == (nativeFirst ? 3:2), "fast next contact remains native ink, not part of previous shape")
         withExtendedLifetime(owner) {}
     }
@@ -281,7 +282,7 @@ import PencilKit
             try check(canvas.drawing.strokes.isEmpty && canvas.layer.opacity == 1, "preview replaces native ink without modifying drawing")
             if kind == .triangle || kind == .rectangle {
                 var final: PKDrawing?
-                controller.onCompletion = { _,_,completed in final=completed; canvas.drawing=completed; return true }
+                controller.onCompletion = { _,_,completed, _ in final=completed; canvas.drawing=completed; return true }
                 let nativePoints=points.enumerated().map { i,p in
                     PKStrokePoint(location:p,timeOffset:Double(i)*0.01,size:CGSize(width:3,height:3),opacity:1,force:1,azimuth:0,altitude:.pi/2)
                 }
@@ -396,7 +397,7 @@ import PencilKit
             try check(editedPixels>1 && controller.phase == .snapped && canvas.drawing.strokes.isEmpty,"\(style) same-contact endpoint preview follows pointer through zero length at zoom \(factor)")
             try check(host.backgroundRasterizationCount==renders,"snap shares \(style) tile images without re-rendering the page")
             let native=PKDrawing(strokes:[PKStroke(ink:PKInk(.pen,color:.black),path:PKStrokePath(controlPoints:contactPoints,creationDate:Date()))])
-            controller.onCompletion = { _,_,drawing in canvas.drawing=drawing; return true }
+            controller.onCompletion = { _,_,drawing, _ in canvas.drawing=drawing; return true }
             controller.inputEnded(ShapeCompletionSample(documentPoint:end,timestamp:1.6,estimationIndex:nil,expectingUpdates:0))
             canvas.drawing=native; controller.nativeChanged(drawing:native,revision:2); controller.nativeEnded(drawing:native,revision:2)
             let committed=await settle { controller.phase == .committing }
@@ -539,18 +540,18 @@ import PencilKit
     let nativeWithTail = PKDrawing(strokes: [existing, tailStroke])
     var tailEvent = ended; tailEvent.timestamp = 1.7; tailEvent.documentPoint = CGPoint(x: 600,y: 500)
     heldController.inputMoved(tailEvent); heldController.inputEnded(tailEvent)
+    undo.beginUndoGrouping()
     session.canvas.drawing = nativeWithTail
     session.canvasViewDrawingDidChange(session.canvas); session.canvasViewDidEndUsingTool(session.canvas)
     try? await Task.sleep(for: .milliseconds(10))
-    try check(heldController.phase == .snapped, "native end cannot overwrite pending native force")
+    try check(heldController.phase == .committing || heldController.phase == .finished, "native end commits without waiting for an undocumented estimate/drawing sequence")
     heldController.inputEstimated(sample(30))
     try? await Task.sleep(for: .milliseconds(10))
-    try check(heldController.phase == .snapped, "estimate notification alone cannot finalize an older native snapshot")
-    undo.beginUndoGrouping()
+    try check(heldController.phase == .committing || heldController.phase == .finished, "late estimate preserves the single committed operation")
     session.canvasViewDrawingDidChange(session.canvas)
     let heldCommitted = await settle { heldController.phase == .committing || heldController.phase == .finished }
     undo.endUndoGrouping()
-    try check(heldCommitted && visibleSnaps == 1, "late native revision performs exactly one shape commit")
+    try check(heldCommitted && visibleSnaps == 1, "late native revision cannot duplicate the shape commit")
     let heldFinal = session.canvas.drawing
     let finalPoints = Array(heldFinal.strokes.last!.path)
     try check(heldFinal.strokes.count == 2 && finalPoints.first!.location == samples.first!.documentPoint &&

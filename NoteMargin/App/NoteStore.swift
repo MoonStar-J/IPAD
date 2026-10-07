@@ -39,6 +39,10 @@ final class NoteStore: ObservableObject {
     }
 
     init() { loadLibrary() }
+    init(repository: LibraryRepository) throws {
+        self.repository = repository
+        library = try repository.loadProjectLibrary()
+    }
 
     func loadLibrary() {
         do {
@@ -193,9 +197,9 @@ final class NoteStore: ObservableObject {
         }
     }
 
-    func createNote(title: String, paper: PaperStyle, cover: CoverColor, folderID: UUID?, projectID: UUID? = nil) -> UUID? {
+    func createNote(title: String, paper: PaperStyle, cover: CoverColor, folderID: UUID?, projectID: UUID? = nil, infinite: Bool = false) -> UUID? {
         var note = Notebook(title: title.trimmedOrUntitled, cover: cover, folderID: folderID, projectID: projectID.flatMap { project($0)?.id })
-        note.pages = [NotePage(paper: paper)]
+        note.pages = [NotePage(paper: paper, canvasMode: infinite ? "infinite" : nil)]
         return commit { $0.notebooks.append(note) } ? note.id : nil
     }
 
@@ -472,7 +476,7 @@ final class NoteStore: ObservableObject {
         } catch { errorMessage = "PDF를 가져오지 못했습니다. \(error.localizedDescription)"; return nil }
     }
 
-    func addImage(_ data: Data, noteID: UUID, pageID: UUID) {
+    func addImage(_ data: Data, noteID: UUID, pageID: UUID, center: CGPoint? = nil) {
         guard let image = UIImage(data: data), let page = note(noteID)?.pages.first(where: { $0.id == pageID }),
               let normalized = image.jpegData(compressionQuality: 0.9), let repository else { return }
         let name = "\(UUID()).jpg"
@@ -480,7 +484,8 @@ final class NoteStore: ObservableObject {
             try repository.writeAsset(normalized, noteID: noteID, name: name)
             let width = min(page.width - 80, 420)
             let height = min(page.height - 80, width * image.size.height / max(image.size.width, 1))
-            let element = PageElement(kind: .image, assetName: name, x: 40, y: 40, width: width, height: height)
+            let origin = page.isInfinite ? center.map { CGPoint(x: $0.x-width/2, y: $0.y-height/2) } : nil
+            let element = PageElement(kind: .image, assetName: name, x: Double(origin?.x ?? 40), y: Double(origin?.y ?? 40), width: width, height: height)
             updatePage(noteID: noteID, pageID: pageID) { $0.elements.append(element) }
         } catch { errorMessage = error.localizedDescription }
     }

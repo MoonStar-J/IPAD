@@ -39,7 +39,7 @@ enum PageRenderer {
     }
 
     static func drawBackground(page: NotePage, note: Notebook, store: NoteStore, context: CGContext) {
-        let bounds = CGRect(x: 0, y: 0, width: page.width, height: page.height)
+        let bounds = page.isInfinite ? context.boundingBoxOfClipPath : CGRect(x: 0, y: 0, width: page.width, height: page.height)
         context.setFillColor(UIColor.white.cgColor)
         context.fill(bounds)
         if !page.pdfRegions.isEmpty {
@@ -73,31 +73,48 @@ enum PageRenderer {
             context.setStrokeColor(UIColor(red: 0.78, green: 0.81, blue: 0.84, alpha: 0.65).cgColor)
             context.setFillColor(UIColor(red: 0.69, green: 0.73, blue: 0.78, alpha: 0.65).cgColor)
             context.setLineWidth(0.6)
+            let visible = context.boundingBoxOfClipPath.intersection(bounds)
+            func lines(from low: Double, to high: Double, phase: Double, step: Double) -> StrideTo<Double> {
+                stride(from: phase + ceil((low-phase)/step)*step, to: high, by: step)
+            }
             switch page.paper {
             case .plain: break
             case .ruled:
-                for y in stride(from: 80.0, to: page.height - 36, by: 32) {
-                    context.move(to: CGPoint(x: 40, y: y)); context.addLine(to: CGPoint(x: page.width - 40, y: y))
+                let minY = page.isInfinite ? visible.minY : max(80,visible.minY)
+                let maxY = page.isInfinite ? visible.maxY : min(page.height-36,visible.maxY)
+                for y in lines(from: minY, to: maxY, phase: 80, step: 32) {
+                    context.move(to: CGPoint(x: page.isInfinite ? visible.minX : 40, y: y))
+                    context.addLine(to: CGPoint(x: page.isInfinite ? visible.maxX : page.width-40, y: y))
                 }
                 context.strokePath()
-            case .grid:
-                for x in stride(from: 32.0, to: page.width, by: 24) {
-                    context.move(to: CGPoint(x: x, y: 0)); context.addLine(to: CGPoint(x: x, y: page.height))
-                }
-                for y in stride(from: 32.0, to: page.height, by: 24) {
-                    context.move(to: CGPoint(x: 0, y: y)); context.addLine(to: CGPoint(x: page.width, y: y))
-                }
-                context.strokePath()
-            case .dotted:
-                for x in stride(from: 32.0, to: page.width - 20, by: 24) {
-                    for y in stride(from: 32.0, to: page.height - 20, by: 24) {
-                        context.fillEllipse(in: CGRect(x: x, y: y, width: 1.8, height: 1.8))
+            case .grid, .dotted:
+                let overlap = page.paper == .dotted ? 2.0 : 0
+                let margin = page.paper == .dotted ? 20.0 : 0
+                let minX = page.isInfinite ? visible.minX-overlap : max(32,visible.minX-overlap)
+                let minY = page.isInfinite ? visible.minY-overlap : max(32,visible.minY-overlap)
+                let maxX = page.isInfinite ? visible.maxX : min(page.width-margin,visible.maxX)
+                let maxY = page.isInfinite ? visible.maxY : min(page.height-margin,visible.maxY)
+                if page.paper == .grid {
+                    for x in lines(from: minX, to: maxX, phase: 32, step: 24) {
+                        context.move(to: CGPoint(x: x, y: visible.minY)); context.addLine(to: CGPoint(x: x, y: visible.maxY))
+                    }
+                    for y in lines(from: minY, to: maxY, phase: 32, step: 24) {
+                        context.move(to: CGPoint(x: visible.minX, y: y)); context.addLine(to: CGPoint(x: visible.maxX, y: y))
+                    }
+                    context.strokePath()
+                } else {
+                    for x in lines(from: minX, to: maxX, phase: 32, step: 24) {
+                        for y in lines(from: minY, to: maxY, phase: 32, step: 24) {
+                            context.fillEllipse(in: CGRect(x: x, y: y, width: 1.8, height: 1.8))
+                        }
                     }
                 }
             }
         }
+
         for element in page.elements {
             let rect = CGRect(x: element.x, y: element.y, width: element.width, height: element.height)
+            guard context.boundingBoxOfClipPath.intersects(rect) else { continue }
             switch element.kind {
             case .text:
                 let paragraph = NSMutableParagraphStyle()
@@ -118,15 +135,19 @@ enum PageRenderer {
     }
 
     static func snapshot(page: NotePage, note: Notebook, drawing: PKDrawing, store: NoteStore, width: CGFloat) -> UIImage {
-        let size = CGSize(width: width, height: width * page.height / page.width)
+        let rect = page.isInfinite ? CanvasExtent.usedBounds(ink: drawing.bounds, elements: page.elements) : CGRect(x: 0, y: 0, width: page.width, height: page.height)
+        let scale = page.isInfinite ? min(width / rect.width, 4096 / max(rect.width, rect.height)) : width / rect.width
+        let size = CGSize(width: max(1,rect.width*scale), height: max(1,rect.height*scale))
         let format = UIGraphicsImageRendererFormat()
         format.scale = 1
         format.opaque = true
         return UIGraphicsImageRenderer(size: size, format: format).image { output in
-            output.cgContext.scaleBy(x: width / page.width, y: width / page.width)
+            output.cgContext.scaleBy(x: scale, y: scale)
+            output.cgContext.translateBy(x: -rect.minX, y: -rect.minY)
             drawBackground(page: page, note: note, store: store, context: output.cgContext)
-            let rect = CGRect(x: 0, y: 0, width: page.width, height: page.height)
-            drawing.image(from: rect, scale: max(width / page.width, 0.001)).draw(in: rect)
+            UITraitCollection(userInterfaceStyle: .light).performAsCurrent {
+                drawing.image(from: rect, scale: max(scale, 0.000001)).draw(in: rect)
+            }
         }
     }
 }
@@ -137,11 +158,13 @@ enum PageRenderer {
 final class PaperView: UIView {
     var render: ((CGContext) -> Void)? { didSet { invalidateTiles() } }
     var documentBounds = CGRect.zero
+    var nativeOrigin = CGPoint.zero
     private let documentLayer = CALayer()
     private var tiles: [String: CALayer] = [:]
     private var rasterScale: CGFloat = 0
     private var lastTransform = CGAffineTransform.identity
     private var lastViewport = CGRect.zero
+    private var lastDocumentBounds = CGRect.zero
     private var refinement: Task<Void, Never>?
     private var drawingActive = false
     private(set) var rasterizationCount = 0
@@ -149,7 +172,7 @@ final class PaperView: UIView {
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        clipsToBounds = true
+        clipsToBounds = false
         documentLayer.anchorPoint = .zero
         layer.addSublayer(documentLayer)
     }
@@ -164,15 +187,16 @@ final class PaperView: UIView {
 
     func updateViewport(_ transform: CGAffineTransform, viewport: CGRect, interacting: Bool) {
         guard !viewport.isEmpty, !documentBounds.isEmpty, transform.a > 0 else { return }
-        let changed = transform != lastTransform || viewport != lastViewport || tiles.isEmpty
+        let changed = transform != lastTransform || viewport != lastViewport || documentBounds != lastDocumentBounds || tiles.isEmpty
         lastTransform = transform; lastViewport = viewport
+        lastDocumentBounds = documentBounds
         viewportTransform = transform
         CATransaction.begin(); CATransaction.setDisableActions(true)
         // Native UIScrollView bounds already supplies -contentOffset. Paper is
         // its document-space child, so applying that translation again is wrong.
         layer.anchorPoint = .zero
-        layer.position = .zero
-        bounds = documentBounds
+        layer.position = CGPoint(x: nativeOrigin.x*transform.a,y: nativeOrigin.y*transform.d)
+        bounds = CGRect(origin: .zero, size: documentBounds.size)
         layer.setAffineTransform(CGAffineTransform(scaleX: transform.a, y: transform.d))
         documentLayer.setAffineTransform(.identity)
         CATransaction.commit()
@@ -198,7 +222,11 @@ final class PaperView: UIView {
     func copyCachedTiles(to target: CALayer, fill: CGColor? = UIColor.white.cgColor) {
         target.sublayers?.forEach { $0.removeFromSuperlayer() }
         target.anchorPoint = .zero; target.position = .zero
-        target.bounds = documentBounds; target.backgroundColor = fill
+        target.bounds = CGRect(origin: .zero, size: documentBounds.size); target.backgroundColor = nil
+        if let fill {
+            let base = CALayer(); base.frame = documentBounds; base.backgroundColor = fill
+            target.addSublayer(base)
+        }
         for tile in tiles.values {
             let copy = CALayer(); copy.frame = tile.frame
             copy.contents = tile.contents; copy.contentsScale = tile.contentsScale
@@ -228,7 +256,10 @@ final class PaperView: UIView {
                 let rect = CGRect(x: CGFloat(column) * side, y: CGFloat(row) * side, width: side, height: side).intersection(documentBounds)
                 guard !rect.isEmpty, !rect.isNull else { continue }
                 retained.insert(key)
-                guard tiles[key] == nil else { continue }
+                // Expanding an infinite range can enlarge an old boundary tile.
+                // Full interior tiles remain reusable at the same resolution.
+                if tiles[key]?.frame == rect { continue }
+                tiles.removeValue(forKey: key)?.removeFromSuperlayer()
                 let format = UIGraphicsImageRendererFormat(); format.scale = rasterScale; format.opaque = true
                 let image = UIGraphicsImageRenderer(size: rect.size, format: format).image { output in
                     output.cgContext.translateBy(x: -rect.minX, y: -rect.minY)

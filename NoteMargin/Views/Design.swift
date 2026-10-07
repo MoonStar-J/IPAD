@@ -48,6 +48,7 @@ struct NotebookForm: View {
     var onCreated: (UUID) -> Void = { _ in }
     @State private var title = ""
     @State private var paper: PaperStyle = .ruled
+    @State private var infinite = false
     @State private var cover: CoverColor = .blue
 
     var body: some View {
@@ -61,7 +62,7 @@ struct NotebookForm: View {
                         Spacer()
                     }.listRowBackground(Color.clear)
                 }
-                Section("노트 이름") { TextField("제목 없는 노트", text: $title).submitLabel(.done) }
+                Section("노트 이름") { TextField("제목 없는 노트", text: $title).submitLabel(.done).accessibilityIdentifier("create-note-title") }
                 Section("표지 색상") {
                     HStack(spacing: 20) {
                         ForEach(CoverColor.allCases) { value in
@@ -75,6 +76,12 @@ struct NotebookForm: View {
                     }.frame(maxWidth: .infinity)
                 }
                 if existing == nil {
+                    Section("노트 형식") {
+                        Picker("캔버스", selection: $infinite) {
+                            Text("고정 페이지").tag(false)
+                            Text("무한 캔버스").tag(true)
+                        }.pickerStyle(.segmented).accessibilityIdentifier("note-canvas-mode")
+                    }
                     Section("첫 페이지 용지") {
                         Picker("용지", selection: $paper) {
                             ForEach(PaperStyle.allCases) { Text($0.title).tag($0) }
@@ -90,11 +97,11 @@ struct NotebookForm: View {
                     Button(existing == nil ? "만들기" : "완료") {
                         if let existing {
                             if store.updateNote(existing.id, { $0.title = title.trimmedOrUntitled; $0.cover = cover }) { dismiss() }
-                        } else if let id = store.createNote(title: title, paper: paper, cover: cover, folderID: folderID, projectID: projectID) {
+                        } else if let id = store.createNote(title: title, paper: paper, cover: cover, folderID: folderID, projectID: projectID, infinite: infinite) {
                             dismiss()
                             onCreated(id)
                         }
-                    }.bold()
+                    }.bold().accessibilityIdentifier("create-note-confirm")
                 }
             }
             .onAppear { if let existing { title = existing.title; cover = existing.cover } }
@@ -208,7 +215,7 @@ struct DrawingToolsView: View {
     @ObservedObject var session: DrawingSession
     @Binding var expanded: Bool
     var vertical = false
-    var onMove: (CGPoint, Bool) -> Void = { _, _ in }
+    var onMove: (CGPoint, CGPoint, Bool) -> Void = { _, _, _ in }
     @AppStorage("inkTools.colors") private var storedColors = InkPalette.defaults.joined(separator: ",")
     @State private var editingColor = 0
     @State private var selectedColorSlot: Int?
@@ -217,8 +224,8 @@ struct DrawingToolsView: View {
     @State private var eraserSettings = false
     private var moveGesture: some Gesture {
         DragGesture(minimumDistance: 8, coordinateSpace: .named("ink-tool-dock"))
-            .onChanged { onMove($0.location, false) }
-            .onEnded { onMove($0.location, true) }
+            .onChanged { onMove($0.startLocation, $0.location, false) }
+            .onEnded { onMove($0.startLocation, $0.location, true) }
     }
     private let colors: [(String, Color)] = [("검정", .black), ("파랑", .blue), ("빨강", .red), ("초록", .green), ("노랑", .yellow), ("흰색", .white)]
     var body: some View {
@@ -561,39 +568,109 @@ struct ToolDock: Equatable {
         return Self(edge: edge, fraction: t)
     }
 }
+struct ToolObstacleKey: PreferenceKey {
+    static var defaultValue: [Anchor<CGRect>] = []
+    static func reduce(value: inout [Anchor<CGRect>], nextValue: () -> [Anchor<CGRect>]) { value += nextValue() }
+}
+extension View {
+    func toolObstacle() -> some View { anchorPreference(key: ToolObstacleKey.self, value: .bounds) { [$0] } }
+}
+
+extension ToolDock {
+    struct Placement {
+        var dock: ToolDock
+        var size: CGSize
+        var center: CGPoint
+        var expanded: Bool
+    }
+    /// Subtract occupied intervals from each edge, using that edge's FINAL size.
+    static func resolve(point: CGPoint, viewport: CGRect, obstacles: [CGRect], expanded: Bool) -> Placement? {
+        var candidates: [Placement] = []
+        for edge in Edge.allCases {
+            let dock = ToolDock(edge: edge, fraction: 0)
+            let size = dock.paletteSize(viewport: viewport.size, expanded: expanded)
+            guard size.width + 24 <= viewport.width, size.height + 24 <= viewport.height,
+                  !expanded || (edge.isVertical ? size.height : size.width) >= 180 else { continue }
+            let limits = limits(viewport: viewport.size, tool: size).offsetBy(dx: viewport.minX, dy: viewport.minY)
+            let vertical = edge.isVertical
+            let fixed = edge == .left ? limits.minX : edge == .right ? limits.maxX : edge == .top ? limits.minY : limits.maxY
+            let low = vertical ? limits.minY : limits.minX, high = vertical ? limits.maxY : limits.maxX
+            var intervals: [ClosedRange<CGFloat>] = [low...high]
+            for obstacle in obstacles where !obstacle.isEmpty && !obstacle.isNull {
+                let forbidden = obstacle.insetBy(dx: -size.width/2-6, dy: -size.height/2-6)
+                guard vertical ? (forbidden.minX...forbidden.maxX).contains(fixed) : (forbidden.minY...forbidden.maxY).contains(fixed) else { continue }
+                let a = vertical ? forbidden.minY : forbidden.minX, b = vertical ? forbidden.maxY : forbidden.maxX
+                intervals = intervals.flatMap { range -> [ClosedRange<CGFloat>] in
+                    if b < range.lowerBound || a > range.upperBound { return [range] }
+                    var result: [ClosedRange<CGFloat>] = []
+                    if a > range.lowerBound { result.append(range.lowerBound...min(range.upperBound,a)) }
+                    if b < range.upperBound { result.append(max(range.lowerBound,b)...range.upperBound) }
+                    return result
+                }
+            }
+            for interval in intervals {
+                let variable = min(interval.upperBound, max(interval.lowerBound, vertical ? point.y : point.x))
+                let center = vertical ? CGPoint(x: fixed,y: variable) : CGPoint(x: variable,y: fixed)
+                candidates.append(Placement(dock: ToolDock(edge: edge, fraction: Double((variable-low)/max(1,high-low))), size: size, center: center, expanded: expanded))
+            }
+        }
+        if let best = candidates.min(by: { hypot($0.center.x-point.x,$0.center.y-point.y) < hypot($1.center.x-point.x,$1.center.y-point.y) }) { return best }
+        return expanded ? resolve(point: point, viewport: viewport, obstacles: obstacles, expanded: false) : nil
+    }
+}
+
 struct DockedDrawingTools: View {
     @ObservedObject var session: DrawingSession
     @AppStorage("inkTools.dock.edge") private var edge = "bottom"
     @AppStorage("inkTools.dock.fraction") private var fraction = 1.0
     @State private var expanded = true
-    @State private var moving: ToolDock?
+    var obstacles: [CGRect] = []
+    @State private var moving: CGPoint?
+    @State private var dragOrigin: CGPoint?
+    @State private var compactTools = false
     var body: some View {
         GeometryReader { geometry in
-            let dock = moving ?? ToolDock(edge: ToolDock.Edge(rawValue: edge) ?? .bottom, fraction: fraction)
-            let size = dock.paletteSize(viewport: geometry.size, expanded: expanded)
-            DrawingToolsView(session: session, expanded: $expanded, vertical: dock.edge.isVertical) { location, ended in
-                // Choose the edge from finger position, independently of the
-                // palette's changing aspect ratio, so rotation cannot oscillate.
-                var projected = ToolDock.nearest(to: location, viewport: geometry.size, tool: CGSize(width: 60, height: 60))
-                let limits = ToolDock.limits(viewport: geometry.size, tool: projected.paletteSize(viewport: geometry.size, expanded: expanded))
-                projected.fraction = projected.edge.isVertical
-                    ? min(1, max(0, (location.y - limits.minY) / max(1, limits.height)))
-                    : min(1, max(0, (location.x - limits.minX) / max(1, limits.width)))
-                if ended {
-                    edge = projected.edge.rawValue; fraction = projected.fraction; moving = nil
-                } else { moving = projected }
+            let dock = ToolDock(edge: ToolDock.Edge(rawValue: edge) ?? .bottom, fraction: fraction)
+            let area = CGRect(origin: .zero, size: geometry.size).inset(by: UIEdgeInsets(top: geometry.safeAreaInsets.top, left: geometry.safeAreaInsets.leading, bottom: geometry.safeAreaInsets.bottom, right: geometry.safeAreaInsets.trailing))
+            let desiredSize = dock.paletteSize(viewport: area.size, expanded: expanded)
+            let desired = dock.center(viewport: area.size, tool: desiredSize)
+            let requested = CGPoint(x: desired.x+area.minX, y: desired.y+area.minY)
+            let placement = ToolDock.resolve(point: requested, viewport: area, obstacles: obstacles, expanded: expanded)
+            if let placement {
+                let size = placement.size
+                let center = moving ?? placement.center
+                DrawingToolsView(session: session, expanded: Binding(get: { placement.expanded }, set: { value in
+                    if value && !placement.expanded && expanded { compactTools = true } else { expanded = value }
+                }), vertical: placement.dock.edge.isVertical) { start, location, ended in
+                    let origin = dragOrigin ?? placement.center
+                    if dragOrigin == nil { dragOrigin = origin }
+                    let target = CGPoint(x: origin.x + location.x-start.x, y: origin.y + location.y-start.y)
+                    if ended {
+                        if let final = ToolDock.resolve(point: target, viewport: area, obstacles: obstacles, expanded: expanded) {
+                            withAnimation(.easeOut(duration: 0.2)) {
+                                edge = final.dock.edge.rawValue; fraction = final.dock.fraction; moving = nil
+                            }
+                        } else { moving = nil }
+                        dragOrigin = nil
+                    } else { moving = target }
+                }
+                .frame(width: size.width, height: size.height)
+                .position(center)
+                .popover(isPresented: $compactTools) {
+                    DrawingToolsView(session: session, expanded: .constant(true))
+                        .frame(width: min(430, geometry.size.width-24), height: 56).padding(8)
+                }
+                .accessibilityAction(named: "위쪽으로 이동") { edge = "top"; fraction = 0.5 }
+                .accessibilityAction(named: "아래쪽으로 이동") { edge = "bottom"; fraction = 0.5 }
+                .accessibilityAction(named: "왼쪽으로 이동") { edge = "left"; fraction = 0.5 }
+                .accessibilityAction(named: "오른쪽으로 이동") { edge = "right"; fraction = 0.5 }
             }
-            .frame(width: size.width, height: size.height)
-            .position(dock.center(viewport: geometry.size, tool: size))
-            .accessibilityAction(named: "위쪽으로 이동") { edge = "top"; fraction = 0.5 }
-            .accessibilityAction(named: "아래쪽으로 이동") { edge = "bottom"; fraction = 0.5 }
-            .accessibilityAction(named: "왼쪽으로 이동") { edge = "left"; fraction = 0.5 }
-            .accessibilityAction(named: "오른쪽으로 이동") { edge = "right"; fraction = 0.5 }
-            if session.selectedTool.isSelection, session.selectedStrokeCount > 0,
+            if session.selectedStrokeCount > 0,
                let selectionRect = session.selectionActionRect,
                selectionRect.intersects(CGRect(origin: .zero, size: geometry.size)) {
                 let barSize = CGSize(width: min(430, max(60, geometry.size.width - 16)), height: 60)
-                let paletteCenter = dock.center(viewport: geometry.size, tool: size)
+                let size = placement?.size ?? desiredSize
+                let paletteCenter = moving ?? placement?.center ?? requested
                 let paletteFrame = CGRect(x: paletteCenter.x - size.width / 2, y: paletteCenter.y - size.height / 2,
                                           width: size.width, height: size.height)
                 InkSelectionActionBar(session: session)

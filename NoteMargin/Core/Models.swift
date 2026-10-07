@@ -64,16 +64,28 @@ struct InkGroup: Codable, Identifiable, Equatable {
     var strokeIDs: [InkStrokeID]
 }
 
+struct InkShape: Codable, Equatable {
+    var strokeID: InkStrokeID
+    var kind: String
+    var points: [CGPoint]
+    // Native stroke digest validates shape semantics after partial erasing.
+    var fingerprint: Data
+}
+
 struct NotePage: Codable, Identifiable, Equatable {
     var id = UUID()
     var paper: PaperStyle = .plain
     var width: Double = 768
     var height: Double = 1024
+    var canvasMode: String?
+    var viewport: CanvasViewport?
+    var isInfinite: Bool { canvasMode == "infinite" && pdfPageIndex == nil && pdfSegments == nil }
     var pdfPageIndex: Int?
     var elements: [PageElement] = []
     // Older pages decode without a migration. Erased members can remain here so
     // undo restores their group; selection only expands to currently live ink.
     var inkGroups: [InkGroup]?
+    var inkShapes: [InkShape]?
     // Optional for compatibility with notebooks saved before continuous import.
     var pdfSegments: [PDFSegment]?
     var pdfFitToPage: Bool?

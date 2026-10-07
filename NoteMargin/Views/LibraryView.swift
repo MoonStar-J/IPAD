@@ -10,11 +10,9 @@ struct LibraryView: View {
     @State private var sort: NoteSort = .modified
     @State private var creatingNote = false
     @State private var importingPDF = false
-    @State private var pickedPDF: PreparedPDFImport?
-    @State private var importing = false
-    @State private var pendingPDF: PreparedPDFImport?
+    @StateObject private var pdfImport = PDFImportFlow()
     @State private var importedNoteID: UUID?
-    @State private var deferredImport: PreparedPDFImport?
+    @State private var deferredImportURL: URL?
     @State private var route: NoteRoute?
     @State private var createdNoteID: UUID?
     @State private var editingNote: Notebook?
@@ -26,6 +24,7 @@ struct LibraryView: View {
     @State private var rootDropTargeted = false
     @State private var projectDropTarget: UUID?
     @State private var deletingProject: NoteProject?
+    @State private var showingSettings = false
     @State private var connectingAI = false
     @State private var movingItem: LibraryItem?
 
@@ -82,6 +81,7 @@ struct LibraryView: View {
                             Button { newProjectParentID = nil; creatingProject = true } label: {
                                 Label("새 프로젝트", systemImage: "plus").frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).padding(.horizontal, 12)
                             }.buttonStyle(.plain).accessibilityIdentifier("sidebar-new-project")
+                            Button("설정", systemImage: "gearshape") { showingSettings = true }.padding(12)
                             sidebarRow("최근 삭제된 항목", icon: "trash", filter: .trash).padding(.top, 22)
                             Button { connectingAI = true } label: {
                                 Label(AppBuild.aiConnectionTitle, systemImage: "sparkles").frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).padding(.horizontal, 12)
@@ -177,11 +177,12 @@ struct LibraryView: View {
                                     Button { importingPDF = true } label: { Label("PDF 가져오기", systemImage: "square.and.arrow.down") }
                                         .accessibilityIdentifier("library-import-pdf")
                                     Button { creatingNote = true } label: { Label("새로운 노트", systemImage: "square.and.pencil") }
+                                        .accessibilityIdentifier("library-create-note")
                                         .keyboardShortcut("n", modifiers: .command)
                                 }
                             }
                         }
-                        .overlay { if importing { ProgressView("PDF 가져오는 중…").padding(28).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18)) } }
+                        .overlay { if pdfImport.preparing { ProgressView("PDF 가져오는 중…").padding(28).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18)) } }
                     }
                 }
             }
@@ -203,31 +204,23 @@ struct LibraryView: View {
             }
         } message: { Text("하위 프로젝트와 노트는 삭제되지 않고 한 단계 위로 이동합니다.") }
         .sheet(item: $editingNote) { NotebookForm(existing: $0) }
-        .sheet(item: $pendingPDF, onDismiss: {
-            if let id = importedNoteID { route = NoteRoute(id: id); importedNoteID = nil }
-        }) { prepared in
-            PDFImportChoiceView(title: prepared.title, pageCount: prepared.pages.count) { layout in
-                importedNoteID = store.importPDF(prepared, layout: layout)
-                pendingPDF = nil
-            }
-        }
         .fullScreenCover(item: $route, onDismiss: {
-            if let prepared = deferredImport { deferredImport = nil; presentImport(prepared) }
+            if let url = deferredImportURL { deferredImportURL = nil; prepareImport(url, folderID: nil) }
         }) { route in NavigationStack { EditorView(noteID: route.id) }.environmentObject(store) }
+        .sheet(isPresented: $showingSettings) { AppearanceSettings() }
         .sheet(isPresented: $importingPDF, onDismiss: {
-            if let prepared = pickedPDF {
-                pickedPDF = nil
-                presentImport(prepared)
-            }
+            pdfImport.cancel()
+            if let id = importedNoteID { importedNoteID = nil; route = NoteRoute(id: id) }
         }) {
-            PDFImportSourceView(folderID: currentFolderID, projectID: currentProjectID) { prepared in
-                pickedPDF = prepared
+            PDFImportSourceView(flow: pdfImport, folderID: currentFolderID, projectID: currentProjectID) { id in
+                importedNoteID = id
                 importingPDF = false
             }
         }
         .onOpenURL { url in
-            guard store.flushDrawings(), !importing, !importingPDF, pendingPDF == nil else { return }
-            prepareImport(url, folderID: nil)
+            guard url.isFileURL, store.flushDrawings(), !importingPDF else { return }
+            if route != nil { deferredImportURL = url; route = nil }
+            else { prepareImport(url, folderID: nil) }
         }
         .alert("노트를 영구 삭제할까요?", isPresented: Binding(get: { deletingNote != nil }, set: { if !$0 { deletingNote = nil } })) {
             Button("취소", role: .cancel) { }
@@ -360,31 +353,14 @@ struct LibraryView: View {
         } description: {
             Text(query.isEmpty ? (filter == .trash ? "삭제한 노트는 이곳에서 복원할 수 있습니다." : "프로젝트나 노트를 추가하거나 PDF를 가져올 수 있습니다.") : "다른 이름이나 텍스트로 검색해 보세요.")
         } actions: {
-            if query.isEmpty && filter != .trash { Button("새로운 노트 만들기") { creatingNote = true }.buttonStyle(.borderedProminent) }
+            if query.isEmpty && filter != .trash { Button("새로운 노트 만들기") { creatingNote = true }.buttonStyle(.borderedProminent).foregroundStyle(Color(uiColor: .systemBackground)) }
         }
     }
 
     private func prepareImport(_ url: URL, folderID: UUID?) {
-        guard !importing else { return }
-        importing = true
-        let projectID = currentProjectID
-        Task { @MainActor in
-            await Task.yield()
-            defer { importing = false }
-            do {
-                let contents = try await PDFImportReader.read(url)
-                guard var prepared = store.preparePDF(data: contents.data, title: contents.title, folderID: folderID) else { return }
-                prepared.projectID = projectID
-                if route != nil { deferredImport = prepared; route = nil }
-                else { presentImport(prepared) }
-            } catch is CancellationError { }
-            catch { store.errorMessage = "PDF 파일을 읽지 못했습니다. 클라우드 파일이라면 인터넷 연결과 로그인 상태를 확인해 주세요.\n\n\(error.localizedDescription)" }
-        }
-    }
-
-    private func presentImport(_ prepared: PreparedPDFImport) {
-        if prepared.pages.count > 1 { pendingPDF = prepared }
-        else if let id = store.importPDF(prepared, layout: .paged) { route = NoteRoute(id: id) }
+        guard !pdfImport.preparing else { return }
+        importingPDF = true
+        pdfImport.prepare(url, store: store, folderID: folderID, projectID: currentProjectID)
     }
 
     @ViewBuilder private func noteActions(_ note: Notebook) -> some View {
@@ -400,43 +376,6 @@ struct LibraryView: View {
             Button("복제", systemImage: "plus.square.on.square") { _ = store.duplicate(note.id) }
             Button("휴지통으로 이동", systemImage: "trash", role: .destructive) { store.trash(note.id) }
         }
-    }
-}
-
-private struct PDFImportChoiceView: View {
-    let title: String
-    let pageCount: Int
-    let onChoose: (PDFImportLayout) -> Void
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        NavigationStack {
-            VStack(alignment: .leading, spacing: 24) {
-                Text("\(title) · \(pageCount)페이지").font(.subheadline).foregroundStyle(.secondary)
-                Text("페이지 배치").font(.title2.bold())
-                ForEach(PDFImportLayout.allCases) { layout in
-                    Button { onChoose(layout) } label: {
-                        HStack(spacing: 18) {
-                            Image(systemName: layout == .continuous ? "scroll" : "rectangle.stack")
-                                .font(.title).frame(width: 40)
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text(layout.title).font(.headline)
-                                Text(layout == .continuous
-                                     ? "모든 페이지를 세로로 연결합니다. 스크롤하며 페이지 경계를 넘어 필기할 수 있습니다."
-                                     : "원래 페이지를 유지합니다. 세 손가락으로 좌우로 쓸어 페이지를 넘깁니다.")
-                                    .font(.subheadline).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                            }
-                            Spacer(minLength: 0)
-                            Image(systemName: "chevron.right").font(.caption)
-                        }.padding(20).frame(maxWidth: .infinity, alignment: .leading)
-                            .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18))
-                    }.buttonStyle(.plain)
-                }
-                Spacer(minLength: 0)
-            }.padding(24).background(Color(uiColor: .systemGroupedBackground))
-                .navigationTitle("PDF 가져오기").navigationBarTitleDisplayMode(.inline)
-                .toolbar { ToolbarItem(placement: .cancellationAction) { Button("취소") { dismiss() } } }
-        }.presentationDetents([.large])
     }
 }
 

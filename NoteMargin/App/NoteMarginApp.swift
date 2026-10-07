@@ -2,6 +2,7 @@ import SwiftUI
 
 @main
 struct NoteMarginApp: App {
+    @AppStorage("app.appearance") private var appearance: AppAppearance = .system
     @StateObject private var store = NoteStore()
     @Environment(\.scenePhase) private var scenePhase
 
@@ -10,6 +11,7 @@ struct NoteMarginApp: App {
             LibraryView()
                 .environmentObject(store)
                 .tint(.accentColor)
+                .preferredColorScheme(appearance.colorScheme)
                 .onChange(of: scenePhase) { _, phase in
                     if phase != .active { store.flushDrawings() }
                     if phase == .background {

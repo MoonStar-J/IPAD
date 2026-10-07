@@ -24,6 +24,8 @@ struct ShapeCompletionContact: Sendable {
     private var anchor = CGPoint.zero
     private(set) var lastMovement: TimeInterval = 0
     private var endTime: TimeInterval = 0
+    private var anchorIndex = 0
+    var recognitionSamples: [ShapeCompletionSample] { Array(samples.prefix(anchorIndex + 1)) }
     private var minimum = CGPoint.zero, maximum = CGPoint.zero
     let zoom: CGFloat
     let offset: CGPoint
@@ -44,7 +46,7 @@ struct ShapeCompletionContact: Sendable {
         if samples.isEmpty {
             anchor = sample.documentPoint; minimum = anchor; maximum = anchor; lastMovement = sample.timestamp
         } else if hypot(sample.documentPoint.x - anchor.x, sample.documentPoint.y - anchor.y) * zoom > 2.5 {
-            anchor = sample.documentPoint; lastMovement = sample.timestamp
+            anchor = sample.documentPoint; lastMovement = sample.timestamp; anchorIndex = samples.count
         }
         minimum.x = min(minimum.x, sample.documentPoint.x); minimum.y = min(minimum.y, sample.documentPoint.y)
         maximum.x = max(maximum.x, sample.documentPoint.x); maximum.y = max(maximum.y, sample.documentPoint.y)
@@ -100,7 +102,7 @@ final class ShapeCompletionController {
         }
     }
     // Native source, freehand before the snap (for undo), completed drawing.
-    var onCompletion: ((PKDrawing, PKDrawing, PKDrawing) -> Bool)?
+    var onCompletion: ((PKDrawing, PKDrawing, PKDrawing, ShapeRecognitionResult) -> Bool)?
     var onRepair: ((PKDrawing, PKDrawing) -> Void)?
     var onClosedShapePreview: ((ShapeRecognitionResult) -> Void)?
     var onClosedShapeReady: ((ShapeRecognitionResult, Set<InkStrokeID>) -> Void)?
@@ -117,7 +119,6 @@ final class ShapeCompletionController {
     private var previousStrokeCount: Int?
     private var nativeActive = false, nativeDidEnd = false
     private var revision: UInt64 = 0, epoch: UInt64 = 0, request: UInt64 = 0
-    private var estimatesSettledAtRevision: UInt64?
     private var work: Task<Void, Never>?
     private var cancelDeadline: (() -> Void)?
     private var eventClockOffset: TimeInterval = 0
@@ -126,7 +127,6 @@ final class ShapeCompletionController {
     private var cutoff: TimeInterval = 0
     private var preview: ShapeHeldPreview?
     private var lineTemplate: PKStroke?
-    private var commitEchoRevision: UInt64?
     private var handoffScheduled = false
     private var renderedCommit: PKDrawing?
     private var committed: PKDrawing?
@@ -143,7 +143,7 @@ final class ShapeCompletionController {
     // Only disposable integration fixtures opt in: production still observes Pencil only.
     private var renderCallbacks = 0
     var handoffDiagnostics: String {
-        "phase=\(phase) echo=\(String(describing: commitEchoRevision)) rev=\(revision) renders=\(renderCallbacks) scheduled=\(handoffScheduled) active=\(nativeActive) same=\(canvas?.drawing == committed) viewport=\(contact.flatMap { c in canvas.map { viewportMatches(c,$0) } } ?? false)"
+        "phase=\(phase) rev=\(revision) renders=\(renderCallbacks) scheduled=\(handoffScheduled) active=\(nativeActive) same=\(canvas?.drawing == committed) viewport=\(contact.flatMap { c in canvas.map { viewportMatches(c,$0) } } ?? false)"
     }
     var acceptsTestTouches = false
     var onPreviewForTesting: ((PKDrawing) -> Void)?
@@ -169,28 +169,33 @@ final class ShapeCompletionController {
         latestDrawing = canvas.drawing
         canvas.addGestureRecognizer(observer); observer.isEnabled = isEnabled
     }
-    func invalidate() {
+    func invalidate(preservingCommittedSelection: Bool = false) {
         epoch &+= 1; request &+= 1; cancelDeadline?(); cancelDeadline = nil
         work?.cancel(); work = nil
         contact = nil; baseline = nil; previousStrokeCount = nil
-        estimatesSettledAtRevision = nil; result = nil; committed = nil; receipt = nil
+        result = nil; committed = nil; receipt = nil
         nativeActive = false; nativeDidEnd = false; phase = .idle
         // Cancellation keeps PencilKit's original, as before. Never cancel its
         // drawing recognizer or assign drawing while a native contact is active.
-        clearPreview(); onPreviewCancelled?()
+        clearPreview()
+        if !preservingCommittedSelection { onPreviewCancelled?() }
     }
     func nativeBegan(previousStrokeCount: Int) {
         guard isEnabled else { return }
-        // A new native stroke can begin before the previous CA transaction is
-        // presented. Keep the previous receipt/contact intact until handoff;
-        // PencilKit still accepts and renders that new stroke normally.
-        if phase == .committing { return }
+        // A new contact is also a presentation boundary: the installed shape
+        // must no longer obscure subsequent native input.
+        if phase == .committing {
+            // A new real contact must never remain behind the previous preview.
+            // The committed drawing is already installed; keep only its repair receipt.
+            clearPreview(); contact = nil; result = nil; phase = .finished
+        }
         self.previousStrokeCount = previousStrokeCount
         baseline = latestDrawing
         nativeActive = true; nativeDidEnd = false
     }
     func nativeChanged(drawing: PKDrawing, revision: UInt64, isNativeNotification: Bool = true) {
         latestDrawing = drawing; self.revision = revision
+        trace("drawing-changed")
         if !nativeActive, repairLateNativeDrawing(drawing) { return }
         if phase == .committing {
             if let committed, drawing != committed {
@@ -201,13 +206,13 @@ final class ShapeCompletionController {
                 if strokes.count >= prior.count && zip(prior,strokes).allSatisfy({ InkStrokeAppearance.matches($0,$1) }) {
                     self.committed = drawing
                 }
-                commitEchoRevision = nil; renderedCommit = nil
+                renderedCommit = nil
             }
-            if drawing == committed, isNativeNotification { commitEchoRevision = revision }
         }
         scheduleGate()
     }
     func nativeEnded(drawing: PKDrawing, revision: UInt64) {
+        trace("native-ended")
         if phase == .committing {
             nativeChanged(drawing: drawing, revision: revision, isNativeNotification: false)
             return
@@ -217,9 +222,8 @@ final class ShapeCompletionController {
     }
     func inputBegan(_ sample: ShapeCompletionSample, zoom: CGFloat, offset: CGPoint) {
         guard isEnabled, shouldObserveContact?() != false else { return }
-        // A committed surface must be presented before accepting another shape
-        // session. Native input remains available; no recognizer is toggled.
-        if phase == .committing { return }
+        // UIKit may deliver the observation before or after nativeBegan.
+        if phase == .committing { clearPreview(); phase = .finished }
         if phase == .snapped {
             // Do not let an interrupted native finalization obscure the next
             // contact. As with tool/page cancellation, preserve native ink.
@@ -227,11 +231,10 @@ final class ShapeCompletionController {
         }
         epoch &+= 1; request &+= 1; work?.cancel(); work = nil
         cancelDeadline?(); cancelDeadline = nil
-        if phase == .committing { clearPreview() }
         result = nil; committed = nil
         if !nativeActive { baseline = nil; previousStrokeCount = nil; nativeDidEnd = false }
         contact = ShapeCompletionContact(zoom: zoom, offset: offset, holdDuration: holdDuration)
-        estimatesSettledAtRevision = nil; eventClockOffset = clock.now() - sample.timestamp
+        eventClockOffset = clock.now() - sample.timestamp
         contact?.append(sample); phase = .tracking
         armDeadline()
     }
@@ -242,15 +245,14 @@ final class ShapeCompletionController {
         }
         guard phase == .tracking || phase == .recognizing else { return }
         let oldAnchorTime = contact?.lastMovement
-        let pending = contact?.pending.isEmpty == false
         contact?.append(sample)
-        if pending && contact?.pending.isEmpty == true { estimatesSettledAtRevision = revision }
         if oldAnchorTime != contact?.lastMovement {
             request &+= 1; work?.cancel(); work = nil; phase = .tracking
             armDeadline()
         }
     }
     func inputEnded(_ sample: ShapeCompletionSample) {
+        trace("touch-ended")
         if phase == .tracking || phase == .recognizing {
             // Lifting before a visible snap must never cause a delayed snap.
             let previousReceipt = receipt
@@ -263,9 +265,8 @@ final class ShapeCompletionController {
         cancelDeadline?(); cancelDeadline = nil; scheduleGate()
     }
     func inputEstimated(_ sample: ShapeCompletionSample) {
-        let pending = contact?.pending.isEmpty == false
+        trace("estimated")
         contact?.updateEstimate(sample)
-        if pending && contact?.pending.isEmpty == true { estimatesSettledAtRevision = revision }
         scheduleGate()
     }
     private func armDeadline() {
@@ -293,16 +294,19 @@ final class ShapeCompletionController {
               clock.now() - eventClockOffset - contact.lastMovement >= contact.holdDuration - 0.000001 else { return }
         phase = .recognizing
         let token = epoch; request &+= 1; let attempt = request
-        let points = contact.samples.map(\.documentPoint)
+        let samples = contact.recognitionSamples
+        let points = samples.map(\.documentPoint)
         let recognizer = self.recognizer
         // A held PKCanvasView may contain only committed strokes (verified by
         // the real-touch probe). Do not read/guess drawing.strokes.last here.
-        let provisional = Self.provisionalStroke(contact.samples, tool: tool)
+        let provisional = Self.provisionalStroke(samples, tool: tool)
         let source = PKDrawing(strokes: baseline.strokes + [provisional])
         let viewport = CGRect(x: canvas.bounds.minX / contact.zoom, y: canvas.bounds.minY / contact.zoom,
                               width: canvas.bounds.width / contact.zoom, height: canvas.bounds.height / contact.zoom)
         let scale = contact.zoom * (canvas.window?.screen.scale ?? UIScreen.main.scale)
-        let frozenCutoff = clock.now() - eventClockOffset - (contact.samples.first?.timestamp ?? 0)
+        // Recognition excludes stationary jitter; Undo retains every real
+        // sample received before the visible snap, excluding later editing.
+        let frozenCutoff = (contact.samples.last?.timestamp ?? 0) - (contact.samples.first?.timestamp ?? 0)
         let computation = Task.detached(priority: .userInitiated) { () -> (ShapeRecognitionResult, PKDrawing, UIImage, UIImage)? in
             guard !Task.isCancelled, baseline.strokes.count == previousStrokeCount,
                   let recognized = recognizer.recognize(documentPoints: points) else { return nil }
@@ -385,6 +389,11 @@ final class ShapeCompletionController {
     fileprivate func began(_ touch: UITouch) {
         guard let canvas, isEnabled, !canvas.isZooming, !canvas.isDragging,
               let sample = Self.sample(touch, canvas: canvas) else { return }
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("--shape-diagnostics") {
+            print("Shape input policy=\(canvas.drawingPolicy.rawValue) drawingEnabled=\(canvas.drawingGestureRecognizer.isEnabled) panTouches=\(canvas.panGestureRecognizer.minimumNumberOfTouches) offset=\(canvas.contentOffset)")
+        }
+        #endif
         inputBegan(sample, zoom: canvas.zoomScale, offset: canvas.contentOffset)
     }
     private static func sample(_ touch: UITouch, canvas: PKCanvasView) -> ShapeCompletionSample? {
@@ -407,17 +416,18 @@ final class ShapeCompletionController {
     }
     private func finalizeIfReady() {
         guard phase == .snapped, nativeDidEnd, !nativeActive, let contact, contact.ended,
-              !contact.ambiguous, contact.pending.isEmpty,
-              estimatesSettledAtRevision.map({ revision > $0 }) ?? true,
+              !contact.ambiguous,
               let canvas, let source = latestDrawing, canvas.drawing == source,
               let baseline, let result,
               let pair = ShapeStrokeCompleter.heldReplacement(source: source, baseline: baseline, result: result, cutoff: cutoff) else { return }
-        // Match preview to final pressure/estimated attributes before committing.
+        // Lift is a commit boundary, not a promise about estimate callback order.
+        // Use the current native attributes; repair later estimates by stroke identity.
+        // Waiting for another revision after the last estimate can wait forever.
         preview?.showShape(PKDrawing(strokes: [pair.completed.strokes[baseline.strokes.count]]), canvas: canvas)
         phase = .committing; committed = pair.completed
-        commitEchoRevision = nil; handoffScheduled = false
+        handoffScheduled = false
         receipt = Receipt(baseline: baseline, original: source.strokes.last!, result: result, cutoff: cutoff, completed: pair.completed)
-        let accepted = onCompletion?(source, pair.original, pair.completed) == true
+        let accepted = onCompletion?(source, pair.original, pair.completed, result) == true
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("--shape-diagnostics") {
             print("Shape session=\(epoch) commit=\(accepted) kind=\(result.kind.rawValue)")
@@ -450,11 +460,12 @@ final class ShapeCompletionController {
         return true
     }
     func nativeFinishedRendering() {
+        trace("rendered")
         #if DEBUG
         if phase == .committing { renderCallbacks += 1 }
         #endif
         guard phase == .committing, let committed, let canvas,
-              canvas.drawing == committed, commitEchoRevision != nil,
+              canvas.drawing == committed,
               let contact, viewportMatches(contact, canvas), !nativeActive else { return }
         renderedCommit = committed
         schedulePresentationHandoff()
@@ -462,11 +473,9 @@ final class ShapeCompletionController {
     private func schedulePresentationHandoff() {
         guard phase == .committing, !handoffScheduled, let committed, renderedCommit == committed,
               let canvas, canvas.drawing == committed, let contact, viewportMatches(contact,canvas),
-              commitEchoRevision != nil, !nativeActive else { return }
-        // PencilKit can notify synchronously inside the drawing setter, before
-        // our identical persistence notification increments revision. The echo
-        // proves this committed content was observed; it need not equal that
-        // bookkeeping revision. Freeze the CURRENT revision for CA handoff.
+              !nativeActive else { return }
+        // didFinishRendering acknowledges native presentation. A drawing setter
+        // is not documented to emit a separate drawingDidChange echo.
         let token = epoch, handoffRevision = revision
         handoffScheduled = true
         // The delegate says the matching native ink is rendered; wait for that
@@ -490,8 +499,15 @@ final class ShapeCompletionController {
         canvas.layer.setNeedsDisplay()
         CATransaction.commit()
     }
+    private func trace(_ event: String) {
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("--shape-diagnostics") {
+            print("Shape event=\(event) session=\(epoch) phase=\(phase) revision=\(revision) active=\(nativeActive) pending=\(contact?.pending.count ?? 0)")
+        }
+        #endif
+    }
     private func clearPreview() {
-        commitEchoRevision = nil; handoffScheduled = false; renderedCommit = nil; lineTemplate = nil
+        handoffScheduled = false; renderedCommit = nil; lineTemplate = nil
         guard preview != nil else { return }
         CATransaction.begin(); CATransaction.setDisableActions(true)
         preview?.removeFromSuperview(); preview = nil
@@ -660,6 +676,7 @@ private final class ShapeHeldPreview: UIView {
     override init(frame: CGRect) {
         super.init(frame: frame)
         isUserInteractionEnabled = false; isOpaque = true; clipsToBounds = true
+        overrideUserInterfaceStyle = .light
         accessibilityIdentifier = "shape-held-preview"
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }

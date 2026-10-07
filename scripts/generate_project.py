@@ -3,6 +3,8 @@ from pathlib import Path
 import hashlib
 import json
 import argparse
+import subprocess
+import xml.etree.ElementTree as ET
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--output", type=Path, help="Write the generated project to a separate directory")
@@ -12,6 +14,8 @@ ROOT = Path(__file__).resolve().parents[1]
 OUTPUT = args.output or ROOT
 (OUTPUT / "NoteMargin.xcodeproj/xcshareddata/xcschemes").mkdir(parents=True, exist_ok=True)
 objects = {}
+previous = OUTPUT / "NoteMargin.xcodeproj/project.pbxproj"
+previous_objects = json.loads(subprocess.check_output(["plutil", "-convert", "json", "-o", "-", str(previous)]))["objects"] if previous.exists() else {}
 
 def uid(name):
     return hashlib.sha1(name.encode()).hexdigest()[:24].upper()
@@ -85,7 +89,8 @@ def configs(prefix, settings):
         if mode == "Debug":
             current["SWIFT_ACTIVE_COMPILATION_CONDITIONS"] = "DEBUG " + current.get("SWIFT_ACTIVE_COMPILATION_CONDITIONS", "$(inherited)")
             current["ENABLE_TESTABILITY"] = "YES"
-        values = " ".join(f"{key} = {quote(value)};" for key, value in current.items())
+        current.update(previous_objects.get(uid(prefix + mode), {}).get("buildSettings", {}))
+        values = " ".join(f"{key} = {array([quote(x) for x in value]) if isinstance(value, list) else quote(value)};" for key, value in current.items())
         ids.append(add(prefix + mode, f"isa = XCBuildConfiguration; buildSettings = {{ {values} }}; name = {mode};"))
     return add(prefix + "configs", f"isa = XCConfigurationList; buildConfigurations = {array(ids)}; defaultConfigurationIsVisible = 0; defaultConfigurationName = Release;")
 
@@ -115,7 +120,29 @@ personal_sources = personal_phase("sources", sources, "PBXSourcesBuildPhase")
 personal_resources = personal_phase("resources", [r for r in resources if r != uid("build:localized:InfoPlist.strings")] + personal_name_resources, "PBXResourcesBuildPhase")
 personal_frameworks = personal_phase("frameworks", [], "PBXFrameworksBuildPhase")
 personal_target = add("personal-target", f'isa = PBXNativeTarget; buildConfigurationList = {personal_configs}; buildPhases = ({personal_sources}, {personal_frameworks}, {personal_resources}); buildRules = (); dependencies = (); name = NoteMarginPersonal; productName = NoteMarginPersonal; productReference = {personal_product}; productType = "com.apple.product-type.application";')
-project = add("project", f'isa = PBXProject; attributes = {{ BuildIndependentTargetsInParallel = YES; LastSwiftUpdateCheck = 1600; LastUpgradeCheck = 1600; TargetAttributes = {{ {target} = {{ CreatedOnToolsVersion = 16.0; }}; }}; }}; buildConfigurationList = {project_configs}; compatibilityVersion = "Xcode 14.0"; developmentRegion = ko; hasScannedForEncodings = 0; knownRegions = (ko, en, Base); mainGroup = {main_group}; productRefGroup = {products}; projectDirPath = ""; projectRoot = ""; targets = ({target}, {personal_target});')
+test_targets = []
+test_refs = []
+for test_name, folder, ui in [("NoteMarginTests", "AppTests", False), ("NoteMarginUITests", "UITests", True)]:
+    files = []
+    for path in sorted((ROOT / "Tests" / folder).glob("*.swift")):
+        ref_id = add("file:" + str(path.relative_to(ROOT)), f'isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = {quote(str(path.relative_to(ROOT)))}; sourceTree = SOURCE_ROOT;')
+        files.append(add("build:" + test_name + path.name, f'isa = PBXBuildFile; fileRef = {ref_id};'))
+        # Test source references live beside the app group, not in app Sources.
+        objects[main_group] = objects[main_group].replace(f'({app_group},', f'({ref_id}, {app_group},')
+    phase = add(test_name+"sources", f'isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = {array(files)}; runOnlyForDeploymentPostprocessing = 0;')
+    prod = add(test_name+"product", f'isa = PBXFileReference; explicitFileType = wrapper.cfbundle; path = {test_name}.xctest; sourceTree = BUILT_PRODUCTS_DIR;')
+    objects[products] = objects[products].replace(f'({product},', f'({prod}, {product},')
+    config = {"PRODUCT_NAME": "$(TARGET_NAME)", "PRODUCT_BUNDLE_IDENTIFIER": "com.notemargin."+test_name.lower(), "GENERATE_INFOPLIST_FILE": "YES", "TARGETED_DEVICE_FAMILY": "2", "CODE_SIGN_STYLE": "Automatic"}
+    if ui: config["TEST_TARGET_NAME"] = "NoteMargin"
+    else: config.update({"TEST_HOST": "$(BUILT_PRODUCTS_DIR)/NoteMargin.app/NoteMargin", "BUNDLE_LOADER": "$(TEST_HOST)"})
+    cfg = configs(test_name, config)
+    dep = add(test_name+"dependency", f'isa = PBXTargetDependency; target = {target};')
+    kind = "ui-testing" if ui else "unit-test"
+    tid = add(test_name, f'isa = PBXNativeTarget; name = {test_name}; productName = {test_name}; productReference = {prod}; buildConfigurationList = {cfg}; buildPhases = ({phase}); buildRules = (); dependencies = ({dep}); productType = "com.apple.product-type.bundle.{kind}";')
+    test_targets.append(tid)
+    test_refs.append(f'<TestableReference skipped="NO"><BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="{tid}" BuildableName="{test_name}.xctest" BlueprintName="{test_name}" ReferencedContainer="container:NoteMargin.xcodeproj"/></TestableReference>')
+
+project = add("project", f'isa = PBXProject; attributes = {{ BuildIndependentTargetsInParallel = YES; LastSwiftUpdateCheck = 1600; LastUpgradeCheck = 1600; TargetAttributes = {{ {target} = {{ CreatedOnToolsVersion = 16.0; }}; }}; }}; buildConfigurationList = {project_configs}; compatibilityVersion = "Xcode 14.0"; developmentRegion = ko; hasScannedForEncodings = 0; knownRegions = (ko, en, Base); mainGroup = {main_group}; productRefGroup = {products}; projectDirPath = ""; projectRoot = ""; targets = ({target}, {personal_target}, {", ".join(test_targets)});')
 
 output = '// !$*UTF8*$!\n{\n archiveVersion = 1;\n classes = {};\n objectVersion = 56;\n objects = {\n'
 output += "\n".join(f"  {key} = {{ {value} }};" for key, value in objects.items())
@@ -126,15 +153,25 @@ ref = f'<BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="{
 scheme = f'''<?xml version="1.0" encoding="UTF-8"?>
 <Scheme LastUpgradeVersion="1600" version="1.3">
  <BuildAction parallelizeBuildables="YES" buildImplicitDependencies="YES"><BuildActionEntries><BuildActionEntry buildForTesting="YES" buildForRunning="YES" buildForProfiling="YES" buildForArchiving="YES" buildForAnalyzing="YES">{ref}</BuildActionEntry></BuildActionEntries></BuildAction>
- <TestAction buildConfiguration="Debug" selectedDebuggerIdentifier="Xcode.DebuggerFoundation.Debugger.LLDB" selectedLauncherIdentifier="Xcode.IDEFoundation.Launcher.LLDB" shouldUseLaunchSchemeArgsEnv="YES"><Testables/></TestAction>
+ <TestAction buildConfiguration="Debug" selectedDebuggerIdentifier="Xcode.DebuggerFoundation.Debugger.LLDB" selectedLauncherIdentifier="Xcode.IDEFoundation.Launcher.LLDB" shouldUseLaunchSchemeArgsEnv="YES"><Testables>{"".join(test_refs)}</Testables></TestAction>
  <LaunchAction buildConfiguration="Debug" selectedDebuggerIdentifier="Xcode.DebuggerFoundation.Debugger.LLDB" selectedLauncherIdentifier="Xcode.IDEFoundation.Launcher.LLDB" launchStyle="0" useCustomWorkingDirectory="NO" ignoresPersistentStateOnLaunch="NO" debugDocumentVersioning="YES" debugServiceExtension="internal" allowLocationSimulation="YES"><BuildableProductRunnable runnableDebuggingMode="0">{ref}</BuildableProductRunnable></LaunchAction>
  <ProfileAction buildConfiguration="Release" shouldUseLaunchSchemeArgsEnv="YES" savedToolIdentifier="" useCustomWorkingDirectory="NO" debugDocumentVersioning="YES"><BuildableProductRunnable runnableDebuggingMode="0">{ref}</BuildableProductRunnable></ProfileAction>
  <AnalyzeAction buildConfiguration="Debug"/>
  <ArchiveAction buildConfiguration="Release" revealArchiveInOrganizer="YES"/>
 </Scheme>
 '''
-(OUTPUT / "NoteMargin.xcodeproj/xcshareddata/xcschemes/NoteMargin.xcscheme").write_text(scheme)
+scheme_path = OUTPUT / "NoteMargin.xcodeproj/xcshareddata/xcschemes/NoteMargin.xcscheme"
+if scheme_path.exists():
+    tree = ET.fromstring(scheme_path.read_text())
+    action = tree.find("TestAction")
+    if action is not None:
+        prior_tests = action.find("Testables")
+        if prior_tests is not None: action.remove(prior_tests)
+        action.append(ET.fromstring('<Testables>'+''.join(test_refs)+'</Testables>'))
+    scheme = ET.tostring(tree, encoding="unicode")
+scheme_path.write_text(scheme)
 print(f"Generated NoteMargin.xcodeproj: {len(sources)} Swift files, {len(resources)} resources")
 
 personal_scheme = scheme.replace(target, personal_target).replace("NoteMargin.app", "NoteMarginPersonal.app").replace('BlueprintName="NoteMargin"', 'BlueprintName="NoteMarginPersonal"')
-(OUTPUT / "NoteMargin.xcodeproj/xcshareddata/xcschemes/NoteMarginPersonal.xcscheme").write_text(personal_scheme)
+personal_path = OUTPUT / "NoteMargin.xcodeproj/xcshareddata/xcschemes/NoteMarginPersonal.xcscheme"
+if not personal_path.exists(): personal_path.write_text(personal_scheme)

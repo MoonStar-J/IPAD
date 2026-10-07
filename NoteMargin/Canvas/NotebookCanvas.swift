@@ -67,6 +67,7 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
     var automaticShapeFrame: ShapeEditFrame? { automaticShape?.frame }
     private var committingInk = false
     private var fitScale: CGFloat = 1
+    private var workingBounds = CGRect(x: -768, y: -1024, width: 2304, height: 3072)
     private var adjustingViewport = false
     private var viewportNotificationPending = false
     private var inkPan: UIPanGestureRecognizer!
@@ -211,31 +212,32 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
         self.onViewportChange = onViewportChange
         regionSelection.onChange = { [weak self] rect in
             guard let self else { return }
-            let document = rect.applying(self.documentToViewport.inverted())
-                .intersection(CGRect(x: 0, y: 0, width: page.width, height: page.height))
+            let raw = rect.applying(self.documentToViewport.inverted())
+            let document = page.isInfinite ? raw : raw.intersection(CGRect(x: 0, y: 0, width: page.width, height: page.height))
             guard document != self.lastReportedRegion else { return }
             self.lastReportedRegion = document
             DispatchQueue.main.async { onRegionChange?(document) }
         }
         regionSelection.isHidden = !selectingRegion
         if !selectingRegion { regionSelection.clear(); lastReportedRegion = nil }
-        let canTurn = note.pages.count > 1 && !page.isContinuousPDF && !editingObjects && !selectingRegion && toolsVisible
+        let canTurn = note.pages.count > 1 && !page.isContinuousPDF && !page.isInfinite && !editingObjects && !selectingRegion && toolsVisible
         pageSwipes.forEach { if $0.isEnabled != canTurn { $0.isEnabled = canTurn } }
         session.canvas.pageTurningEnabled = canTurn
         if pageChanged {
             canvas.minimumZoomScale = min(canvas.minimumZoomScale, 1)
             canvas.maximumZoomScale = max(canvas.maximumZoomScale, 1)
             canvas.zoomScale = 1
+            workingBounds = CGRect(x: -768, y: -1024, width: 2304, height: 3072)
             canvas.contentSize = CGSize(width: page.width, height: page.height)
             selectedID = nil
             needsFit = true
         }
         if contentChanged {
-            paper.documentBounds = CGRect(x: 0, y: 0, width: page.width, height: page.height)
+            paper.documentBounds = page.isInfinite ? workingBounds : CGRect(x: 0, y: 0, width: page.width, height: page.height)
             paper.render = { [weak store] context in
                 guard let store else { return }
                 context.saveGState()
-                context.clip(to: CGRect(x: 0, y: 0, width: page.width, height: page.height))
+                if !page.isInfinite { context.clip(to: CGRect(x: 0, y: 0, width: page.width, height: page.height)) }
                 PageRenderer.drawBackground(page: page, note: note, store: store, context: context)
                 context.restoreGState()
             }
@@ -280,7 +282,12 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
         if inkPreview.frame != bounds { inkPreview.frame = bounds }
         if needsFit || lastSize != bounds.size {
             lastSize = bounds.size
-            if bounds.width > 0 && bounds.height > 0 { fitPage(animated: false); needsFit = false }
+            if bounds.width > 0 && bounds.height > 0 {
+                if currentPage?.isInfinite == true {
+                    if needsFit { restoreInfiniteViewport() } else { extendInfiniteViewport() }
+                } else { fitPage(animated: false) }
+                needsFit = false
+            }
         }
         centerSheet()
         updateVisiblePaper()
@@ -288,6 +295,11 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
 
     func fitPage(animated: Bool) {
         guard let page = currentPage, bounds.width > 0 else { return }
+        if page.isInfinite {
+            let used = session.drawing.strokes.first?.renderBounds ?? CanvasExtent.usedBounds(ink: .null, elements: page.elements)
+            setInfiniteViewport(center: CGPoint(x: used.midX, y: used.midY), zoom: 1)
+            return
+        }
         let fitWidth = (bounds.width - 48) / page.width
         let fit = max(0.01, page.isContinuousPDF ? fitWidth : min(fitWidth, (bounds.height - 48) / page.height))
         fitScale = fit
@@ -305,6 +317,7 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
 
     private func centerSheet(settleOffset: Bool = false) {
         guard !adjustingViewport else { return }
+        if currentPage?.isInfinite == true { extendInfiniteViewport(); return }
         let horizontal = max(24, (canvas.bounds.width - ((currentPage?.width ?? 0) * canvas.zoomScale)) / 2)
         let vertical = max(24, (canvas.bounds.height - ((currentPage?.height ?? 0) * canvas.zoomScale)) / 2)
         let inset = UIEdgeInsets(top: vertical, left: horizontal, bottom: vertical, right: horizontal)
@@ -337,6 +350,60 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
         }
     }
 
+    private func restoreInfiniteViewport() {
+        let saved = currentPage?.viewport
+        let center = saved?.center ?? CGPoint(x: 384, y: 512)
+        setInfiniteViewport(center: center, zoom: saved?.zoom ?? 1)
+    }
+    private func setInfiniteViewport(center: CGPoint, zoom: Double) {
+        guard center.x.isFinite, center.y.isFinite else { return }
+        canvas.minimumZoomScale = 0.25; canvas.maximumZoomScale = 6
+        fitScale = 1
+        canvas.setZoomScale(min(6, max(0.25, zoom.isFinite ? zoom : 1)), animated: false)
+        let z = canvas.zoomScale
+        let visible = CGRect(x: center.x-bounds.width/(2*z), y: center.y-bounds.height/(2*z), width: bounds.width/z, height: bounds.height/z)
+        workingBounds = CanvasExtent.expanded(workingBounds, around: visible)
+        updateInfiniteRange()
+        canvas.setContentOffset(CGPoint(x: (visible.minX+session.canvasOrigin.x)*z, y: (visible.minY+session.canvasOrigin.y)*z), animated: false)
+        updateVisiblePaper()
+    }
+    private func extendInfiniteViewport() {
+        guard !adjustingViewport, canvas.zoomScale > 0 else { return }
+        let visible = bounds.applying(documentToViewport.inverted())
+        workingBounds = CanvasExtent.expanded(workingBounds, around: visible)
+        updateInfiniteRange()
+    }
+    private func updateInfiniteRange() {
+        guard !adjustingViewport else { return }
+        adjustingViewport = true
+        defer { adjustingViewport = false }
+        let z = canvas.zoomScale, offset = canvas.contentOffset
+        let oldOrigin = session.canvasOrigin
+        let requestedOrigin = CGPoint(x: max(oldOrigin.x,ceil(-workingBounds.minX/1024)*1024),
+                             y: max(oldOrigin.y,ceil(-workingBounds.minY/1024)*1024))
+        CATransaction.begin(); CATransaction.setDisableActions(true)
+        session.setCanvasOrigin(requestedOrigin)
+        let origin = session.canvasOrigin
+        let size = CGSize(width: max(bounds.width,(workingBounds.maxX+origin.x)*z),
+                          height: max(bounds.height,(workingBounds.maxY+origin.y)*z))
+        if canvas.contentInset != .zero { canvas.contentInset = .zero }
+        if canvas.contentSize != size { canvas.contentSize = size }
+        let shifted = CGPoint(x:offset.x+(origin.x-oldOrigin.x)*z,y:offset.y+(origin.y-oldOrigin.y)*z)
+        if canvas.contentOffset != shifted { canvas.contentOffset = shifted }
+        paper.nativeOrigin = origin
+        paper.documentBounds = workingBounds
+        CATransaction.commit()
+    }
+    func saveViewport() {
+        guard currentPage?.isInfinite == true else { return }
+        let visible = bounds.applying(documentToViewport.inverted())
+        session.saveViewport(CanvasViewport(center: CGPoint(x: visible.midX, y: visible.midY), zoom: canvas.zoomScale))
+    }
+    var visibleDocumentCenter: CGPoint {
+        let visible = bounds.applying(documentToViewport.inverted())
+        return CGPoint(x: visible.midX, y: visible.midY)
+    }
+
     @objc private func turnPage(_ gesture: UISwipeGestureRecognizer) {
         guard gesture.state == .ended, onTurnPage?(gesture.direction == .left ? 1 : -1) == true else { return }
         // Do not snapshot/crossfade the whole host: that includes the previous ink.
@@ -346,7 +413,7 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
     // Ink uses these exact offset/zoom values internally in PKCanvasView.
     var documentToViewport: CGAffineTransform {
         CGAffineTransform(a: canvas.zoomScale, b: 0, c: 0, d: canvas.zoomScale,
-                          tx: -canvas.contentOffset.x, ty: -canvas.contentOffset.y)
+                          tx: session.canvasOrigin.x*canvas.zoomScale-canvas.contentOffset.x, ty: session.canvasOrigin.y*canvas.zoomScale-canvas.contentOffset.y)
     }
 
     /// Shape preview uses the same immutable paper/PDF tiles as the native
@@ -364,7 +431,7 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
         if !inkPreview.isHidden { inkPreview.updateViewport(documentToViewport, paper: paper) }
         if !eraserPreview.isHidden { eraserPreview.updateViewport(documentToViewport, paper: paper) }
         if !regionSelection.isHidden, let page = currentPage {
-            let visiblePage = CGRect(x: 0, y: 0, width: page.width, height: page.height).applying(documentToViewport).intersection(bounds.insetBy(dx: 12, dy: 12))
+            let visiblePage = page.isInfinite ? bounds.insetBy(dx: 12, dy: 12) : CGRect(x: 0, y: 0, width: page.width, height: page.height).applying(documentToViewport).intersection(bounds.insetBy(dx: 12, dy: 12))
             regionSelection.configure(available: visiblePage)
         }
         if lastReportedTransform != documentToViewport || lastReportedBounds != bounds {
@@ -413,7 +480,7 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
             waitingForEraserRender = false
             // PencilKit vector erasers report width 0 and ignore a supplied
             // width. Our deferred stroke eraser must use its own saved radius.
-            eraserTransaction = StrokeEraserTransaction(drawing: canvas.drawing, width: session.eraserWidth, geometryCache: geometry(for: canvas.drawing))
+            eraserTransaction = StrokeEraserTransaction(drawing: session.drawing, width: session.eraserWidth, geometryCache: geometry(for: session.drawing))
             paper.setDrawingActive(true)
             eraserPreview.begin(transaction: eraserTransaction!, paper: paper,
                                 viewport: bounds, transform: documentToViewport)
@@ -460,7 +527,7 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
         previewWarmup = Task { [weak self, weak target] in
             guard !Task.isCancelled else { return }
             guard let self, let target, self.canvas === target, target.window != nil, !self.drawingActive else { return }
-            let drawing = target.drawing
+            let drawing = self.session.drawing
             let sourceRevision = self.session.drawingRevision
             let cache = self.geometry(for: drawing)
             let transform = self.documentToViewport
@@ -521,14 +588,14 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
 
     func finishEraserRendering() {
         guard waitingForEraserRender, eraserHandoff == nil, let committed = eraserCommitDrawing,
-              canvas.drawing == committed else { return }
+              session.drawing == committed else { return }
         let target = canvas
         eraserHandoff = Task { [weak self] in
             // A render callback can precede presentation of its CA transaction.
             // Keep feedback through that display handoff; a new page/tool cancels it.
             do { try await Task.sleep(for: .milliseconds(34)) } catch { return }
             guard let self, self.canvas === target, self.waitingForEraserRender,
-                  self.canvas.drawing == committed else { return }
+                  self.session.drawing == committed else { return }
             self.cancelStrokeErasing()
         }
     }
@@ -546,6 +613,7 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
 
     func canvasDidScroll() {
         guard !adjustingViewport else { return }
+        if currentPage?.isInfinite == true { extendInfiniteViewport() }
         cancelInkDrag()
         if eraserTransaction != nil { cancelStrokeErasing() }
         updateVisiblePaper()
@@ -570,7 +638,7 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
     func activateAutomaticShape(_ result: ShapeRecognitionResult, ids: Set<InkStrokeID>) {
         guard !ids.isEmpty else { return }
         automaticShape = (ids, ShapeEditFrame(result: result), result.fittedPoints); shapeSelectionPending = false
-        let drawing = canvas.drawing
+        let drawing = session.drawing
         let indices = Set(drawing.strokes.indices.filter { ids.contains(InkStrokeID(drawing.strokes[$0])) })
         guard indices.count == ids.count else { clearInkSelection(); return }
         inkSelection = RectangularInkSelection(drawing: drawing, indices: indices, geometryCache: geometry(for: drawing))
@@ -651,7 +719,7 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
     var selectedInkIndices: Set<Int> { inkSelection?.indices ?? [] }
     func restoreInkSelection(indices: Set<Int>) {
         endInkPreview()
-        let selected = RectangularInkSelection(drawing: canvas.drawing, indices: indices, geometryCache: geometry(for: canvas.drawing))
+        let selected = RectangularInkSelection(drawing: session.drawing, indices: indices, geometryCache: geometry(for: session.drawing))
         inkSelection = selected.indices.isEmpty ? nil : selected
         inkSelectionRect = inkSelection?.bounds
         session.selectedStrokeCount = selected.indices.count
@@ -734,7 +802,7 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
         inkStart = point; inkDragTransform = .identity; shapeResize = nil
         // Stable IDs resolve into this immutable pointer-down snapshot only.
         if let shape = automaticShape, !shapeSelectionPending {
-            let drawing = canvas.drawing
+            let drawing = session.drawing
             let indices = Set(drawing.strokes.indices.filter { shape.ids.contains(InkStrokeID(drawing.strokes[$0])) })
             guard indices.count == shape.ids.count else { clearInkSelection(); return }
             inkSelection = RectangularInkSelection(drawing: drawing, indices: indices, geometryCache: geometry(for: drawing))
@@ -779,7 +847,7 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
                 updateInkOutline(inkProposedRect); return
             }
             let page = CGRect(x: 0, y: 0, width: currentPage?.width ?? rect.maxX, height: currentPage?.height ?? rect.maxY)
-            let clamped = CGPoint(x: min(page.maxX, max(0, point.x)), y: min(page.maxY, max(0, point.y)))
+            let clamped = currentPage?.isInfinite == true ? point : CGPoint(x: min(page.maxX, max(0, point.x)), y: min(page.maxY, max(0, point.y)))
             // Opposite corner stays fixed; forbid crossing/reflection or zero size.
             let sx = max(0.05, (clamped.x - inkResizeAnchor.x) / (inkStart.x - inkResizeAnchor.x))
             let sy = max(0.05, (clamped.y - inkResizeAnchor.y) / (inkStart.y - inkResizeAnchor.y))
@@ -797,8 +865,8 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
                 return
             }
             let rect = inkSelectionRect ?? selected.bounds
-            let dx = min(max(-rect.minX, point.x - inkStart.x), max(-rect.minX, (currentPage?.width ?? rect.maxX) - rect.maxX))
-            let dy = min(max(-rect.minY, point.y - inkStart.y), max(-rect.minY, (currentPage?.height ?? rect.maxY) - rect.maxY))
+            let dx = currentPage?.isInfinite == true ? point.x - inkStart.x : min(max(-rect.minX, point.x - inkStart.x), max(-rect.minX, (currentPage?.width ?? rect.maxX) - rect.maxX))
+            let dy = currentPage?.isInfinite == true ? point.y - inkStart.y : min(max(-rect.minY, point.y - inkStart.y), max(-rect.minY, (currentPage?.height ?? rect.maxY) - rect.maxY))
             inkDragTransform = CGAffineTransform(translationX: dx, y: dy)
         }
         CATransaction.begin(); CATransaction.setDisableActions(true)
@@ -829,7 +897,7 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
     }
     func finishInkRendering() {
         guard waitingForInkRender, !inkHandoffScheduled, inkCommitEcho, let committed = inkCommitDrawing,
-              canvas.drawing == committed, !drawingActive else { return }
+              session.drawing == committed, !drawingActive else { return }
         let target = canvas, generation = inkRenderGeneration, viewport = documentToViewport
         inkHandoffScheduled = true
         CATransaction.begin()
@@ -837,7 +905,7 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
             MainActor.assumeIsolated {
                 guard let self, self.canvas === target, self.inkRenderGeneration == generation else { return }
                 self.inkHandoffScheduled = false
-                guard self.waitingForInkRender, self.canvas.drawing == committed,
+                guard self.waitingForInkRender, self.session.drawing == committed,
                       !self.drawingActive, self.documentToViewport == viewport else { return }
                 self.endInkPreview()
             }
@@ -847,25 +915,34 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
     }
 
     func selectInk(in rect: CGRect) {
-        let rect = rect.standardized.intersection(CGRect(x: 0, y: 0, width: currentPage?.width ?? .greatestFiniteMagnitude, height: currentPage?.height ?? .greatestFiniteMagnitude))
+        let rect = currentPage?.isInfinite == true ? rect.standardized : rect.standardized.intersection(CGRect(x: 0, y: 0, width: currentPage?.width ?? .greatestFiniteMagnitude, height: currentPage?.height ?? .greatestFiniteMagnitude))
         guard !rect.isNull, rect.width > 1, rect.height > 1 else { clearInkSelection(); return }
         inkSelectionRect = rect
-        let selected = RectangularInkSelection(drawing: canvas.drawing, rect: rect, geometryCache: geometry(for: canvas.drawing))
-        let expanded = session.expandedSelectionIndices(in: canvas.drawing, indices: selected.indices)
-        inkSelection = RectangularInkSelection(drawing: canvas.drawing, indices: expanded, geometryCache: selected.geometryCache)
+        let selected = RectangularInkSelection(drawing: session.drawing, rect: rect, geometryCache: geometry(for: session.drawing))
+        let expanded = session.expandedSelectionIndices(in: session.drawing, indices: selected.indices)
+        inkSelection = RectangularInkSelection(drawing: session.drawing, indices: expanded, geometryCache: selected.geometryCache)
         if expanded != selected.indices { inkSelectionRect = rect.union(inkSelection!.bounds) }
         if inkSelection?.indices.isEmpty == true { inkSelection = nil }
+        restoreSelectedShape()
         session.selectedStrokeCount = inkSelection?.indices.count ?? 0
         updateInkOutline()
     }
     func selectInk(in path: CGPath) {
-        let raw = RectangularInkSelection(drawing: canvas.drawing, path: path, geometryCache: geometry(for: canvas.drawing))
-        let selection = RectangularInkSelection(drawing: canvas.drawing,
-            indices: session.expandedSelectionIndices(in: canvas.drawing, indices: raw.indices), geometryCache: raw.geometryCache)
+        let raw = RectangularInkSelection(drawing: session.drawing, path: path, geometryCache: geometry(for: session.drawing))
+        let selection = RectangularInkSelection(drawing: session.drawing,
+            indices: session.expandedSelectionIndices(in: session.drawing, indices: raw.indices), geometryCache: raw.geometryCache)
         inkSelection = selection.indices.isEmpty ? nil : selection
         inkSelectionRect = inkSelection?.bounds
+        restoreSelectedShape()
         session.selectedStrokeCount = selection.indices.count
         updateInkOutline()
+    }
+    private func restoreSelectedShape() {
+        automaticShape = nil
+        guard let selected = inkSelection, selected.indices.count == 1,
+              let stroke = selected.drawing.strokes.first, let result = session.shape(for: stroke), result.kind != .line else { return }
+        automaticShape = ([InkStrokeID(stroke)], ShapeEditFrame(result: result), result.fittedPoints)
+        shapeSelectionPending = false
     }
     func transformSelectedInk(_ transform: CGAffineTransform, action: String) {
         guard let selected = inkSelection else { return }
@@ -887,7 +964,7 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
         inkPreview.moveSelection(transform, viewportTransform: documentToViewport)
         clearInkSelection()
         inkCommitDrawing = drawing; inkCommitEcho = false; inkRenderGeneration &+= 1
-        session.commitDrawing(drawing, action: action)
+        session.commitDrawing(drawing, action: action, shapes: session.transformedShapes(drawing: drawing, indices: selected.indices, transform: transform))
         committingInk = false
         inkSelection = RectangularInkSelection(drawing: drawing, indices: selected.indices, geometryCache: geometry(for: drawing))
         automaticShape = editedShape; shapeResize = nil; inkDragTransform = .identity
@@ -900,7 +977,7 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
         let rect = inkSelectionRect ?? selected.bounds
         let limit = min(((currentPage?.width ?? rect.maxX) - rect.minX) / max(1, rect.width),
                         ((currentPage?.height ?? rect.maxY) - rect.minY) / max(1, rect.height))
-        let scale = max(0.1, min(factor, limit))
+        let scale = currentPage?.isInfinite == true ? max(0.1, factor) : max(0.1, min(factor, limit))
         transformSelectedInk(CGAffineTransform(a: scale, b: 0, c: 0, d: scale,
                                               tx: rect.minX * (1 - scale), ty: rect.minY * (1 - scale)), action: "필기 크기 조절")
     }
@@ -921,11 +998,11 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
         let visible = bounds.insetBy(dx: 40, dy: 100).applying(documentToViewport.inverted())
         let source = copied.bounds
         let target = duplicate ? CGPoint(x: source.minX + 24, y: source.minY + 24) : CGPoint(x: visible.midX - source.width / 2, y: visible.midY - source.height / 2)
-        let x = min(max(0, target.x), max(0, (currentPage?.width ?? source.width) - source.width))
-        let y = min(max(0, target.y), max(0, (currentPage?.height ?? source.height) - source.height))
+        let x = currentPage?.isInfinite == true ? target.x : min(max(0, target.x), max(0, (currentPage?.width ?? source.width) - source.width))
+        let y = currentPage?.isInfinite == true ? target.y : min(max(0, target.y), max(0, (currentPage?.height ?? source.height) - source.height))
         let inserted = DrawingSession.reidentifiedInk(copied).transformed(using: CGAffineTransform(translationX: x - source.minX, y: y - source.minY))
-        let oldCount = canvas.drawing.strokes.count
-        let result = PKDrawing(strokes: canvas.drawing.strokes + inserted.strokes)
+        let oldCount = session.drawing.strokes.count
+        let result = PKDrawing(strokes: session.drawing.strokes + inserted.strokes)
         clearInkSelection()
         session.commitDrawing(result, action: duplicate ? "필기 복제" : "필기 붙여넣기")
         inkSelection = RectangularInkSelection(drawing: result, indices: Set(oldCount..<result.strokes.count))
@@ -957,8 +1034,8 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
         guard let id = selectedID, let index = page.elements.firstIndex(where: { $0.id == id }) else { return }
         let translation = gesture.translation(in: self)
         let delta = CGPoint(x: translation.x / canvas.zoomScale, y: translation.y / canvas.zoomScale)
-        let x = min(max(0, dragOrigin.x + delta.x), max(0, page.width - page.elements[index].width))
-        let y = min(max(0, dragOrigin.y + delta.y), max(0, page.height - page.elements[index].height))
+        let x = page.isInfinite ? dragOrigin.x + delta.x : min(max(0, dragOrigin.x + delta.x), max(0, page.width - page.elements[index].width))
+        let y = page.isInfinite ? dragOrigin.y + delta.y : min(max(0, dragOrigin.y + delta.y), max(0, page.height - page.elements[index].height))
         page.elements[index].x = x
         page.elements[index].y = y
         // Commit once at the end; show the destination outline while dragging.

@@ -1,5 +1,6 @@
 import SwiftUI
 import PencilKit
+import CryptoKit
 
 /// Small device-local tool preferences; no note, drawing, or account data.
 private struct InkToolPreferences: Codable {
@@ -57,26 +58,78 @@ final class DrawingSession: NSObject, ObservableObject, PKCanvasViewDelegate {
     private var nativeDrawingDirty = false
     private(set) var drawingRevision: UInt64 = 0
     private var committedDrawing = PKDrawing()
+    private var committedDocumentDrawing = PKDrawing()
+    private(set) var canvasOrigin = CGPoint.zero
+    private let infiniteUndo = UndoManager()
+    private var pendingInfiniteUndo: PKDrawing?
+    var undoManager: UndoManager? { canvas.usesDocumentUndo ? infiniteUndo : canvas.undoManager }
+    var drawing: PKDrawing {
+        let native = canvas.drawing
+        return native == committedDrawing ? committedDocumentDrawing : documentDrawing(native)
+    }
+    private func documentDrawing(_ native: PKDrawing) -> PKDrawing {
+        canvasOrigin == .zero ? native : native.transformed(using: CGAffineTransform(translationX: -canvasOrigin.x, y: -canvasOrigin.y))
+    }
+    private func nativeDrawing(_ document: PKDrawing) -> PKDrawing {
+        canvasOrigin == .zero ? document : document.transformed(using: CGAffineTransform(translationX: canvasOrigin.x, y: canvasOrigin.y))
+    }
+    private func documentShape(_ result: ShapeRecognitionResult) -> ShapeRecognitionResult {
+        ShapeRecognitionResult(kind: result.kind, confidence: result.confidence, normalizedError: result.normalizedError,
+            fittedPoints: result.fittedPoints.map { CGPoint(x: $0.x-canvasOrigin.x,y: $0.y-canvasOrigin.y) })
+    }
+    /// Only on scroll-range expansion, never during a contact. PencilKit keeps
+    /// positive input coordinates; persisted paths and all app tools stay logical.
+    func setCanvasOrigin(_ origin: CGPoint) {
+        guard origin != canvasOrigin, !nativeToolActive else { return }
+        let document = drawing
+        // A display-origin change invalidates native-coordinate receipts, but
+        // an already committed selection remains in logical coordinates.
+        shapeCompletion.invalidate(preservingCommittedSelection: host?.hasAutomaticShapeSelection == true)
+        canvasOrigin = origin
+        loading = true
+        canvas.drawing = nativeDrawing(document)
+        loading = false
+        committedDrawing = canvas.drawing; committedDocumentDrawing = document
+        shapeCompletion.nativeChanged(drawing: committedDrawing, revision: drawingRevision)
+    }
     private var committedStrokeCount = 0
     private var committingShape = false
     private let shapeHoldScheduler: ShapeHoldScheduler?
     private lazy var shapeCompletion: ShapeCompletionController = {
         let controller = ShapeCompletionController(scheduler: shapeHoldScheduler)
-        controller.onCompletion = { [weak self] source, original, completed in
+        #if DEBUG
+        controller.acceptsTestTouches = ProcessInfo.processInfo.arguments.contains("--pencil-test-touch")
+        #endif
+        controller.onCompletion = { [weak self] source, original, completed, result in
             guard let self, !self.nativeToolActive, self.loadError == nil,
                   self.canvas.drawing == source else { return false }
             self.committingShape = true
-            self.replaceDrawing(completed, on: self.canvas, action: "도형 보정", undoOriginal: original)
+            var shapes = self.inkShapes
+            if let stroke = self.documentDrawing(completed).strokes.last {
+                shapes.removeAll { $0.strokeID == InkStrokeID(stroke) }
+                shapes.append(InkShape(strokeID: InkStrokeID(stroke), kind: result.kind.rawValue,
+                    points: self.documentShape(result).fittedPoints, fingerprint: Self.fingerprint(stroke)))
+            }
+            self.replaceDrawing(self.documentDrawing(completed), on: self.canvas, action: "도형 보정", undoOriginal: self.documentDrawing(original), shapes: shapes)
             self.committingShape = false
             return true
         }
-        controller.onClosedShapePreview = { [weak self] result in self?.host?.showAutomaticShape(result) }
-        controller.onClosedShapeReady = { [weak self] result, ids in self?.host?.activateAutomaticShape(result, ids: ids) }
+        controller.onClosedShapePreview = { [weak self] result in if let self { self.host?.showAutomaticShape(self.documentShape(result)) } }
+        controller.onClosedShapeReady = { [weak self] result, ids in if let self { self.host?.activateAutomaticShape(self.documentShape(result), ids: ids) } }
         controller.onPreviewCancelled = { [weak self] in self?.host?.cancelAutomaticShape() }
         controller.shouldObserveContact = { [weak self] in self?.host?.hasAutomaticShapeSelection != true }
         controller.onRepair = { [weak self] source, completed in
             guard let self, !self.nativeToolActive, self.canvas.drawing == source else { return }
             // A late native estimate belongs to the same operation, not a new Undo.
+            var shapes = self.inkShapes
+            for stroke in self.documentDrawing(completed).strokes {
+                if let i = shapes.firstIndex(where: { $0.strokeID == InkStrokeID(stroke) }) {
+                    shapes[i].fingerprint = Self.fingerprint(stroke)
+                }
+            }
+            if let noteID = self.noteID, let pageID = self.pageID {
+                self.store?.updatePage(noteID: noteID, pageID: pageID) { $0.inkShapes = shapes }
+            }
             self.canvas.drawing = completed
             self.processDrawingChange(self.canvas, isNativeNotification: false)
         }
@@ -176,13 +229,14 @@ final class DrawingSession: NSObject, ObservableObject, PKCanvasViewDelegate {
     }
     func canvasViewDidBeginUsingTool(_ canvasView: PKCanvasView) {
         guard canvasView === canvas, let noteID, let pageID else { return }
+        if canvas.usesDocumentUndo { pendingInfiniteUndo = drawing }
         nativeToolActive = true
         nativeDrawingDirty = false
         shapeCompletion.nativeBegan(previousStrokeCount: committedStrokeCount)
         host?.setDrawingActive(true)
-        store?.beginDrawingInteraction(noteID: noteID, pageID: pageID, snapshot: { [weak canvasView] in
-            guard let canvasView else { return nil }
-            return DrawingEngineMetrics.snapshot { canvasView.drawing }
+        store?.beginDrawingInteraction(noteID: noteID, pageID: pageID, snapshot: { [weak self, weak canvasView] in
+            guard let self, let canvasView else { return nil }
+            return DrawingEngineMetrics.snapshot { self.documentDrawing(canvasView.drawing) }
         })
     }
     func canvasViewDidEndUsingTool(_ canvasView: PKCanvasView) {
@@ -192,6 +246,7 @@ final class DrawingSession: NSObject, ObservableObject, PKCanvasViewDelegate {
         if nativeDrawingDirty { captureCommittedDrawing(canvasView) }
         nativeToolActive = false
         nativeDrawingDirty = false
+        registerInfiniteStrokeUndo()
         host?.setDrawingActive(false)
         if let noteID, let pageID { store?.endDrawingInteraction(noteID: noteID, pageID: pageID) }
         shapeCompletion.nativeEnded(drawing: committedDrawing, revision: drawingRevision)
@@ -259,6 +314,7 @@ final class DrawingSession: NSObject, ObservableObject, PKCanvasViewDelegate {
 
     func load(noteID: UUID, pageID: UUID, store: NoteStore) {
         guard self.noteID != noteID || self.pageID != pageID else { return }
+        host?.saveViewport()
         shapeCompletion.invalidate()
         nativeToolActive = false
         host?.setDrawingActive(false)
@@ -275,7 +331,9 @@ final class DrawingSession: NSObject, ObservableObject, PKCanvasViewDelegate {
         loadError = nil
         let previous = canvas
         let selectedTool = previous.tool
+        canvasOrigin = .zero; infiniteUndo.removeAllActions(); pendingInfiniteUndo = nil
         let replacement = PagingCanvasView()
+        replacement.usesDocumentUndo = store.note(noteID)?.pages.first(where: { $0.id == pageID })?.isInfinite == true
         configureCanvas(replacement)
         // An empty drawing can leave old PencilKit render tiles alive on a reused
         // view. Give each page its own render surface, without changing ink coordinates.
@@ -283,6 +341,10 @@ final class DrawingSession: NSObject, ObservableObject, PKCanvasViewDelegate {
         if previous.isFirstResponder { previous.resignFirstResponder() }
         toolsAreVisible = false
         canvas = replacement
+        // Reopening can replace the canvas after SwiftUI's configuration pass.
+        // Keep its input policy until the next pass, including infinite viewports.
+        replacement.drawingPolicy = previous.drawingPolicy
+        replacement.panGestureRecognizer.minimumNumberOfTouches = previous.panGestureRecognizer.minimumNumberOfTouches
         replacement.tool = selectedTool
         replacement.isRulerActive = previous.isRulerActive
         host?.replaceCanvas(previous)
@@ -298,6 +360,7 @@ final class DrawingSession: NSObject, ObservableObject, PKCanvasViewDelegate {
         }
         canvas.undoManager?.removeAllActions()
         committedDrawing = canvas.drawing
+        committedDocumentDrawing = documentDrawing(committedDrawing)
         committedStrokeCount = committedDrawing.strokes.count
         shapeCompletion.nativeChanged(drawing: committedDrawing, revision: drawingRevision)
         loading = false
@@ -318,7 +381,8 @@ final class DrawingSession: NSObject, ObservableObject, PKCanvasViewDelegate {
         }
         // Includes PencilKit's late estimated-pressure updates after lift.
         let drawing = captureCommittedDrawing(canvasView)
-        shapeCompletion.nativeChanged(drawing: drawing, revision: drawingRevision, isNativeNotification: isNativeNotification)
+        shapeCompletion.nativeChanged(drawing: committedDrawing, revision: drawingRevision, isNativeNotification: isNativeNotification)
+        registerInfiniteStrokeUndo()
         if isNativeNotification { host?.nativeInkDrawingChanged(drawing) }
         host?.cancelEraserIfDrawingChanged(drawing)
         host?.validateInkSelection(drawing)
@@ -335,31 +399,94 @@ final class DrawingSession: NSObject, ObservableObject, PKCanvasViewDelegate {
 
     @discardableResult private func captureCommittedDrawing(_ canvasView: PKCanvasView) -> PKDrawing {
         let drawing = DrawingEngineMetrics.snapshot { canvasView.drawing }
+        // A transform roundtrip creates a new PKDrawing identity. Keep the
+        // logical snapshot for unchanged native echoes so Undo and preview
+        // handoffs refer to the exact drawing that was committed.
+        if drawing != committedDrawing { committedDocumentDrawing = documentDrawing(drawing) }
         committedDrawing = drawing
         committedStrokeCount = drawing.strokes.count
-        if let noteID, let pageID { store?.queueDrawing(drawing, noteID: noteID, pageID: pageID) }
-        return drawing
+        if let noteID, let pageID { store?.queueDrawing(committedDocumentDrawing, noteID: noteID, pageID: pageID) }
+        return committedDocumentDrawing
+    }
+    private func registerInfiniteStrokeUndo() {
+        guard !nativeToolActive, let original = pendingInfiniteUndo, original != committedDocumentDrawing else { return }
+        pendingInfiniteUndo = nil
+        let ownsGroup = infiniteUndo.groupingLevel == 0 && !infiniteUndo.isUndoing && !infiniteUndo.isRedoing
+        if ownsGroup { infiniteUndo.beginUndoGrouping() }
+        defer { if ownsGroup { infiniteUndo.endUndoGrouping() } }
+        infiniteUndo.registerUndo(withTarget: self) { session in
+            session.commitDrawing(original, action: "필기")
+        }
+        infiniteUndo.setActionName("필기")
     }
 
     func commitStrokeErasing(_ drawing: PKDrawing) {
         commitDrawing(drawing, action: "획 지우기")
     }
 
-    func commitDrawing(_ drawing: PKDrawing, action: String) {
+    func commitDrawing(_ drawing: PKDrawing, action: String, shapes: [InkShape]? = nil) {
         guard loadError == nil else { return }
-        replaceDrawing(drawing, on: canvas, action: action)
+        replaceDrawing(drawing, on: canvas, action: action, shapes: shapes)
     }
 
-    private func replaceDrawing(_ drawing: PKDrawing, on target: PagingCanvasView, action: String, undoOriginal: PKDrawing? = nil) {
+    private func replaceDrawing(_ drawing: PKDrawing, on target: PagingCanvasView, action: String, undoOriginal: PKDrawing? = nil, shapes: [InkShape]? = nil) {
         guard target === canvas else { return }
         if !committingShape { shapeCompletion.invalidate() }
-        let previous = undoOriginal ?? target.drawing
-        target.undoManager?.registerUndo(withTarget: target) { [weak self] target in
-            self?.replaceDrawing(previous, on: target, action: action)
+        let ownsGroup = canvas.usesDocumentUndo && undoManager?.groupingLevel == 0 && undoManager?.isUndoing == false && undoManager?.isRedoing == false
+        if ownsGroup { undoManager?.beginUndoGrouping() }
+        defer { if ownsGroup { undoManager?.endUndoGrouping() } }
+        let previous = undoOriginal ?? self.drawing
+        let previousShapes = inkShapes
+        undoManager?.registerUndo(withTarget: target) { [weak self] target in
+            self?.replaceDrawing(previous, on: target, action: action, shapes: previousShapes)
         }
-        target.undoManager?.setActionName(action)
-        target.drawing = drawing
+        undoManager?.setActionName(action)
+        if let shapes, let noteID, let pageID {
+            store?.updatePage(noteID: noteID, pageID: pageID) { $0.inkShapes = shapes.isEmpty ? nil : shapes }
+        }
+        loading = true
+        target.drawing = nativeDrawing(drawing)
+        committedDrawing = target.drawing
+        committedDocumentDrawing = drawing
+        loading = false
         processDrawingChange(target, isNativeNotification: false)
+    }
+
+    var inkShapes: [InkShape] {
+        guard let noteID, let pageID else { return [] }
+        return store?.note(noteID)?.pages.first(where: { $0.id == pageID })?.inkShapes ?? []
+    }
+    static func fingerprint(_ stroke: PKStroke) -> Data {
+        // A new PKDrawing has a random archive identity. Hash geometry instead
+        // so the same native stroke still matches after loading from disk.
+        var bytes = Data()
+        func append(_ value: Double) {
+            var bits = value.bitPattern.littleEndian
+            withUnsafeBytes(of: &bits) { bytes.append(contentsOf: $0) }
+        }
+        let t = stroke.transform
+        for value in [t.a, t.b, t.c, t.d, t.tx, t.ty] { append(Double(value)) }
+        for point in stroke.path {
+            append(Double(point.location.x)); append(Double(point.location.y))
+        }
+        return Data(SHA256.hash(data: bytes))
+    }
+    func shape(for stroke: PKStroke) -> ShapeRecognitionResult? {
+        guard stroke.mask == nil,
+              let saved = inkShapes.first(where: { $0.strokeID == InkStrokeID(stroke) }),
+              saved.fingerprint == Self.fingerprint(stroke), let kind = ShapeKind(rawValue: saved.kind) else { return nil }
+        return ShapeRecognitionResult(kind: kind, confidence: 1, normalizedError: 0, fittedPoints: saved.points)
+    }
+    func transformedShapes(drawing: PKDrawing, indices: Set<Int>, transform: CGAffineTransform) -> [InkShape] {
+        let strokes = drawing.strokes
+        var shapes = inkShapes
+        for i in indices where strokes.indices.contains(i) {
+            let stroke = strokes[i]
+            guard let index = shapes.firstIndex(where: { $0.strokeID == InkStrokeID(stroke) }) else { continue }
+            shapes[index].points = shapes[index].points.map { $0.applying(transform) }
+            shapes[index].fingerprint = Self.fingerprint(stroke)
+        }
+        return shapes
     }
 
     private var inkGroups: [InkGroup] {
@@ -403,7 +530,7 @@ final class DrawingSession: NSObject, ObservableObject, PKCanvasViewDelegate {
 
     func groupSelectedInk() {
         guard loadError == nil, let host, let store, let noteID, let pageID else { return }
-        let drawing = canvas.drawing
+        let drawing = self.drawing
         let indices = expandedSelectionIndices(in: drawing, indices: host.selectedInkIndices)
         guard indices.count >= 2 else { return }
         let strokes = drawing.strokes
@@ -424,7 +551,7 @@ final class DrawingSession: NSObject, ObservableObject, PKCanvasViewDelegate {
             return
         }
         groups.append(InkGroup(strokeIDs: identifiers))
-        if store.setInkGroups(noteID: noteID, pageID: pageID, groups: groups, undoManager: canvas.undoManager, action: "필기 그룹화") {
+        if store.setInkGroups(noteID: noteID, pageID: pageID, groups: groups, undoManager: undoManager, action: "필기 그룹화") {
             updateSelectionActions(rect: selectionActionRect, selectedDrawing: host.selectedInkDrawing)
             refreshUndo()
         }
@@ -433,18 +560,20 @@ final class DrawingSession: NSObject, ObservableObject, PKCanvasViewDelegate {
     private func replaceGroupedSelection(_ drawing: PKDrawing, groups: [InkGroup], selectedIndices: Set<Int>, action: String) {
         guard loadError == nil, let store, let noteID, let pageID else { return }
         let target = canvas
-        let previous = target.drawing, previousGroups = inkGroups
+        let previous = self.drawing, previousGroups = inkGroups
         guard store.setInkGroupsAndDrawing(noteID: noteID, pageID: pageID, drawing: drawing, groups: groups) else { return }
-        target.undoManager?.registerUndo(withTarget: target) { [weak self] target in
+        undoManager?.registerUndo(withTarget: target) { [weak self] target in
             guard let self, self.canvas === target else { return }
             self.replaceGroupedSelection(previous, groups: previousGroups, selectedIndices: selectedIndices, action: action)
         }
-        target.undoManager?.setActionName(action)
+        undoManager?.setActionName(action)
         host?.clearInkSelection()
         // Persistence already succeeded. Suppress the synchronous drawing-change
         // callback; any late PencilKit callback still follows the normal path.
         loading = true
-        target.drawing = drawing
+        target.drawing = nativeDrawing(drawing)
+        committedDrawing = target.drawing
+        committedDocumentDrawing = drawing
         loading = false
         host?.restoreInkSelection(indices: selectedIndices)
         updateSelectionActions(rect: selectionActionRect, selectedDrawing: host?.selectedInkDrawing)
@@ -456,7 +585,7 @@ final class DrawingSession: NSObject, ObservableObject, PKCanvasViewDelegate {
               let store, let noteID, let pageID else { return }
         let selected = Set(drawing.strokes.map(Self.strokeID))
         let groups = inkGroups.filter { selected.isDisjoint(with: $0.strokeIDs) }
-        if store.setInkGroups(noteID: noteID, pageID: pageID, groups: groups, undoManager: canvas.undoManager, action: "필기 그룹 해제") {
+        if store.setInkGroups(noteID: noteID, pageID: pageID, groups: groups, undoManager: undoManager, action: "필기 그룹 해제") {
             updateSelectionActions(rect: selectionActionRect, selectedDrawing: drawing)
             refreshUndo()
         }
@@ -529,13 +658,13 @@ final class DrawingSession: NSObject, ObservableObject, PKCanvasViewDelegate {
     }
 
     func refreshUndo() {
-        let undo = canvas.undoManager?.canUndo ?? false
-        let redo = canvas.undoManager?.canRedo ?? false
+        let undo = undoManager?.canUndo ?? false
+        let redo = undoManager?.canRedo ?? false
         if canUndo != undo { canUndo = undo }
         if canRedo != redo { canRedo = redo }
     }
-    func undo() { shapeCompletion.invalidate(); host?.clearInkSelection(); host?.cancelStrokeErasing(); canvas.undoManager?.undo(); refreshUndo() }
-    func redo() { shapeCompletion.invalidate(); host?.clearInkSelection(); host?.cancelStrokeErasing(); canvas.undoManager?.redo(); refreshUndo() }
+    func undo() { shapeCompletion.invalidate(); host?.clearInkSelection(); host?.cancelStrokeErasing(); undoManager?.undo(); refreshUndo() }
+    func redo() { shapeCompletion.invalidate(); host?.clearInkSelection(); host?.cancelStrokeErasing(); undoManager?.redo(); refreshUndo() }
     func fitPage() { host?.fitPage(animated: true) }
 
     func setToolsVisible(_ visible: Bool) {
@@ -548,7 +677,19 @@ final class DrawingSession: NSObject, ObservableObject, PKCanvasViewDelegate {
         else if !shouldShow && canvas.isFirstResponder { canvas.resignFirstResponder() }
     }
 
+    func saveViewport(_ viewport: CanvasViewport) {
+        guard let noteID, let pageID else { return }
+        if store?.note(noteID)?.pages.first(where: { $0.id == pageID })?.viewport != viewport {
+            store?.updatePage(noteID: noteID, pageID: pageID) { $0.viewport = viewport }
+        }
+    }
+    func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
+        if !decelerate { host?.saveViewport() }
+    }
+    func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) { host?.saveViewport() }
+    func scrollViewDidEndZooming(_ scrollView: UIScrollView, with view: UIView?, atScale scale: CGFloat) { host?.saveViewport() }
     func stop() {
+        host?.saveViewport()
         shapeCompletion.invalidate()
         nativeToolActive = false
         host?.cancelStrokeErasing()
@@ -559,10 +700,14 @@ final class DrawingSession: NSObject, ObservableObject, PKCanvasViewDelegate {
 }
 
 final class PagingCanvasView: PKCanvasView {
+    // Native Undo snapshots use display coordinates. Infinite documents register
+    // logical snapshots in DrawingSession so range rebasing cannot corrupt Undo.
+    var usesDocumentUndo = false
+    override var undoManager: UndoManager? { usesDocumentUndo ? nil : super.undoManager }
     var pageTurningEnabled = false
     // The canvas owns three-finger paging; toolbar undo/redo remain available.
     override var editingInteractionConfiguration: UIEditingInteractionConfiguration {
-        pageTurningEnabled ? .none : .default
+        (pageTurningEnabled || usesDocumentUndo) ? .none : .default
     }
 }
 
