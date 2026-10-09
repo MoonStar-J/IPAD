@@ -134,8 +134,8 @@ enum PageRenderer {
         }
     }
 
-    static func snapshot(page: NotePage, note: Notebook, drawing: PKDrawing, store: NoteStore, width: CGFloat) -> UIImage {
-        let rect = page.isInfinite ? CanvasExtent.usedBounds(ink: drawing.bounds, elements: page.elements) : CGRect(x: 0, y: 0, width: page.width, height: page.height)
+    static func snapshot(page: NotePage, note: Notebook, drawing: PKDrawing, store: NoteStore, width: CGFloat, rect requested: CGRect? = nil) -> UIImage {
+        let rect = requested ?? (page.isInfinite ? CanvasExtent.usedBounds(ink: drawing.bounds, elements: page.elements) : CGRect(x: 0, y: 0, width: page.width, height: page.height))
         let scale = page.isInfinite ? min(width / rect.width, 4096 / max(rect.width, rect.height)) : width / rect.width
         let size = CGSize(width: max(1,rect.width*scale), height: max(1,rect.height*scale))
         let format = UIGraphicsImageRendererFormat()

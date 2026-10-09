@@ -17,6 +17,7 @@ iPad에서 PDF를 읽고 Apple Pencil로 필기하며, 선택한 내용에 대�
 - 하위 프로젝트와 노트를 함께 관리하고 길게 눌러 이동
 - PDF를 페이지별로 열거나 세로로 이어 붙여 필기
 - 로컬 파일 가져오기, Google Drive 연결과 PDF 선택¹
+- 전체 노트·선택 페이지·무한 캔버스 영역 요약, 프로젝트의 ‘요약’에 Markdown·수식 노트 저장
 - 텍스트·사진 삽입, PDF·이미지 공유, 자동 저장
 - 최근 삭제된 노트 복원 및 휴지통 전체 영구 삭제
 
@@ -28,4 +29,4 @@ iPad에서 PDF를 읽고 Apple Pencil로 필기하며, 선택한 내용에 대�
 
 ![필기 영역과 여백 대화](docs/previews/capture-destination-readable-dark.png)
 
-¹ Google Drive는 앱 빌드에 Google OAuth 클라이언트 등록이 필요합니다. 현재 저장소에는 계정별 등록 값이 포함되어 있지 않습니다.
+¹ Google Drive는 앱 빌드에 Google OAuth 클라이언트 등록이 필요합니다. 기본 NoteMargin 타깃에는 제공된 iOS Client ID가 설정되어 있습니다. Google Cloud의 API 활성화·동의 화면 설정 확인과 실제 계정 검증은 별도로 필요합니다.

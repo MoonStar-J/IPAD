@@ -3,7 +3,7 @@ import PencilKit
 import PhotosUI
 
 private enum EditorSheet: String, Identifiable {
-    case pages, settings, text, objects, share
+    case pages, settings, text, objects, share, summary
     var id: String { rawValue }
 }
 
@@ -27,6 +27,11 @@ struct EditorView: View {
     @State private var importingPhoto = false
     @State private var showingSwipeHint = true
     @State private var aiOverlayActive = false
+    @StateObject private var summaryDraft = NoteSummaryDraft()
+    @State private var selectingSummary = false
+    @State private var summaryRegion: CGRect?
+    @State private var pendingSummaryID: UUID?
+    @State private var openedSummary: NoteRoute?
 
     private var note: Notebook? { store.note(noteID) }
     private var page: NotePage? { note?.pages.first { $0.id == selectedPageID } ?? note?.pages.first }
@@ -34,7 +39,9 @@ struct EditorView: View {
 
     var body: some View {
         Group {
-            if let note, let page {
+            if note?.summary != nil {
+                SummaryReaderView(noteID: noteID, service: store.summaries)
+            } else if let note, let page {
                 AIEditorCanvas(note: note, page: page, session: session, store: store,
                                fingerDrawing: fingerDrawing, editingObjects: editingObjects,
                                toolsVisible: sheet == nil && !choosingPhoto,
@@ -46,7 +53,10 @@ struct EditorView: View {
                         page.elements[index].x = x; page.elements[index].y = y
                     }
                 }, editorControlsInset: 64, toolObstacles: toolObstacles,
-                   onOverlayVisibilityChange: { aiOverlayActive = $0 })
+                   onOverlayVisibilityChange: { aiOverlayActive = $0 },
+                   summarySelection: $selectingSummary, onSummaryRegion: { rect in
+                    summaryRegion = rect; sheet = .summary
+                })
                 .overlay {
                     if let error = session.loadError {
                         ContentUnavailableView("필기를 불러올 수 없습니다", systemImage: "exclamationmark.triangle", description: Text(error))
@@ -102,7 +112,9 @@ struct EditorView: View {
                     selectedElementID = nil
                     session.load(noteID: noteID, pageID: id, store: store)
                 }
-                .sheet(item: $sheet) { value in
+                .sheet(item: $sheet, onDismiss: {
+                    if let id = pendingSummaryID { pendingSummaryID = nil; openedSummary = NoteRoute(id: id) }
+                }) { value in
                     switch value {
                     case .pages:
                         PageManagerView(noteID: noteID, selectedPageID: page.id) { selectedPageID = $0 }
@@ -114,6 +126,11 @@ struct EditorView: View {
                         }
                     case .objects: ObjectManagerView(noteID: noteID, pageID: page.id, selectedID: selectedElementID)
                     case .share: ShareSheet(urls: sharingURLs)
+                    case .summary:
+                        NoteSummaryComposer(noteID: noteID, service: store.summaries, draft: summaryDraft, selectedRegion: summaryRegion, selectRegion: {
+                            sheet = nil; editingObjects = false; selectedElementID = nil
+                            session.host?.cancelStrokeErasing(); selectingSummary = true
+                        }, open: { id in pendingSummaryID = id; sheet = nil })
                     }
                 }
                 .alert("이 페이지를 삭제할까요?", isPresented: $showingDeletePage) {
@@ -128,7 +145,10 @@ struct EditorView: View {
                 } actions: { Button("닫기") { dismiss() } }
             }
         }
-        .toolbar(.hidden, for: .navigationBar)
+        .toolbar(note?.summary == nil ? .hidden : .visible, for: .navigationBar)
+        .fullScreenCover(item: $openedSummary) { route in
+            NavigationStack { SummaryReaderView(noteID: route.id, service: store.summaries) }.environmentObject(store)
+        }
         .background(Color(uiColor: .secondarySystemBackground))
         .interactiveDismissDisabled(store.hasUnsavedChanges)
         .onDisappear { session.stop() }
@@ -238,6 +258,8 @@ struct EditorView: View {
             Button("노트 전체를 PDF로 공유", systemImage: "doc.richtext") { export(asPDF: true) }
             Button("현재 페이지를 이미지로 공유", systemImage: "photo") { export(asPDF: false) }
         } label: { Label("공유", systemImage: "square.and.arrow.up") }.disabled(exporting)
+        Button { if store.flushDrawings() { sheet = .summary } } label: { Label("요약", systemImage: "text.alignleft") }
+            .accessibilityIdentifier("editor-summary")
         Menu {
             AppearancePicker()
             Toggle("손가락으로도 필기", isOn: $fingerDrawing)

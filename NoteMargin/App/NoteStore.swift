@@ -19,6 +19,7 @@ final class NoteStore: ObservableObject {
     @Published private(set) var hasUnsavedChanges = false
     private var repository: LibraryRepository?
     private var aiStore = MarginAIStore.shared
+    lazy var summaries = NoteSummaryService(store: self)
     // PKDrawing is a value snapshot. Do not serialize the entire drawing on the
     // PencilKit callback thread; late pressure updates may replace this value.
     private var pending: [DrawingKey: PendingDrawing] = [:]
@@ -65,11 +66,25 @@ final class NoteStore: ObservableObject {
                         PKStrokePoint(location: p, timeOffset: Double(i) * 0.01, size: CGSize(width: 2, height: 2), opacity: 1, force: 1, azimuth: 0, altitude: .pi / 2)
                     }, creationDate: Date()))
                     note.pages = [NotePage(paper: .ruled, canvasMode: ProcessInfo.processInfo.arguments.contains("--infinite-editing-fixture") ? "infinite" : nil, inkShapes: [InkShape(strokeID: InkStrokeID(stroke), kind: result.kind.rawValue, points: result.fittedPoints, fingerprint: DrawingSession.fingerprint(stroke))])]
+                    if ProcessInfo.processInfo.arguments.contains("--live-summary-fixture") {
+                        note.pages[0].elements = [PageElement(kind: .text, text: "미분 학습 노트\nf(x) = x²의 도함수는 f′(x) = 2x이다.\nx = 3에서 접선의 기울기는 6이다.\n아래 손으로 그린 도형은 원이다.", x: 40, y: 60, width: 640, height: 200)]
+                    }
                     var fixtureLibrary = Library(); fixtureLibrary.notebooks = [note]
                     if ProcessInfo.processInfo.arguments.contains("--trashed-editing-fixture") {
                         fixtureLibrary.notebooks[0].deletedAt = Date()
                     }
                     try repository.writeDrawing(PKDrawing(strokes: [stroke]).dataRepresentation(), noteID: note.id, pageID: note.pages[0].id)
+                    if ProcessInfo.processInfo.arguments.contains("--summary-reader-fixture") {
+                        var summary = Notebook(title: "Summary rendering fixture", cover: .sage)
+                        summary.pages = []
+                        summary.summary = NoteSummary(sourceID: note.id, sourceTitle: note.title, createdAt: Date(), model: "fixture", account: "fixture", state: .completed)
+                        let source = SummarySource(id: "S1", pageID: note.pages[0].id, label: "1페이지", rect: CGRect(x: 0, y: 0, width: 768, height: 1024))
+                        var work = SummaryWork(snapshot: note, sources: [source])
+                        work.final = "# 학습 요약\n\n정의와 조건 [S1]\n\n" + #"\(a^2+b^2=c^2\)"# + "\n\n" + #"\[\sum_{k=1}^{n} k = \frac{n(n+1)}{2}\]"# + "\n\n" + String(repeating: "## 핵심 주제\n\n- 성립 조건과 예외를 확인합니다. [S1]\n\n", count: 20) + "<script>window.location='https://example.invalid'</script>"
+                        fixtureLibrary.notebooks.append(summary)
+                        try repository.writeAsset(JSONEncoder().encode(work), noteID: summary.id, name: "summary-work.json")
+                        try repository.writeAsset(Data(work.final!.utf8), noteID: summary.id, name: "summary.md")
+                    }
                     try repository.save(fixtureLibrary)
                 }
             } else { repository = try LibraryRepository.applicationLibrary(in: documents) }
@@ -230,6 +245,71 @@ final class NoteStore: ObservableObject {
         return commit { $0.notebooks.append(note) } ? note.id : nil
     }
 
+    func summaryDestination(for source: Notebook) -> NoteProject? {
+        if let parent = source.projectID.flatMap({ project($0) }), parent.isSummaryDestination == true { return parent }
+        return library.projects.first { $0.parentID == source.projectID && $0.isSummaryDestination == true }
+    }
+
+    func summaryLocation(for source: Notebook) -> String {
+        if let destination = summaryDestination(for: source) {
+            return library.projectPath(destination.id).map(\.title).joined(separator: " / ")
+        }
+        let path = source.projectID.map { library.projectPath($0).map(\.title) } ?? []
+        return (path + ["요약"]).joined(separator: " / ")
+    }
+
+    func createSummary(source: Notebook, sources: [SummarySource], title: String, model: String, account: String) throws -> UUID {
+        guard let repository, !sources.isEmpty, note(source.id) != nil else { throw CocoaError(.fileReadNoSuchFile) }
+        var destination = summaryDestination(for: source)
+        if destination == nil {
+            destination = NoteProject(title: "요약", parentID: source.projectID.flatMap { project($0)?.id }, isSummaryDestination: true)
+        }
+        var result = Notebook(title: title.trimmedOrUntitled, cover: source.cover, projectID: destination!.id)
+        result.pages = []
+        result.summary = NoteSummary(sourceID: source.id, sourceTitle: source.title, createdAt: Date(), model: model, account: account)
+        var snapshot = source
+        snapshot.id = result.id
+        snapshot.pages = source.pages.filter { page in sources.contains { $0.pageID == page.id } }
+        let work = SummaryWork(snapshot: snapshot, sources: sources)
+        do {
+            // File copies freeze PDF, drawings and inserted images before any await.
+            try repository.copyAssets(from: source.id, to: result.id)
+            try repository.writeAsset(JSONEncoder().encode(work), noteID: result.id, name: result.summary!.workAsset)
+            try repository.writeAsset(Data(work.markdown.utf8), noteID: result.id, name: result.summary!.bodyAsset)
+            guard commit({ library in
+                if !library.projects.contains(where: { $0.id == destination!.id }) { library.projects.append(destination!) }
+                library.notebooks.append(result)
+            }) else { throw SummaryError.message(errorMessage ?? "요약 노트를 저장하지 못했습니다.") }
+        } catch {
+            try? repository.deleteAssets(noteID: result.id)
+            throw error
+        }
+        return result.id
+    }
+
+    func summaryWork(_ id: UUID) throws -> SummaryWork {
+        guard let name = note(id)?.summary?.workAsset else { throw CocoaError(.fileReadNoSuchFile) }
+        return try JSONDecoder().decode(SummaryWork.self, from: summaryAsset(id, name: name))
+    }
+    func summaryAsset(_ id: UUID, name: String) throws -> Data {
+        guard let url = assetURL(noteID: id, name: name) else { throw CocoaError(.fileReadNoSuchFile) }
+        return try Data(contentsOf: url)
+    }
+    func writeSummaryAsset(_ data: Data, id: UUID, name: String) throws {
+        guard note(id)?.summary != nil, let repository else { throw CocoaError(.fileNoSuchFile) }
+        try repository.writeAsset(data, noteID: id, name: name)
+    }
+    func saveSummary(_ id: UUID, work: SummaryWork, state: NoteSummary.State) throws {
+        guard let summary = note(id)?.summary else { throw CocoaError(.fileNoSuchFile) }
+        // The checkpoint is authoritative for retry. A body/manifest write failure
+        // never forces a completed model request to be sent again.
+        try writeSummaryAsset(JSONEncoder().encode(work), id: id, name: summary.workAsset)
+        try writeSummaryAsset(Data(work.markdown.utf8), id: id, name: summary.bodyAsset)
+        guard updateNote(id, { $0.summary?.state = state }) else {
+            throw SummaryError.message(errorMessage ?? "요약을 저장하지 못했습니다.")
+        }
+    }
+
     func createFolder(_ title: String) {
         let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !title.isEmpty else { return }
@@ -298,6 +378,7 @@ final class NoteStore: ObservableObject {
         copy.createdAt = Date()
         copy.updatedAt = Date()
         copy.deletedAt = nil
+        if copy.summary?.state.running == true { copy.summary?.state = .interrupted }
         do {
             try repository.copyAssets(from: id, to: copy.id)
             return commit { $0.notebooks.append(copy) } ? copy.id : nil

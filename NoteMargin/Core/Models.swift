@@ -121,6 +121,7 @@ struct Notebook: Codable, Identifiable, Equatable {
     var deletedAt: Date?
     var pages: [NotePage] = [NotePage()]
     var pdfAssetName: String?
+    var summary: NoteSummary?
 }
 
 struct NoteFolder: Codable, Identifiable, Equatable {
@@ -135,6 +136,7 @@ struct NoteProject: Codable, Identifiable, Equatable {
     var parentID: UUID?
     // Older project libraries did not store a color; nil keeps the blue default.
     var cover: CoverColor?
+    var isSummaryDestination: Bool?
     var preferredProvider: String?
     var preferredModel: String?
 }

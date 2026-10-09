@@ -16,6 +16,8 @@ struct AIEditorCanvas: View {
     var editorControlsInset: CGFloat = 0
     var toolObstacles: [CGRect] = []
     var onOverlayVisibilityChange: (Bool) -> Void = { _ in }
+    var summarySelection: Binding<Bool> = .constant(false)
+    var onSummaryRegion: (CGRect) -> Void = { _ in }
     @ObservedObject private var ai = MarginAIStore.shared
     @Environment(\.scenePhase) private var scenePhase
     @State private var selecting = false
@@ -29,7 +31,7 @@ struct AIEditorCanvas: View {
     private var noteHistory: [MarginConversation] { ai.conversations.filter { $0.noteID == note.id } }
     private var noteChats: [MarginConversation] { ai.conversations.filter { $0.belongs(to: note) } }
 
-    private var overlayActive: Bool { selecting || activeChatID != nil || showingHistory || choosingTarget }
+    private var overlayActive: Bool { selecting || summarySelection.wrappedValue || activeChatID != nil || showingHistory || choosingTarget }
 
     private var pageChats: [MarginConversation] { ai.conversations.filter { $0.noteID == note.id && $0.pageID == page.id } }
 
@@ -37,9 +39,9 @@ struct AIEditorCanvas: View {
         GeometryReader { geometry in
             NotebookCanvas(note: note, page: page, session: session, store: store,
                            fingerDrawing: fingerDrawing, editingObjects: editingObjects,
-                           toolsVisible: toolsVisible && activeChatID == nil && !selecting && !showingHistory,
+                           toolsVisible: toolsVisible && activeChatID == nil && !selecting && !summarySelection.wrappedValue && !showingHistory,
                            onTurnPage: onTurnPage, onSelectElement: onSelectElement, onMoveElement: onMoveElement,
-                           selectingRegion: selecting, onRegionChange: { selection = $0 },
+                           selectingRegion: selecting || summarySelection.wrappedValue, onRegionChange: { selection = $0 },
                            onViewportChange: { next, _ in
                                if !pageChats.isEmpty && transform != next { transform = next }
                                if let focus = sourceFocus, focus.pageID == page.id {
@@ -48,12 +50,12 @@ struct AIEditorCanvas: View {
                                }
                            })
             .overlay {
-                if toolsVisible && activeChatID == nil && !selecting && !showingHistory && !editingObjects && session.loadError == nil {
+                if toolsVisible && activeChatID == nil && !selecting && !summarySelection.wrappedValue && !showingHistory && !editingObjects && session.loadError == nil {
                     DockedDrawingTools(session: session, obstacles: toolObstacles)
                 }
             }
             .overlay {
-                if !selecting && !editingObjects {
+                if !selecting && !summarySelection.wrappedValue && !editingObjects {
                     ForEach(Array(pageChats.filter { $0.belongs(to: note) }.enumerated()), id: \.element.id) { index, chat in
                         let anchor = CGPoint(x: chat.rect.midX, y: chat.rect.midY).applying(transform)
                         if anchor.y >= 60 && anchor.y <= geometry.size.height - 24 {
@@ -76,12 +78,12 @@ struct AIEditorCanvas: View {
             }
             .overlay(alignment: .topLeading) {
                 if !editingObjects {
-                    if selecting {
+                    if selecting || summarySelection.wrappedValue {
                         VStack(alignment: .leading, spacing: 8) {
-                            Text("모서리를 끌어 질문할 영역을 조절하세요").font(.caption).foregroundStyle(.primary)
+                            Text(summarySelection.wrappedValue ? "모서리를 끌어 요약할 영역을 조절하세요" : "모서리를 끌어 질문할 영역을 조절하세요").font(.caption).foregroundStyle(.primary)
                             HStack {
-                                Button("취소") { selecting = false; selection = nil }.foregroundStyle(.primary)
-                                Button(captureTarget == nil ? "이 영역으로 질문" : "현재 문제에 추가") { if captureTarget != nil || noteChats.isEmpty { capture() } else { choosingTarget = true } }.buttonStyle(.borderedProminent).foregroundStyle(Color(uiColor: .systemBackground))
+                                Button("취소") { selecting = false; summarySelection.wrappedValue = false; selection = nil }.foregroundStyle(.primary)
+                                Button(summarySelection.wrappedValue ? "이 영역 요약" : (captureTarget == nil ? "이 영역으로 질문" : "현재 문제에 추가")) { if summarySelection.wrappedValue { if let selection { summarySelection.wrappedValue = false; onSummaryRegion(selection) } } else if captureTarget != nil || noteChats.isEmpty { capture() } else { choosingTarget = true } }.buttonStyle(.borderedProminent).foregroundStyle(Color(uiColor: .systemBackground))
                                     .disabled(selection == nil).accessibilityIdentifier("ai-region-confirm")
                                     .popover(isPresented: $choosingTarget) { captureDestinationPicker }
                             }

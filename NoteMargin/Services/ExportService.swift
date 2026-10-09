@@ -5,7 +5,15 @@ import SwiftUI
 
 @MainActor
 enum ExportService {
+    static func exportMarkdown(note: Notebook, store: NoteStore) throws -> URL {
+        guard let summary = note.summary else { throw CocoaError(.fileReadCorruptFile) }
+        let data = try store.summaryAsset(note.id, name: summary.bodyAsset)
+        let url = try exportURL(title: note.title, extension: "md")
+        try data.write(to: url, options: .atomic)
+        return url
+    }
     static func exportPDF(note: Notebook, store: NoteStore) throws -> URL {
+        if note.summary != nil { return try exportMarkdown(note: note, store: store) }
         let url = try exportURL(title: note.title, extension: "pdf")
         let defaultBounds = CGRect(x: 0, y: 0, width: 768, height: 1024)
         let format = UIGraphicsPDFRendererFormat()
