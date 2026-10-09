@@ -57,6 +57,12 @@ final class LibraryRepository {
             }
             try save(library)
         }
+        var interrupted = false
+        for index in library.notebooks.indices where library.notebooks[index].summary?.state.running == true {
+            library.notebooks[index].summary?.state = .interrupted
+            interrupted = true
+        }
+        if interrupted { try save(library) }
         return library
     }
 

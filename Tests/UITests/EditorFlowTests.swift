@@ -102,6 +102,70 @@ final class EditorFlowTests: XCTestCase {
         app.buttons["완료"].tap()
         XCTAssertTrue(app.buttons["pdf-import-files"].isHittable)
     }
+    @MainActor func testSummaryDraftSurvivesConnectionAndRegionSelection() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchEnvironment["NOTEMARGIN_UI_FIXTURE"] = UUID().uuidString
+        app.launch()
+        app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Editing fixture,'")).firstMatch.tap()
+        XCTAssertTrue(app.buttons["editor-summary"].waitForExistence(timeout: 10))
+        app.buttons["editor-summary"].tap()
+        app.buttons["summary-next"].tap()
+        let name = app.textFields["summary-title"]
+        XCTAssertTrue(name.waitForExistence(timeout: 5))
+        name.tap(); name.typeText(" 요약 초안")
+        app.buttons["연결·계정 설정"].tap()
+        XCTAssertTrue(app.buttons["Continue with ChatGPT"].waitForExistence(timeout: 5))
+        app.buttons["완료"].tap()
+        XCTAssertTrue(name.waitForExistence(timeout: 5))
+        XCTAssertEqual(name.value as? String, "Editing fixture 요약 초안")
+        app.buttons["범위 다시 선택"].tap()
+        app.buttons["선택한 부분 요약하기"].tap()
+        XCTAssertFalse(app.buttons["summary-next"].isEnabled)
+        app.buttons["1페이지, 선택 안 됨"].tap()
+        XCTAssertTrue(app.buttons["summary-next"].isEnabled)
+        app.buttons["닫기"].tap()
+        XCTAssertTrue(app.buttons["editor-summary"].waitForExistence(timeout: 5))
+    }
+    @MainActor func testInfiniteSummaryUsesExistingRectangleSelection() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchEnvironment["NOTEMARGIN_UI_FIXTURE"] = UUID().uuidString
+        app.launchArguments = ["--infinite-editing-fixture"]
+        app.launch()
+        app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Editing fixture,'")).firstMatch.tap()
+        XCTAssertTrue(app.buttons["editor-summary"].waitForExistence(timeout: 10)); app.buttons["editor-summary"].tap()
+        app.buttons["선택한 부분 요약하기"].tap()
+        XCTAssertFalse(app.buttons["summary-next"].isEnabled)
+        app.buttons["사각형 영역 선택"].tap()
+        let confirm = app.buttons["ai-region-confirm"]
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5)); XCTAssertEqual(confirm.label, "이 영역 요약")
+        XCTAssertTrue(confirm.isEnabled); confirm.tap()
+        XCTAssertTrue(app.buttons["summary-next"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["summary-next"].isEnabled); app.buttons["summary-next"].tap()
+        XCTAssertTrue(app.textFields["summary-title"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "선택한 사각형 영역")).firstMatch.waitForExistence(timeout: 5))
+        app.buttons["닫기"].tap()
+    }
+    @MainActor func testSummaryReaderMathThemesCopyAndReopen() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchEnvironment["NOTEMARGIN_UI_FIXTURE"] = UUID().uuidString
+        for theme in ["light", "dark"] {
+            app.launchArguments = ["--summary-reader-fixture", "-app.appearance", theme]
+            app.launch()
+            let card = app.buttons["Summary rendering fixture, 요약"]
+            XCTAssertTrue(card.waitForExistence(timeout: 10)); card.tap()
+            XCTAssertTrue(app.webViews.firstMatch.waitForExistence(timeout: 10))
+            XCTAssertTrue(app.staticTexts["학습 요약"].firstMatch.waitForExistence(timeout: 10))
+            app.buttons["원문 복사"].tap()
+            let attachment = XCTAttachment(screenshot: app.screenshot())
+            attachment.name = "Summary-" + theme; attachment.lifetime = .keepAlways; add(attachment)
+            app.buttons["editor-library-back"].tap()
+            XCTAssertTrue(card.waitForExistence(timeout: 5))
+            app.terminate()
+        }
+    }
     @MainActor func makeNote(_ app: XCUIApplication, infinite: Bool = false, finger: Bool = true, appearance: String = "light") -> String {
         app.launchArguments = ["-fingerDrawing", finger ? "YES" : "NO", "--pencil-test-touch", "--shape-diagnostics", "-app.appearance", appearance]
         app.launch()

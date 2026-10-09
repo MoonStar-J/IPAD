@@ -155,6 +155,7 @@ struct ChatGPTMarginView: View {
 }
 
 struct ChatGPTPlanSettings: View {
+    var onDone: (() -> Void)? = nil
     @ObservedObject private var connection = ChatGPTPlanConnection.shared
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var phase
@@ -186,7 +187,7 @@ struct ChatGPTPlanSettings: View {
                 Section { Text("기존 ChatGPT 대화 기록은 가져오지 않습니다. 영역 대화와 부분 답변은 이 앱에 저장됩니다. store:false는 외부 전송이나 모든 서버 보관이 없다는 뜻이 아닙니다.").font(.caption) }
             }
             .navigationTitle("ChatGPT 연결").navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("완료") { connection.cancelSignIn(); dismiss() } } }
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("완료") { connection.cancelSignIn(); if let onDone { onDone() } else { dismiss() } } } }
             .alert("ChatGPT 구독을 사용합니다", isPresented: $connection.welcome) {
                 Button("확인") { connection.acknowledgeWelcome() }
             } message: { Text("질문은 플랜 사용량과 허용된 크레딧을 사용합니다. 사용량 관리에서 이 앱의 한도와 권한을 확인할 수 있습니다.") }

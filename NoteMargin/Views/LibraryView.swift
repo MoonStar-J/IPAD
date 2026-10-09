@@ -135,7 +135,7 @@ struct LibraryView: View {
                                                     NoteCover(note: note)
                                                     Text(note.title).font(.subheadline.weight(.semibold)).foregroundStyle(.primary).lineLimit(1)
                                                     HStack(spacing: 4) {
-                                                        Text("\(note.pages.count)페이지")
+                                                        Text(note.summary == nil ? "\(note.pages.count)페이지" : "요약 · " + note.summary!.state.title)
                                                         Text("·")
                                                         Text(note.updatedAt, style: .date)
                                                     }.font(.caption).foregroundStyle(.secondary).lineLimit(1)
@@ -143,7 +143,7 @@ struct LibraryView: View {
                                                 }
                                                 .buttonStyle(.plain)
                                                 .disabled(filter == .trash)
-                                                .accessibilityLabel("\(note.title), \(note.pages.count)페이지")
+                                                .accessibilityLabel(note.title + (note.summary == nil ? ", \(note.pages.count)페이지" : ", 요약"))
                                                 if filter == .trash {
                                                     HStack {
                                                         Button("복원", systemImage: "arrow.uturn.backward") { store.restore(note.id) }

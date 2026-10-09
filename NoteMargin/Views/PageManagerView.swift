@@ -70,6 +70,7 @@ struct PageManagerView: View {
 struct PageThumbnail: View {
     let note: Notebook
     let page: NotePage
+    var region: CGRect? = nil
     @EnvironmentObject private var store: NoteStore
     @State private var image: UIImage?
     @State private var failed = false
@@ -88,7 +89,9 @@ struct PageThumbnail: View {
         .task(id: note.updatedAt) {
             do {
                 let drawing = try store.drawing(noteID: note.id, pageID: page.id)
-                image = PageRenderer.snapshot(page: page, note: note, drawing: drawing, store: store, width: min(160, 2048 * page.width / max(page.width, page.height)))
+                let width = region?.width ?? CGFloat(page.width)
+                let height = region?.height ?? CGFloat(page.height)
+                image = PageRenderer.snapshot(page: page, note: note, drawing: drawing, store: store, width: min(160, 2048 * width / max(width, height)), rect: region)
             } catch { failed = true }
         }
     }
