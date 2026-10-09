@@ -158,9 +158,9 @@ extension MarginMessage {
     var coverage: MemoryCoverage {
         struct Source: Encodable {
             let role: Role; let text: String; let status: AnswerStatus?
-            let mode: TutorMode?; let model: String?; let attachments: [UUID]; let reply: MessageReference?
+            let mode: TutorMode?; let preset: AIQuestionPreset?; let model: String?; let attachments: [UUID]; let reply: MessageReference?
         }
-        let source = Source(role: role, text: text, status: status, mode: mode, model: model, attachments: attachmentIDs ?? [], reply: replyTo)
+        let source = Source(role: role, text: text, status: status, mode: mode, preset: preset, model: model, attachments: attachmentIDs ?? [], reply: replyTo)
         return .init(id: id, revision: sourceRevision, hash: MemoryHash.value(source))
     }
 }
@@ -246,7 +246,7 @@ enum ContextBuilder {
         throw ContextAction.overflow
     }
     static func assemble(chat: MarginConversation, projectInstructions: String, snapshot: MemorySnapshot?) throws -> ContextPlan {
-        let instructions = TutorMode.tutor + "\n현재 모드: " + (chat.mode ?? .free).instruction + "\n사용자가 고정한 조건:\n" + (chat.pinnedConditions ?? "") + "\n프로젝트 학습 범위:\n" + projectInstructions
+        let instructions = chat.draftInstructions ?? (TutorMode.tutor + "\n응답 지침: " + (chat.draftPreset ?? chat.preset ?? .legacy(chat.mode ?? .free)).instructions + "\n사용자가 고정한 조건:\n" + (chat.pinnedConditions ?? "") + "\n프로젝트 학습 범위:\n" + projectInstructions)
         let messages = chat.messages.filter { $0.status != .streaming && (!$0.text.isEmpty || !($0.attachmentIDs ?? []).isEmpty) }
         guard Set(messages.map(\.id)).count == messages.count else { throw ContextAction.invalidScope }
         let attachments = chat.sourceAttachments

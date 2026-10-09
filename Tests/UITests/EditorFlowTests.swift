@@ -102,6 +102,77 @@ final class EditorFlowTests: XCTestCase {
         app.buttons["완료"].tap()
         XCTAssertTrue(app.buttons["pdf-import-files"].isHittable)
     }
+    @MainActor func testSelectedPDFAndSummaryPromptControls() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchEnvironment["NOTEMARGIN_UI_FIXTURE"] = UUID().uuidString
+        app.launch()
+        app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Editing fixture,'")).firstMatch.tap()
+        app.buttons["editor-summary"].tap(); app.buttons["summary-next"].tap()
+        let prompt = app.textFields["summary-prompt"]
+        XCTAssertTrue(prompt.waitForExistence(timeout: 5), app.debugDescription)
+        prompt.tap(); prompt.typeText("이번 요청 지침")
+        if app.buttons["키보드 가리기"].exists { app.buttons["키보드 가리기"].tap() }
+        app.buttons["닫기"].tap(); app.buttons["editor-summary"].tap()
+        XCTAssertEqual(app.textFields["summary-prompt"].value as? String, "이번 요청 지침")
+        app.buttons["기본 요약 프롬프트 설정"].tap()
+        XCTAssertTrue(app.textViews["default-summary-prompt"].waitForExistence(timeout: 5))
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        app.buttons["닫기"].tap()
+        app.buttons["공유"].tap(); app.buttons["선택한 페이지를 PDF로 내보내기"].tap()
+        let export = app.buttons["내보내기"]
+        XCTAssertTrue(export.waitForExistence(timeout: 5)); XCTAssertFalse(export.isEnabled)
+        app.buttons["전체 선택"].tap(); XCTAssertTrue(export.isEnabled)
+        app.buttons["선택 해제"].tap(); XCTAssertFalse(export.isEnabled)
+        app.buttons["1페이지, 선택 안 됨"].tap(); export.tap()
+        XCTAssertTrue(app.cells["파일에 저장"].waitForExistence(timeout: 10), app.debugDescription)
+        let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot()); attachment.name = "Selected-PDF-share"; attachment.lifetime = .keepAlways; add(attachment)
+    }
+
+    @MainActor func testQuestionPresetSelectionPreservesDraft() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchEnvironment["NOTEMARGIN_UI_FIXTURE"] = UUID().uuidString
+        app.launch()
+        app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Editing fixture,'")).firstMatch.tap()
+        app.buttons["ai-question-start"].tap(); app.buttons["ai-region-confirm"].tap()
+        let question = app.textFields["ai-question-input"]
+        XCTAssertTrue(question.waitForExistence(timeout: 5), app.debugDescription)
+        question.tap(); question.typeText("보존할 직접 질문")
+        app.buttons["ai-preset-picker"].tap(); app.buttons["힌트만"].tap()
+        XCTAssertEqual(question.value as? String, "보존할 직접 질문")
+        // Management opens from this panel without a new account request.
+        app.buttons["더 보기"].tap(); app.buttons["AI 질문 프리셋"].tap()
+        XCTAssertTrue(app.navigationBars["AI 질문 프리셋"].waitForExistence(timeout: 5))
+        app.buttons["프리셋 추가"].tap()
+        app.buttons.matching(identifier: "새 프리셋").allElementsBoundByIndex.last!.tap()
+        let presetName = "UI preset " + UUID().uuidString.prefix(8)
+        let name = app.textFields["preset-name"]
+        name.tap(); name.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 10) + presetName)
+        let defaultQuestion = app.textViews["preset-question"]
+        defaultQuestion.tap(); defaultQuestion.typeText("UI default question")
+        let instructions = app.textViews["preset-instructions"]
+        instructions.tap(); instructions.typeText("UI answer style")
+        if app.buttons["키보드 가리기"].exists { app.buttons["키보드 가리기"].tap() }
+        app.navigationBars["프리셋 편집"].buttons["AI 질문 프리셋"].tap()
+        XCTAssertTrue(app.buttons[presetName].exists)
+        app.buttons["완료"].tap()
+        app.buttons["ai-preset-picker"].tap(); app.buttons[presetName].tap()
+        XCTAssertEqual(question.value as? String, "보존할 직접 질문")
+        app.buttons["ai-chat-close"].tap(); app.buttons["editor-library-back"].tap()
+        app.terminate(); app.launch()
+        app.buttons["설정"].tap(); app.buttons["AI 질문 프리셋"].tap()
+        XCTAssertTrue(app.buttons[presetName].waitForExistence(timeout: 5))
+        app.buttons[presetName].tap()
+        XCTAssertEqual(app.textViews["preset-question"].value as? String, "UI default question")
+        XCTAssertEqual(app.textViews["preset-instructions"].value as? String, "UI answer style")
+        app.navigationBars["프리셋 편집"].buttons["AI 질문 프리셋"].tap()
+        app.buttons[presetName].swipeLeft(); app.buttons["삭제"].tap()
+        XCTAssertFalse(app.buttons[presetName].exists)
+        let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot()); attachment.name = "Question-preset-settings"; attachment.lifetime = .keepAlways; add(attachment)
+
+    }
+
     @MainActor func testSummaryDraftSurvivesConnectionAndRegionSelection() {
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -114,6 +185,11 @@ final class EditorFlowTests: XCTestCase {
         let name = app.textFields["summary-title"]
         XCTAssertTrue(name.waitForExistence(timeout: 5))
         name.tap(); name.typeText(" 요약 초안")
+        if app.buttons["키보드 가리기"].exists { app.buttons["키보드 가리기"].tap() }
+        for _ in 0..<3 {
+            if app.buttons["연결·계정 설정"].isHittable { break }
+            app.descendants(matching: .any)["summary-form"].swipeUp()
+        }
         app.buttons["연결·계정 설정"].tap()
         XCTAssertTrue(app.buttons["Continue with ChatGPT"].waitForExistence(timeout: 5))
         app.buttons["완료"].tap()

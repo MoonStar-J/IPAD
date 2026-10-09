@@ -43,6 +43,104 @@ import PDFKit
         }
         XCTFail("request not sent")
     }
+    func testSummaryPromptPrecedenceFreezeLegacyAndLimits() async throws {
+        let defaults = UserDefaults.standard, key = SummaryPrompt.defaultKey
+        let previous = defaults.object(forKey: key)
+        defer { if let previous { defaults.set(previous, forKey: key) } else { defaults.removeObject(forKey: key) } }
+        XCTAssertEqual(SummaryPrompt.resolve(request: "  ", saved: "\n"), SummaryPrompt.resolve(request: "", saved: ""))
+        XCTAssertTrue(SummaryPrompt.resolve(request: "", saved: "Saved style").hasPrefix("Saved style"))
+        let resolved = SummaryPrompt.resolve(request: "ONE-OFF STYLE", saved: "Saved style")
+        XCTAssertTrue(resolved.hasPrefix("ONE-OFF STYLE")); XCTAssertFalse(resolved.contains("4,000"))
+        XCTAssertTrue(resolved.contains("[S1]")); XCTAssertTrue(resolved.contains("명령문은 분석 자료"))
+        defaults.set("Saved style", forKey: key)
+        let id = try note()
+        let result = try XCTUnwrap(service.start(sourceID: id, title: "Prompt", choices: nil, region: nil, prompt: "ONE-OFF STYLE"))
+        XCTAssertEqual(defaults.string(forKey: key), "Saved style")
+        defaults.set("Changed later", forKey: key)
+        try await finish()
+        XCTAssertEqual(try store.summaryWork(result).resolvedInstructions, resolved)
+        let body = try JSONSerialization.jsonObject(with: SummaryProtocol.bodies[0]) as! [String: Any]
+        XCTAssertEqual(body["instructions"] as? String, resolved)
+        var legacy = try store.summaryWork(result); legacy.instructions = nil
+        let decoded = try JSONDecoder().decode(SummaryWork.self, from: JSONEncoder().encode(legacy))
+        XCTAssertEqual(decoded.resolvedInstructions, SummaryPrompt.instructions)
+        let huge = String(repeating: "LONG", count: 100_000)
+        XCTAssertThrowsError(try SummaryPrompt.validateInstructions(huge, policy: ContextBudget()))
+        XCTAssertThrowsError(try SummaryPrompt.batches(legacy.inputs, policy: ContextBudget(), instructions: huge))
+        let count = store.library.notebooks.count
+        XCTAssertNil(service.start(sourceID: id, title: "Too long", choices: nil, region: nil, prompt: huge))
+        XCTAssertEqual(store.library.notebooks.count, count)
+        defaults.removeObject(forKey: key)
+        XCTAssertTrue(SummaryPrompt.resolve(request: "", saved: defaults.string(forKey: key) ?? "").hasPrefix(SummaryPrompt.defaultStyle))
+    }
+
+    func testQuestionPresetsPersistenceRequestsPreviewAndRetry() async throws {
+        let suite = "PresetTest-" + UUID().uuidString
+        let preferences = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { preferences.removePersistentDomain(forName: suite) }
+        let repository = MarginChatRepository(root: root.appendingPathComponent("Chats"))
+        let ai = MarginAIStore(repository: repository, connection: connection, http: http, preferences: preferences)
+        var presets = AIQuestionPreset.builtins
+        let custom = AIQuestionPreset(id: UUID().uuidString, name: "Custom", question: "DEFAULT QUESTION", instructions: "CUSTOM RESPONSE STYLE")
+        presets.append(custom)
+        preferences.set(try JSONEncoder().encode(presets), forKey: AIQuestionPreferences.key)
+        let id = try note(), source = store.note(id)!, page = source.pages[0]
+        let region = try RegionContextService.capture(note: source, page: page, drawing: PKDrawing(), store: store, rect: CGRect(x: 0, y: 0, width: 300, height: 300))
+        let chatID = try XCTUnwrap(ai.create(note: source, project: nil, region: region))
+        ai.setDraft("  typed question\n", for: chatID)
+        ai.selectPreset(chatID, presetID: custom.id)
+        XCTAssertEqual(ai.conversation(chatID)?.draft, "  typed question\n")
+        let preview = try ai.previewContext(chatID, project: nil, model: connection.model).0
+        XCTAssertTrue(preview.instructions.contains(custom.instructions)); XCTAssertFalse(preview.instructions.contains(TutorMode.free.instruction))
+        XCTAssertTrue(preview.items.contains { $0.text.contains("  typed question\n") })
+        SummaryProtocol.hold = true
+        XCTAssertTrue(ai.sendPlan("  typed question\n", conversationID: chatID, project: nil))
+        try await awaitRequest(1)
+        let frozen = ai.conversation(chatID)!.runs!.last!.frozenInstructions
+        presets[presets.count - 1].instructions = "UPDATED STYLE"
+        preferences.set(try JSONEncoder().encode(presets), forKey: AIQuestionPreferences.key)
+        ai.refreshPreset(chatID)
+        XCTAssertEqual(ai.conversation(chatID)!.messages.first!.text, "  typed question\n")
+        XCTAssertEqual(ai.conversation(chatID)!.messages.first!.preset, custom)
+        XCTAssertEqual(ai.conversation(chatID)!.runs!.last!.frozenInstructions, frozen)
+        ai.cancel(chatID)
+        for _ in 0..<200 where ai.sending.contains(chatID) { try await Task.sleep(for: .milliseconds(10)) }
+        ai.retryQuestion(chatID)
+        let retry = try ai.previewContext(chatID, project: nil, model: connection.model).0
+        XCTAssertEqual(retry.instructions, frozen)
+        ai.selectPreset(chatID, presetID: custom.id)
+        ai.setDraft("", for: chatID)
+        let updated = try ai.previewContext(chatID, project: nil, model: connection.model).0
+        XCTAssertTrue(updated.instructions.contains("UPDATED STYLE"))
+        XCTAssertTrue(updated.items.last!.text.contains(custom.question))
+        SummaryProtocol.hold = false
+        XCTAssertTrue(ai.sendPlan("", conversationID: chatID, project: nil))
+        for _ in 0..<500 where ai.sending.contains(chatID) { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertFalse(ai.sending.contains(chatID))
+        let request = try JSONSerialization.jsonObject(with: SummaryProtocol.bodies.last!) as! [String: Any]
+        XCTAssertEqual(request["instructions"] as? String, updated.instructions)
+        presets.removeAll { $0.id == custom.id }
+        preferences.set(try JSONEncoder().encode(presets), forKey: AIQuestionPreferences.key)
+        ai.refreshPreset(chatID)
+        XCTAssertEqual(ai.conversation(chatID)?.preset, .direct)
+        XCTAssertFalse(ai.sendPlan("", conversationID: chatID, project: nil))
+        XCTAssertNotNil(ai.failures[chatID])
+        let reopened = MarginAIStore(repository: repository, connection: connection, http: http, preferences: preferences)
+        reopened.load(noteID: id)
+        XCTAssertEqual(reopened.conversation(chatID)?.messages.first?.preset, custom)
+        XCTAssertEqual(reopened.conversation(chatID)?.messages.filter { $0.role == .user }.last?.text, custom.question)
+        XCTAssertEqual(try AIQuestionPreferences.decode(UserDefaults(suiteName: suite)!.data(forKey: AIQuestionPreferences.key)!), presets)
+        var edited = AIQuestionPreset.builtins; edited[0].name = "Renamed"; edited.append(custom)
+        let restored = AIQuestionPreferences.restore(edited)
+        XCTAssertEqual(restored.first, .legacy(.free)); XCTAssertEqual(restored.last, custom)
+        XCTAssertEqual(AIQuestionPreset.selected(id: nil, mode: .proof, from: restored), .legacy(.proof))
+        var tooLong = custom; tooLong.instructions = String(repeating: "large", count: 100_000)
+        preferences.set(try JSONEncoder().encode([tooLong]), forKey: AIQuestionPreferences.key)
+        ai.selectPreset(chatID, presetID: custom.id)
+        XCTAssertGreaterThan(try ai.previewContext(chatID, project: nil, model: connection.model).1.estimatedTokens, ai.conversation(chatID)!.policy.usable)
+        XCTAssertFalse(ai.sendPlan("Question", conversationID: chatID, project: nil))
+    }
+
     func testSmallSelectionUsesOneRequestAndFrozenSources() async throws {
         let id = try note(["SELECTED-A", "NOT-SELECTED", "SELECTED-C"])
         let source = store.note(id)!, choices = NoteSummaryService.pageChoices(source)
@@ -61,7 +159,7 @@ import PDFKit
         XCTAssertTrue(work.inputs.allSatisfy { $0.imageBytes > 0 })
         XCTAssertEqual(store.library.notebooks.count, 2)
     }
-    func testProjectReuseHomeAndLifecyclePreserveMarkdown() throws {
+    func testProjectReuseHomeAndLifecyclePreserveMarkdown() async throws {
         let parent = try XCTUnwrap(store.createProject(title: "미적분학"))
         let userProject = try XCTUnwrap(store.createProject(title: "요약", parentID: parent))
         let sourceID = try note()
@@ -80,7 +178,7 @@ import PDFKit
         store.trash(sourceID); XCTAssertTrue(store.permanentlyDelete(sourceID))
         let reopened = try NoteStore(repository: LibraryRepository(root: root))
         XCTAssertEqual(String(data: try reopened.summaryAsset(copy, name: "summary.md"), encoding: .utf8), work.final)
-        let url = try ExportService.exportPDF(note: reopened.note(copy)!, store: reopened)
+        let url = try await ExportService.exportPDF(note: reopened.note(copy)!, store: reopened)
         XCTAssertEqual(url.pathExtension, "md")
         XCTAssertEqual(try String(contentsOf: url, encoding: .utf8), work.final)
         let loose = try note()
@@ -119,7 +217,12 @@ import PDFKit
         XCTAssertEqual(store.note(result)?.summary?.state, .completed, service.failure ?? "")
         let work = try store.summaryWork(result), input = try XCTUnwrap(work.inputs.first)
         XCTAssertTrue(input.text.contains("PDF definition")); XCTAssertTrue(input.text.contains("Inserted definition"))
-        let captured = try XCTUnwrap(UIImage(data: store.summaryAsset(result, name: input.imageAsset))?.cgImage)
+        let exportURL = try await ExportService.exportPDF(note: store.note(id)!, store: store)
+        let exported = try XCTUnwrap(PDFDocument(url: exportURL)?.page(at: 0))
+        XCTAssertTrue(exported.string?.contains("Inserted definition") == true)
+        let images = [try XCTUnwrap(UIImage(data: store.summaryAsset(result, name: input.imageAsset))?.cgImage),
+                      try XCTUnwrap(exported.thumbnail(of: CGSize(width: 768, height: 768), for: .mediaBox).cgImage)]
+        for captured in images {
         var pixels = [UInt8](repeating: 0, count: 256*256*4)
         let context = try XCTUnwrap(CGContext(data: &pixels, width: 256, height: 256, bitsPerComponent: 8, bytesPerRow: 256*4, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
         context.draw(captured, in: CGRect(x: 0, y: 0, width: 256, height: 256))
@@ -132,6 +235,7 @@ import PDFKit
         }
         XCTAssertGreaterThan(red, 100); XCTAssertGreaterThan(blue, 100)
         XCTAssertGreaterThan(green, 50); XCTAssertGreaterThan(dark, 30)
+        }
     }
     func testContinuousPDFAndSparseInfiniteRanges() throws {
         let renderer = UIGraphicsPDFRenderer(bounds: CGRect(x: 0, y: 0, width: 300, height: 400))
@@ -154,9 +258,9 @@ import PDFKit
     func testLongNoteBatchesAndRetryReuseCompletedWork() async throws {
         let id = try note((1...5).map { "definition-\($0)" })
         let source = store.note(id)!, sources = try NoteSummaryService.sources(note: source, choices: nil, region: nil, store: store)
-        let result = try store.createSummary(source: source, sources: sources, title: "긴 요약", model: connection.model, account: connection.selected!)
+        let result = try store.createSummary(source: source, sources: sources, title: "긴 요약", model: connection.model, account: connection.selected!, instructions: SummaryPrompt.resolve(request: "CUSTOM CHUNK STYLE", saved: ""))
         var work = try store.summaryWork(result)
-        work.policy.inputTokens = SummaryPrompt.instructions.utf8.count + 3000 + work.policy.reserveTokens
+        work.policy.inputTokens = work.resolvedInstructions.utf8.count + 3000 + work.policy.reserveTokens
         try store.saveSummary(result, work: work, state: .preparing)
         SummaryProtocol.failAt = 1
         service.resume(result); try await finish()
@@ -174,14 +278,18 @@ import PDFKit
         XCTAssertEqual(work.batches.flatMap { $0 }, Array(work.inputs.indices))
         XCTAssertEqual(work.fragments.flatMap(\.sources), sources.map(\.id))
         XCTAssertEqual(SummaryProtocol.bodies.count, 7, "five successful image requests, one failed request and one merge")
-        for data in SummaryProtocol.bodies { XCTAssertLessThanOrEqual(data.count, work.policy.maxHTTPBytes) }
+        for data in SummaryProtocol.bodies {
+            XCTAssertLessThanOrEqual(data.count, work.policy.maxHTTPBytes)
+            let body = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+            XCTAssertEqual(body["instructions"] as? String, work.resolvedInstructions)
+        }
     }
     func testOversizedMergeUsesStagesWithoutLosingSources() async throws {
         let id = try note((1...5).map { "definition-\($0)" })
         let source = store.note(id)!, sources = try NoteSummaryService.sources(note: source, choices: nil, region: nil, store: store)
         let result = try store.createSummary(source: source, sources: sources, title: "단계 통합", model: connection.model, account: connection.selected!)
         var work = try store.summaryWork(result)
-        work.policy.inputTokens = SummaryPrompt.instructions.utf8.count + 3000 + work.policy.reserveTokens
+        work.policy.inputTokens = work.resolvedInstructions.utf8.count + 3000 + work.policy.reserveTokens
         try store.saveSummary(result, work: work, state: .preparing)
         SummaryProtocol.verboseImages = true
         service.resume(result); try await finish()

@@ -14,6 +14,105 @@ import Security
             PKStrokePoint(location: p, timeOffset: Double(i)*0.01, size: CGSize(width: 2,height: 2), opacity: 1, force: 1, azimuth: 0, altitude: .pi/2)
         }, creationDate: date))
     }
+    func testSelectedPDFOrderFrozenInputsAndFailureCleanup() async throws {
+        let store = try store()
+        let id = try XCTUnwrap(store.createNote(title: "Selected", paper: .plain, cover: .blue, folderID: nil))
+        store.updateNote(id) { $0.pages = (1...3).map { number in
+            NotePage(width: 300 + Double(number), height: 400, elements: [PageElement(kind: .text, text: "Page \(number)", x: 20, y: 20, width: 200, height: 60)])
+        } }
+        let note = store.note(id)!, choices = try ExportService.pageChoices(note: note, store: store)
+        let corrupt = try XCTUnwrap(store.assetURL(noteID: id, name: "\(note.pages[1].id).drawing"))
+        try FileManager.default.createDirectory(at: corrupt.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data([0, 1, 2]).write(to: corrupt)
+        let url = try await ExportService.exportPDF(note: note, store: store, selection: Set([choices[2].id, choices[0].id, choices[2].id])) { done, _ in
+            if done == 0 { store.updateNote(id) { $0.pages[2].elements[0].text = "Changed" } }
+        }
+        let pdf = try XCTUnwrap(PDFDocument(url: url))
+        XCTAssertEqual(pdf.pageCount, 2)
+        XCTAssertTrue(pdf.page(at: 0)!.string!.contains("Page 1"))
+        XCTAssertTrue(pdf.page(at: 1)!.string!.contains("Page 3"))
+        XCTAssertEqual(pdf.page(at: 1)!.bounds(for: .mediaBox).width, 303)
+        do { _ = try await ExportService.exportPDF(note: note, store: store); XCTFail("corrupt selected input must fail") } catch { }
+        do { _ = try await ExportService.exportPDF(note: note, store: store, selection: []); XCTFail("empty selection") } catch { }
+        let directory = url.deletingLastPathComponent().deletingLastPathComponent()
+        let before = Set(try FileManager.default.contentsOfDirectory(atPath: directory.path))
+        let task = Task { @MainActor in try await ExportService.exportPDF(note: note, store: store, selection: [choices[0].id, choices[2].id]) { done, _ in
+            if done == 1 { withUnsafeCurrentTask { $0?.cancel() } }
+        } }
+        do { _ = try await task.value; XCTFail("cancelled result must not be shared") } catch is CancellationError { }
+        XCTAssertEqual(Set(try FileManager.default.contentsOfDirectory(atPath: directory.path)), before)
+    }
+
+    func testContinuousPDFExportUsesOriginalSegmentsAndCompositeRenderer() async throws {
+        let renderer = UIGraphicsPDFRenderer(bounds: CGRect(x: 0, y: 0, width: 240, height: 320))
+        let data = renderer.pdfData { output in
+            for index in 1...3 {
+                output.beginPage()
+                UIColor.blue.setFill(); output.cgContext.fill(CGRect(x: 10, y: 10, width: 40, height: 50))
+                ("Original \(index)" as NSString).draw(at: CGPoint(x: 70, y: 20), withAttributes: [.font: UIFont.systemFont(ofSize: 14)])
+            }
+        }
+        let original = try XCTUnwrap(PDFDocument(data: data)); original.page(at: 2)?.rotation = 90
+        let store = try store()
+        let prepared = try XCTUnwrap(store.preparePDF(data: original.dataRepresentation()!, title: "Continuous", folderID: nil))
+        let id = try XCTUnwrap(store.importPDF(prepared, layout: .continuous))
+        let page = store.note(id)!.pages[0]
+        let choices = try ExportService.pageChoices(note: store.note(id)!, store: store)
+        let rect = choices[2].rect
+        store.queueDrawing(PKDrawing(strokes: [stroke([CGPoint(x: 50, y: rect.minY + 100), CGPoint(x: 300, y: rect.minY + 100)], color: .red)]), noteID: id, pageID: page.id)
+        store.updatePage(noteID: id, pageID: page.id) { $0.elements.append(PageElement(kind: .text, text: "Inserted", x: 50, y: rect.minY + 180, width: 250, height: 80)) }
+        let note = store.note(id)!
+        let url = try await ExportService.exportPDF(note: note, store: store, selection: [choices[2].id, choices[0].id])
+        let exported = try XCTUnwrap(PDFDocument(url: url))
+        XCTAssertEqual(exported.pageCount, 2)
+        XCTAssertEqual(exported.page(at: 1)!.bounds(for: .mediaBox).size, rect.size)
+        XCTAssertTrue(exported.page(at: 0)!.string!.contains("Original 1"))
+        XCTAssertTrue(exported.page(at: 1)!.string!.contains("Original 3"))
+        XCTAssertTrue(exported.page(at: 1)!.string!.contains("Inserted"))
+        let expected = PageRenderer.snapshot(page: note.pages[0], note: note, drawing: try store.drawing(noteID: id, pageID: page.id), store: store, width: rect.width, rect: rect)
+        let actual = exported.page(at: 1)!.thumbnail(of: rect.size, for: .mediaBox)
+        func pixels(_ image: UIImage) -> [UInt8] {
+            var bytes = [UInt8](repeating: 255, count: 192 * 192 * 4)
+            bytes.withUnsafeMutableBytes { buffer in
+                let context = CGContext(data: buffer.baseAddress, width: 192, height: 192, bitsPerComponent: 8, bytesPerRow: 192 * 4, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+                context.draw(image.cgImage!, in: CGRect(x: 0, y: 0, width: 192, height: 192))
+            }
+            return bytes
+        }
+        let reference = pixels(expected), rendered = pixels(actual)
+        let difference = zip(reference, rendered).reduce(0) { $0 + abs(Int($1.0) - Int($1.1)) }
+        XCTAssertLessThan(Double(difference) / Double(reference.count), 3, "PDF rotation, clipping and ink coordinates must match the existing renderer")
+        add(XCTAttachment(image: expected)); add(XCTAttachment(image: actual))
+        let whole = try await ExportService.exportPDF(note: note, store: store)
+        XCTAssertEqual(PDFDocument(url: whole)?.pageCount, 3)
+    }
+
+    func testPDFExportPerformance() async throws {
+        let store = try store()
+        let id = try XCTUnwrap(store.createNote(title: "Export measurement", paper: .grid, cover: .blue, folderID: nil))
+        for _ in 1..<20 { _ = store.addPage(noteID: id, after: store.note(id)!.pages.last!.id, paper: .grid) }
+        let ink = PKDrawing(strokes: (0..<300).map { row in
+            stroke((0..<40).map { CGPoint(x: 40 + $0 * 16, y: 50 + row % 100 * 8) })
+        })
+        for page in store.note(id)!.pages { store.queueDrawing(ink, noteID: id, pageID: page.id) }
+        XCTAssertTrue(store.flushDrawings())
+        var last = Date(), maxGap = 0.0, ticks = 0
+        let heartbeat = Task { @MainActor in
+            while !Task.isCancelled {
+                let now = Date(); maxGap = max(maxGap, now.timeIntervalSince(last)); last = now; ticks += 1
+                try? await Task.sleep(for: .milliseconds(10))
+            }
+        }
+        await Task.yield()
+        let start = Date()
+        let url = try await ExportService.exportPDF(note: store.note(id)!, store: store)
+        let elapsed = Date().timeIntervalSince(start)
+        maxGap = max(maxGap, Date().timeIntervalSince(last)); heartbeat.cancel()
+        var usage = rusage(); getrusage(RUSAGE_SELF, &usage)
+        print("EXPORT_METRIC seconds=\(elapsed) peakMB=\(Double(usage.ru_maxrss)/1048576) maxMainGap=\(maxGap) ticks=\(ticks)")
+        XCTAssertEqual(PDFDocument(url: url)?.pageCount, 20)
+        try FileManager.default.removeItem(at: url.deletingLastPathComponent())
+    }
     func testTrashBatchValidationFailureAndRetry() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let files = CleanupFailureFileManager()
@@ -530,7 +629,7 @@ import Security
         paper.updateViewport(.identity,viewport:viewport,interacting:false)
         XCTAssertEqual(paper.rasterizationCount,after,"unchanged tiles must remain cached")
     }
-    func testInfiniteCoordinatesCaptureExportAndPersistence() throws {
+    func testInfiniteCoordinatesCaptureExportAndPersistence() async throws {
         let store=try store()
         let id=try XCTUnwrap(store.createNote(title:"infinite",paper:.grid,cover:.blue,folderID:nil,infinite:true))
         let page=store.note(id)!.pages[0]
@@ -585,7 +684,7 @@ import Security
         XCTAssertGreaterThan(stride(from:0,to:pixels.count,by:4).filter{pixels[$0]<170 && pixels[$0+1]<170 && pixels[$0+2]<170}.count,40)
         let image=PageRenderer.snapshot(page:page,note:store.note(id)!,drawing:drawing,store:store,width:1000)
         XCTAssertLessThanOrEqual(max(image.size.width,image.size.height),4096)
-        let pdf=try ExportService.exportPDF(note:store.note(id)!,store:store)
+        let pdf=try await ExportService.exportPDF(note:store.note(id)!,store:store)
         XCTAssertGreaterThan(PDFDocument(url:pdf)!.pageCount,1)
         let encoded=try JSONEncoder().encode(store.note(id)!)
         let reopened=try JSONDecoder().decode(Notebook.self,from:encoded)

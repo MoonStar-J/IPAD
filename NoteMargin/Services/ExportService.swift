@@ -12,40 +12,99 @@ enum ExportService {
         try data.write(to: url, options: .atomic)
         return url
     }
-    static func exportPDF(note: Notebook, store: NoteStore) throws -> URL {
+    static func pageChoices(note: Notebook, store: NoteStore) throws -> [SummarySource] {
+        try NoteSummaryService.pageChoices(note).flatMap { choice in
+            guard let page = note.pages.first(where: { $0.id == choice.pageID }), page.isInfinite else { return [choice] }
+            let drawing = try store.drawing(noteID: note.id, pageID: page.id)
+            return try CanvasExtent.exportPages(CanvasExtent.usedBounds(ink: drawing.bounds, elements: page.elements)).enumerated().map { index, rect in
+                SummarySource(id: "\(page.id)-\(index)", pageID: page.id, label: "영역 \(index + 1)", rect: rect)
+            }
+        }
+    }
+
+    static func exportPDF(note: Notebook, store: NoteStore, selection: Set<String>? = nil,
+                          progress: (Int, Int) -> Void = { _, _ in }) async throws -> URL {
         if note.summary != nil { return try exportMarkdown(note: note, store: store) }
+        guard store.flushDrawings() else { throw CocoaError(.fileWriteUnknown) }
+        try Task.checkCancellation()
+        let choices = try pageChoices(note: note, store: store).filter { selection == nil || selection!.contains($0.id) }
+        guard !choices.isEmpty else { throw SummaryError.message("내보낼 페이지를 선택해 주세요.") }
         let url = try exportURL(title: note.title, extension: "pdf")
-        let defaultBounds = CGRect(x: 0, y: 0, width: 768, height: 1024)
-        let format = UIGraphicsPDFRendererFormat()
-        format.documentInfo = [kCGPDFContextTitle as String: note.title, kCGPDFContextCreator as String: AppIdentity.displayName]
-        // Read every drawing before starting the export so a corrupt page cannot
-        // silently disappear from the shared document.
-        let drawings = try note.pages.map { try store.drawing(noteID: note.id, pageID: $0.id) }
+        let directory = url.deletingLastPathComponent()
+        var completed = false
+        defer { if !completed { try? FileManager.default.removeItem(at: directory) } }
+        let assets = directory.appendingPathComponent("Inputs", isDirectory: true)
+        try FileManager.default.createDirectory(at: assets, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: assets) }
+        // Freeze only selected inputs before the first suspension. Copies remain
+        // valid if another editor saves, removes a page, or deletes the source.
+        var names = Set<String>()
+        for page in note.pages where choices.contains(where: { $0.pageID == page.id }) {
+            let drawingName = "\(page.id).drawing"
+            if let source = store.assetURL(noteID: note.id, name: drawingName), FileManager.default.fileExists(atPath: source.path) { names.insert(drawingName) }
+            if !page.pdfRegions.isEmpty, let name = note.pdfAssetName { names.insert(name) }
+            for element in page.elements where element.kind == .image && choices.contains(where: { $0.pageID == page.id && $0.rect.intersects(CGRect(x: element.x, y: element.y, width: element.width, height: element.height)) }) {
+                guard let name = element.assetName else { throw CocoaError(.fileReadCorruptFile) }
+                names.insert(name)
+            }
+        }
+        for name in names {
+            guard let source = store.assetURL(noteID: note.id, name: name) else { throw CocoaError(.fileReadCorruptFile) }
+            try FileManager.default.copyItem(at: source, to: assets.appendingPathComponent(name))
+        }
+        guard let output = CGContext(url as CFURL, mediaBox: nil, [kCGPDFContextTitle: note.title, kCGPDFContextCreator: AppIdentity.displayName] as CFDictionary) else { throw CocoaError(.fileWriteUnknown) }
+        var closed = false
+        defer { if !closed { output.closePDF() } }
+        var count = 0
+        progress(0, choices.count)
+        await Task.yield()
         for page in note.pages {
-            guard PageRenderer.hasValidPDFBackground(page: page, note: note, store: store) else {
-                throw CocoaError(.fileReadCorruptFile)
+            let regions = choices.filter { $0.pageID == page.id }
+            guard !regions.isEmpty else { continue }
+            try Task.checkCancellation()
+            // One drawing is retained per canvas, including all continuous PDF segments.
+            let drawingURL = assets.appendingPathComponent("\(page.id).drawing")
+            let drawing = try autoreleasepool {
+                try FileManager.default.fileExists(atPath: drawingURL.path) ? PKDrawing(data: Data(contentsOf: drawingURL)) : PKDrawing()
             }
-        }
-        let regions = try zip(note.pages, drawings).map { page, drawing in
-            page.isInfinite ? try CanvasExtent.exportPages(CanvasExtent.usedBounds(ink: drawing.bounds, elements: page.elements)) : [CGRect(x: 0,y: 0,width: page.width,height: page.height)]
-        }
-        try UIGraphicsPDFRenderer(bounds: defaultBounds, format: format).writePDF(to: url) { output in
-            for (index, page) in note.pages.enumerated() {
-                let drawing = drawings[index]
-                for region in regions[index] {
-                    let outputBounds = CGRect(origin: .zero, size: region.size)
-                    output.beginPage(withBounds: outputBounds, pageInfo: [:])
-                    output.cgContext.saveGState()
-                    output.cgContext.translateBy(x: -region.minX, y: -region.minY)
-                    PageRenderer.drawBackground(page: page, note: note, store: store, context: output.cgContext)
-                    let scale = min(2, 4096 / max(region.width, region.height))
-                    UITraitCollection(userInterfaceStyle: .light).performAsCurrent {
-                        drawing.image(from: region, scale: scale).draw(in: region)
+            for choice in regions {
+                try Task.checkCancellation()
+                try autoreleasepool {
+                    let region = choice.rect
+                    for segment in page.pdfRegions where region.intersects(CGRect(x: 0, y: segment.y, width: page.width, height: segment.height)) {
+                        var source = page; source.pdfPageIndex = segment.pageIndex
+                        guard PageRenderer.pdfPage(note: note, page: source, store: store, assetDirectory: assets) != nil else { throw CocoaError(.fileReadCorruptFile) }
                     }
-                    output.cgContext.restoreGState()
+                    for element in page.elements where element.kind == .image && region.intersects(CGRect(x: element.x, y: element.y, width: element.width, height: element.height)) {
+                        guard let name = element.assetName, PageRenderer.image(noteID: note.id, name: name, store: store, assetDirectory: assets) != nil else { throw CocoaError(.fileReadCorruptFile) }
+                    }
+                    var bounds = CGRect(origin: .zero, size: region.size)
+                    output.beginPDFPage([kCGPDFContextMediaBox: NSData(bytes: &bounds, length: MemoryLayout<CGRect>.size)] as CFDictionary)
+                    output.saveGState()
+                    output.translateBy(x: 0, y: region.height)
+                    output.scaleBy(x: 1, y: -1)
+                    output.translateBy(x: -region.minX, y: -region.minY)
+                    output.clip(to: region)
+                    UIGraphicsPushContext(output)
+                    UITraitCollection(userInterfaceStyle: .light).performAsCurrent {
+                        PageRenderer.drawBackground(page: page, note: note, store: store, context: output, assetDirectory: assets)
+                        let scale = min(2, 4096 / max(region.width, region.height))
+                        if drawing.bounds.intersects(region) { drawing.image(from: region, scale: scale).draw(in: region) }
+                    }
+                    UIGraphicsPopContext()
+                    output.restoreGState()
+                    output.endPDFPage()
                 }
+                count += 1; progress(count, choices.count)
+                // UIKit/PencilKit rendering stays on the main actor; release each
+                // raster and return control between pages so UI/cancellation can run.
+                await Task.yield()
             }
         }
+        try Task.checkCancellation()
+        output.closePDF(); closed = true
+        guard let document = PDFDocument(url: url), document.pageCount == choices.count else { throw CocoaError(.fileWriteUnknown) }
+        completed = true
         return url
     }
 

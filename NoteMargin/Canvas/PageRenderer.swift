@@ -7,9 +7,9 @@ enum PageRenderer {
     private static let documents = NSCache<NSURL, PDFDocument>()
     private static let images = NSCache<NSURL, UIImage>()
 
-    static func pdfPage(note: Notebook, page: NotePage, store: NoteStore) -> PDFPage? {
+    static func pdfPage(note: Notebook, page: NotePage, store: NoteStore, assetDirectory: URL? = nil) -> PDFPage? {
         guard let name = note.pdfAssetName, let index = page.pdfPageIndex,
-              let url = store.assetURL(noteID: note.id, name: name) else { return nil }
+              let url = assetDirectory?.appendingPathComponent(name) ?? store.assetURL(noteID: note.id, name: name) else { return nil }
         let key = url as NSURL
         let document: PDFDocument?
         if let cached = documents.object(forKey: key) { document = cached }
@@ -28,8 +28,8 @@ enum PageRenderer {
         }
     }
 
-    static func image(noteID: UUID, name: String, store: NoteStore) -> UIImage? {
-        guard let url = store.assetURL(noteID: noteID, name: name) else { return nil }
+    static func image(noteID: UUID, name: String, store: NoteStore, assetDirectory: URL? = nil) -> UIImage? {
+        guard let url = assetDirectory?.appendingPathComponent(name) ?? store.assetURL(noteID: noteID, name: name) else { return nil }
         let key = url as NSURL
         if let cached = images.object(forKey: key) { return cached }
         guard let image = UIImage(contentsOfFile: url.path) else { return nil }
@@ -38,7 +38,7 @@ enum PageRenderer {
         return image
     }
 
-    static func drawBackground(page: NotePage, note: Notebook, store: NoteStore, context: CGContext) {
+    static func drawBackground(page: NotePage, note: Notebook, store: NoteStore, context: CGContext, assetDirectory: URL? = nil) {
         let bounds = page.isInfinite ? context.boundingBoxOfClipPath : CGRect(x: 0, y: 0, width: page.width, height: page.height)
         context.setFillColor(UIColor.white.cgColor)
         context.fill(bounds)
@@ -48,7 +48,7 @@ enum PageRenderer {
                 guard context.boundingBoxOfClipPath.intersects(rect) else { continue }
                 var source = page
                 source.pdfPageIndex = region.pageIndex
-                guard let pdf = pdfPage(note: note, page: source, store: store)?.pageRef else { continue }
+                guard let pdf = pdfPage(note: note, page: source, store: store, assetDirectory: assetDirectory)?.pageRef else { continue }
                 context.saveGState()
                 context.clip(to: rect)
                 context.translateBy(x: 0, y: rect.maxY)
@@ -125,7 +125,7 @@ enum PageRenderer {
                     .paragraphStyle: paragraph
                 ])
             case .image:
-                if let name = element.assetName, let image = image(noteID: note.id, name: name, store: store) {
+                if let name = element.assetName, let image = image(noteID: note.id, name: name, store: store, assetDirectory: assetDirectory) {
                     let ratio = min(rect.width / image.size.width, rect.height / image.size.height)
                     let size = CGSize(width: image.size.width * ratio, height: image.size.height * ratio)
                     image.draw(in: CGRect(x: rect.midX - size.width / 2, y: rect.midY - size.height / 2, width: size.width, height: size.height))

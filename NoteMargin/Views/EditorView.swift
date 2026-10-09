@@ -3,7 +3,7 @@ import PencilKit
 import PhotosUI
 
 private enum EditorSheet: String, Identifiable {
-    case pages, settings, text, objects, share, summary
+    case pages, settings, text, objects, share, summary, exportSelection
     var id: String { rawValue }
 }
 
@@ -23,6 +23,9 @@ struct EditorView: View {
     @State private var choosingPhoto = false
     @State private var sharingURLs: [URL] = []
     @State private var exporting = false
+    @State private var exportTask: Task<Void, Never>?
+    @State private var exportProgress = "준비 중…"
+    @State private var exportChoices: [SummarySource] = []
     @State private var showingDeletePage = false
     @State private var importingPhoto = false
     @State private var showingSwipeHint = true
@@ -112,6 +115,7 @@ struct EditorView: View {
                     selectedElementID = nil
                     session.load(noteID: noteID, pageID: id, store: store)
                 }
+                .allowsHitTesting(!exporting)
                 .sheet(item: $sheet, onDismiss: {
                     if let id = pendingSummaryID { pendingSummaryID = nil; openedSummary = NoteRoute(id: id) }
                 }) { value in
@@ -126,6 +130,8 @@ struct EditorView: View {
                         }
                     case .objects: ObjectManagerView(noteID: noteID, pageID: page.id, selectedID: selectedElementID)
                     case .share: ShareSheet(urls: sharingURLs)
+                    case .exportSelection:
+                        PDFExportSelection(note: note, choices: exportChoices, exporting: exporting, progress: exportProgress, error: $store.errorMessage, cancel: { exportTask?.cancel() }) { export(asPDF: true, selection: $0) }
                     case .summary:
                         NoteSummaryComposer(noteID: noteID, service: store.summaries, draft: summaryDraft, selectedRegion: summaryRegion, selectRegion: {
                             sheet = nil; editingObjects = false; selectedElementID = nil
@@ -151,7 +157,7 @@ struct EditorView: View {
         }
         .background(Color(uiColor: .secondarySystemBackground))
         .interactiveDismissDisabled(store.hasUnsavedChanges)
-        .onDisappear { session.stop() }
+        .onDisappear { exportTask?.cancel(); session.stop() }
         .onChange(of: scenePhase) { _, phase in if phase != .active { session.host?.saveViewport() } }
         .photosPicker(isPresented: $choosingPhoto, selection: $photoItem, matching: .images)
         .onChange(of: photoItem) { _, item in
@@ -168,7 +174,10 @@ struct EditorView: View {
         }
         .overlay {
             if exporting || importingPhoto {
-                ProgressView(exporting ? "내보내는 중…" : "사진 가져오는 중…")
+                VStack(spacing: 16) {
+                    ProgressView(exporting ? exportProgress : "사진 가져오는 중…")
+                    if exporting { Button("내보내기 취소") { exportTask?.cancel() } }
+                }
                     .padding(28).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18))
             }
         }
@@ -256,6 +265,11 @@ struct EditorView: View {
         } label: { Label("삽입", systemImage: "plus") }
         Menu {
             Button("노트 전체를 PDF로 공유", systemImage: "doc.richtext") { export(asPDF: true) }
+            Button("선택한 페이지를 PDF로 내보내기", systemImage: "doc.on.doc") {
+                guard store.flushDrawings() else { return }
+                do { exportChoices = try ExportService.pageChoices(note: note, store: store); sheet = .exportSelection }
+                catch { store.errorMessage = error.localizedDescription }
+            }
             Button("현재 페이지를 이미지로 공유", systemImage: "photo") { export(asPDF: false) }
         } label: { Label("공유", systemImage: "square.and.arrow.up") }.disabled(exporting)
         Button { if store.flushDrawings() { sheet = .summary } } label: { Label("요약", systemImage: "text.alignleft") }
@@ -291,18 +305,19 @@ struct EditorView: View {
         return true
     }
 
-    private func export(asPDF: Bool) {
+    private func export(asPDF: Bool, selection: Set<String>? = nil) {
         guard store.flushDrawings(), let note, let page else { return }
-        exporting = true
-        Task { @MainActor in
+        exporting = true; exportProgress = "준비 중…"
+        exportTask = Task { @MainActor in
             await Task.yield()
-            defer { exporting = false }
+            defer { exporting = false; exportTask = nil }
             do {
                 let url: URL
-                if asPDF { url = try ExportService.exportPDF(note: note, store: store) }
+                if asPDF { url = try await ExportService.exportPDF(note: note, store: store, selection: selection) { done, total in exportProgress = "내보내는 중 · \(done) / \(total)페이지" } }
                 else { url = try ExportService.exportPNG(note: note, page: page, store: store) }
                 sharingURLs = [url]
                 sheet = .share
+            } catch is CancellationError {
             } catch { store.errorMessage = "내보내지 못했습니다. \(error.localizedDescription)" }
         }
     }

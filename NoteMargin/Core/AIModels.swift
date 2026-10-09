@@ -9,6 +9,7 @@ struct MarginMessage: Codable, Identifiable, Equatable {
     var createdAt = Date()
     var status: AnswerStatus?
     var mode: TutorMode?
+    var preset: AIQuestionPreset?
     var model: String?
     var diagnosticCode: String?
     var diagnostic: PlanDiagnostic?
@@ -35,6 +36,10 @@ struct MarginConversation: Codable, Identifiable, Equatable {
     var draft: String?
     var webConversationURL: URL? // Legacy link retained; never used for authentication.
     var mode: TutorMode?
+    var presetID: String?
+    var preset: AIQuestionPreset?
+    var draftPreset: AIQuestionPreset?
+    var draftInstructions: String?
     var pinnedConditions: String?
     var includeImage: Bool?
     var accountRegistrationID: String?

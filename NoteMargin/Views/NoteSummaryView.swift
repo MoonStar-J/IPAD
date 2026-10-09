@@ -6,6 +6,7 @@ import SwiftUI
     @Published var selected = Set<String>()
     @Published var whole = true
     @Published var title = ""
+    @Published var prompt = ""
 }
 
 struct NoteSummaryComposer: View {
@@ -53,26 +54,18 @@ struct NoteSummaryComposer: View {
                                         }
                                     } else {
                                         Section("원래 페이지 순서로 요약합니다") {
-                                            ForEach(choices) { choice in
-                                                if let page = note.pages.first(where: { $0.id == choice.pageID }) {
-                                                    Button {
-                                                        if !draft.selected.insert(choice.id).inserted { draft.selected.remove(choice.id) }
-                                                    } label: {
-                                                        HStack(spacing: 20) {
-                                                            PageThumbnail(note: note, page: page, region: choice.rect).frame(width: 68, height: 92)
-                                                            Text(choice.label).foregroundStyle(.primary)
-                                                            Spacer()
-                                                            Image(systemName: draft.selected.contains(choice.id) ? "checkmark.circle.fill" : "circle")
-                                                        }
-                                                    }.accessibilityLabel(choice.label + (draft.selected.contains(choice.id) ? ", 선택됨" : ", 선택 안 됨"))
-                                                }
-                                            }
+                                            PageSelectionRows(note: note, choices: choices, selected: $draft.selected)
                                         }
                                     }
                                 }
                                 Section { Button("요약하기") { draft.step = .name }.disabled(!canProceed).accessibilityIdentifier("summary-next") }
                             case .name:
                                 Section("요약 노트 이름") { TextField("이름", text: $draft.title).accessibilityIdentifier("summary-title") }
+                                Section("이번 요약 요청") {
+                                    TextField("비워 두면 설정의 기본 요약 프롬프트를 사용합니다", text: $draft.prompt, axis: .vertical).lineLimit(3...8).accessibilityIdentifier("summary-prompt")
+                                    NavigationLink("기본 요약 프롬프트 설정") { SummaryPromptSettings() }
+                                    Text("이번 요청은 저장된 기본값을 바꾸지 않습니다.").font(.caption)
+                                }
                                 Section("생성할 요약") {
                                     LabeledContent("범위", value: rangeLabel)
                                     LabeledContent("저장 위치", value: store.summaryLocation(for: note))
@@ -92,7 +85,7 @@ struct NoteSummaryComposer: View {
                                 }
                                 Section {
                                     Button("생성") {
-                                        if let id = service.start(sourceID: noteID, title: draft.title, choices: draft.whole ? nil : (infinite ? nil : draft.selected), region: draft.whole ? nil : selectedRegion) { draft.step = .progress(id) }
+                                        if let id = service.start(sourceID: noteID, title: draft.title, choices: draft.whole ? nil : (infinite ? nil : draft.selected), region: draft.whole ? nil : selectedRegion, prompt: draft.prompt) { draft.step = .progress(id) }
                                     }.disabled(draft.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !connected || !PlanModelSupport.acceptsImage(connection.model) || service.busy || service.unsaved)
                                         .accessibilityIdentifier("summary-create")
                                     Button("범위 다시 선택") { draft.step = .scope }
@@ -109,6 +102,8 @@ struct NoteSummaryComposer: View {
                             Section { Button("진행 중인 요약 보기") { draft.step = .progress(active) } }
                         }
                     }
+                    .accessibilityIdentifier("summary-form")
+                    .scrollDismissesKeyboard(.interactively)
                     .navigationTitle("노트 요약").navigationBarTitleDisplayMode(.inline)
                     .toolbar { ToolbarItem(placement: .cancellationAction) { Button("닫기") { dismiss() } } }
                 }
@@ -227,5 +222,60 @@ private struct SummaryConnectionView: View {
             Picker("모델", selection: $connection.model) { ForEach(connection.models) { Text($0.display_name).tag($0.slug) } }.padding()
             ChatGPTPlanSettings()
         }.task { if connection.models.isEmpty { await connection.refreshModels() } }
+    }
+}
+
+struct PageSelectionRows: View {
+    let note: Notebook
+    let choices: [SummarySource]
+    @Binding var selected: Set<String>
+    var body: some View {
+        HStack {
+            Button("전체 선택") { selected = Set(choices.map(\.id)) }
+            Spacer()
+            Button("선택 해제") { selected.removeAll() }
+        }.buttonStyle(.borderless)
+        ForEach(choices) { choice in
+            if let page = note.pages.first(where: { $0.id == choice.pageID }) {
+                Button {
+                    if !selected.insert(choice.id).inserted { selected.remove(choice.id) }
+                } label: {
+                    HStack(spacing: 20) {
+                        PageThumbnail(note: note, page: page, region: choice.rect).frame(width: 68, height: 92)
+                        Text(choice.label).foregroundStyle(.primary)
+                        Spacer()
+                        Image(systemName: selected.contains(choice.id) ? "checkmark.circle.fill" : "circle")
+                    }
+                }.accessibilityLabel(choice.label + (selected.contains(choice.id) ? ", 선택됨" : ", 선택 안 됨"))
+            }
+        }
+    }
+}
+
+struct PDFExportSelection: View {
+    let note: Notebook
+    let choices: [SummarySource]
+    let exporting: Bool
+    let progress: String
+    @Binding var error: String?
+    let cancel: () -> Void
+    let export: (Set<String>) -> Void
+    @State private var selected = Set<String>()
+    @Environment(\.dismiss) private var dismiss
+    var body: some View {
+        NavigationStack {
+            Form {
+                if exporting { Section { ProgressView(progress); Button("내보내기 취소", action: cancel) } }
+                Section("원래 문서 순서로 내보냅니다") { PageSelectionRows(note: note, choices: choices, selected: $selected).disabled(exporting) }
+            }
+                .navigationTitle("선택 PDF 내보내기").navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) { Button("취소") { dismiss() }.disabled(exporting) }
+                    ToolbarItem(placement: .confirmationAction) { Button("내보내기") { export(selected) }.disabled(selected.isEmpty || exporting) }
+                }
+        }.interactiveDismissDisabled(exporting)
+            .alert("내보내지 못했습니다", isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })) {
+                Button("확인", role: .cancel) { error = nil }
+            } message: { Text(error ?? "") }
     }
 }

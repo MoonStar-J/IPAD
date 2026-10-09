@@ -104,14 +104,16 @@ import Combine
         return (account, connection.model)
     }
 
-    @discardableResult func start(sourceID: UUID, title: String, choices: Set<String>?, region: CGRect?) -> UUID? {
+    @discardableResult func start(sourceID: UUID, title: String, choices: Set<String>?, region: CGRect?, prompt: String = "") -> UUID? {
         guard !busy, !unsaved, let store else { return nil }
         failure = nil
         do {
             let (account, model) = try verifyConnection()
+            let instructions = SummaryPrompt.resolve(request: prompt, saved: UserDefaults.standard.string(forKey: SummaryPrompt.defaultKey) ?? "")
+            try SummaryPrompt.validateInstructions(instructions, policy: ContextBudget())
             guard store.flushDrawings(), let source = store.note(sourceID) else { throw SummaryError.message(store.errorMessage ?? "원본 저장에 실패했습니다.") }
             let sources = try Self.sources(note: source, choices: choices, region: region, store: store)
-            let id = try store.createSummary(source: source, sources: sources, title: title, model: model, account: account)
+            let id = try store.createSummary(source: source, sources: sources, title: title, model: model, account: account, instructions: instructions)
             resume(id)
             return id
         } catch { failure = error.localizedDescription; return nil }
@@ -199,7 +201,7 @@ import Combine
                 await Task.yield()
             }
             guard work!.inputs.contains(where: \.contentPresent) else { throw SummaryError.message("선택 범위에 요약할 내용이 없습니다. GPT 요청을 보내지 않았습니다.") }
-            if work!.batches.isEmpty { work!.batches = try SummaryPrompt.batches(work!.inputs, policy: work!.policy) }
+            if work!.batches.isEmpty { work!.batches = try SummaryPrompt.batches(work!.inputs, policy: work!.policy, instructions: work!.resolvedInstructions) }
             try save(id, state: .summarizing)
             while work!.fragments.count < work!.batches.count {
                 try check(id)
@@ -261,7 +263,7 @@ import Combine
             return [.init(type: "input_text", text: "[\(input.source.id)] \(input.source.label)\n보조 추출 텍스트:\n" + input.text),
                     .init(type: "input_image", image_url: "data:image/png;base64," + data.base64EncodedString())]
         }
-        return PlanRequest(model: model, instructions: SummaryPrompt.instructions, input: [.init(role: "user", content: content)])
+        return PlanRequest(model: model, instructions: work!.resolvedInstructions, input: [.init(role: "user", content: content)])
     }
     private func request(_ body: PlanRequest, id: UUID, account: String) async throws -> String {
         try check(id)
@@ -299,7 +301,7 @@ import Combine
                 continue
             }
             var end = work!.mergeCursor
-            var selected: [SummaryFragment] = [], tokens = SummaryPrompt.instructions.utf8.count + 1024
+            var selected: [SummaryFragment] = [], tokens = work!.resolvedInstructions.utf8.count + 1024
             while end < inputs.count && tokens + inputs[end].text.utf8.count <= work!.policy.usable {
                 selected.append(inputs[end]); tokens += inputs[end].text.utf8.count; end += 1
             }
@@ -307,7 +309,7 @@ import Combine
                 // Split an unusually long answer without dropping characters. The
                 // next stage merges these pieces again, retaining the same sources.
                 let fragment = inputs[end]
-                let limit = work!.policy.usable - SummaryPrompt.instructions.utf8.count - 2048
+                let limit = work!.policy.usable - work!.resolvedInstructions.utf8.count - 2048
                 guard limit >= 1000 else { throw SummaryError.message("통합 요청 한도가 너무 작습니다. 보존된 결과를 확인해 주세요.") }
                 var pieces: [SummaryFragment] = [], text = "", size = 0
                 for character in fragment.text {
@@ -329,7 +331,7 @@ import Combine
             message = "통합 중 · \(work!.mergeCursor) / \(inputs.count)묶음"
             let sources = Array(Set(selected.flatMap(\.sources))).sorted()
             let text = "다음 중간 요약을 하나로 통합하세요. 출처·핵심 조건·수식·불확실성을 보존하세요. 기존 출처 식별자를 유지하세요.\n\n" + selected.map(\.text).joined(separator: "\n\n---\n\n")
-            let body = PlanRequest(model: summary.model, instructions: SummaryPrompt.instructions, input: [.init(role: "user", content: [.init(type: "input_text", text: text)])])
+            let body = PlanRequest(model: summary.model, instructions: work!.resolvedInstructions, input: [.init(role: "user", content: [.init(type: "input_text", text: text)])])
             let result = try await request(body, id: id, account: summary.account)
             try SummaryPrompt.validate(result, sources: sources)
             work!.mergeOutputs.append(.init(sources: sources, text: result)); work!.mergeCursor = end; work!.partial = ""

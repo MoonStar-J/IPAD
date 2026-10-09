@@ -15,6 +15,12 @@ struct ChatGPTMarginView: View {
     @State private var preview = true
     @State private var deleting = false
     @State private var memory = false
+    @State private var presetSettings = false
+    @AppStorage(AIQuestionPreferences.key) private var presetData = Data()
+    private var presets: [AIQuestionPreset] { (try? AIQuestionPreferences.decode(presetData)) ?? [] }
+    private var selectedPreset: AIQuestionPreset {
+        chat?.draftPreset ?? AIQuestionPreset.selected(id: chat?.presetID, mode: chat?.mode, from: presets)
+    }
     @State private var quoting: MarginMessage?
     private var chat: MarginConversation? { conversationID.flatMap { ai.conversation($0) } }
     private var readOnly: Bool { chat.map { $0.projectID != project?.id } ?? false }
@@ -28,6 +34,7 @@ struct ChatGPTMarginView: View {
                         Spacer()
                         Button { settings = true } label: { Image(systemName: "person.crop.circle") }.accessibilityLabel("ChatGPT 구독 연결")
                         Menu {
+                            Button("AI 질문 프리셋") { presetSettings = true }
                             Button("맥락 보기") { memory = true }
                             if let onAttach { Button("현재 문제에 추가", action: onAttach).disabled(sending || readOnly) }
                             if let onSource { Button("원본 선택 영역으로", action: onSource) }
@@ -76,7 +83,7 @@ struct ChatGPTMarginView: View {
                                     if let diagnostic = message.diagnostic {
                                         Text(diagnostic.summary).font(.caption2).foregroundStyle(.secondary).textSelection(.enabled)
                                     }
-                                    if let model = message.model { Text(model + " · " + (message.mode ?? .free).title).font(.caption2).foregroundStyle(.secondary) }
+                                    if let model = message.model { Text(model + " · " + (message.preset?.name ?? (message.mode ?? .free).title)).font(.caption2).foregroundStyle(.secondary) }
                                 }.frame(maxWidth: .infinity, alignment: .leading).padding(12)
                                     .background(message.role == .user ? Color.accentColor.opacity(0.08) : Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
                             }
@@ -87,8 +94,8 @@ struct ChatGPTMarginView: View {
                             if !sending, chat.draft?.isEmpty != false,
                                let last = chat.messages.last, last.role == .assistant,
                                let status = last.status, status != .completed && status != .streaming,
-                               let question = chat.messages.last(where: { $0.role == .user })?.text {
-                                Button("질문 다시 입력") { ai.setDraft(question, for: chat.id) }.disabled(readOnly)
+                               chat.messages.contains(where: { $0.role == .user }) {
+                                Button("질문 다시 입력") { ai.retryQuestion(chat.id) }.disabled(readOnly)
                             }
                         }.padding()
                     }
@@ -100,18 +107,24 @@ struct ChatGPTMarginView: View {
                             Link("사용량 관리", destination: URL(string: "https://chatgpt.com/settings/usage")!).font(.caption)
                         }
                         HStack {
-                            Picker("질문 모드", selection: Binding(get: { chat.mode ?? .free }, set: { ai.configure(chat.id, mode: $0) })) { ForEach(TutorMode.allCases) { Text($0.title).tag($0) } }
+                            Picker("AI 질문 프리셋", selection: Binding(get: { chat.draftPreset == nil ? selectedPreset.id : "retry" }, set: { ai.selectPreset(chat.id, presetID: $0) })) {
+                                if chat.draftPreset != nil { Text("재시도 · " + selectedPreset.name).tag("retry") }
+                                Text("직접 질문 (기본 질문 없음)").tag(AIQuestionPreset.direct.id)
+                                ForEach(presets) { Text($0.name.isEmpty ? "이름 없는 프리셋" : $0.name).tag($0.id) }
+                            }.accessibilityIdentifier("ai-preset-picker")
                             Picker("모델", selection: $connection.model) {
                                 if connection.models.isEmpty { Text("연결 후 모델 선택").tag("") }
                                 ForEach(connection.models) { Text($0.display_name).tag($0.slug) }
                             }
                         }.disabled(sending)
+                        if chat.draftPreset != nil { Text("이전 요청의 지침을 사용합니다. 새 지침으로 질문하려면 프리셋을 다시 선택하세요.").font(.caption) }
+                        else if selectedPreset.id == AIQuestionPreset.direct.id { Text("선택한 프리셋이 없으므로 질문을 직접 입력해 주세요.").font(.caption) }
                         if readOnly { Text("이전 프로젝트의 대화입니다. 현재 프로젝트에서 새 영역 대화를 만들어 주세요.").font(.caption) }
                         if connection.state != .ready { Button("ChatGPT 구독 연결 확인") { settings = true } }
                         if (chat.draft ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                             VStack(alignment: .leading, spacing: 3) {
-                                Text("기본 질문 · " + (chat.mode ?? .free).title).font(.caption.bold())
-                                Text((chat.mode ?? .free).defaultQuestion).font(.caption).foregroundStyle(.secondary)
+                                Text("기본 질문 · " + selectedPreset.name).font(.caption.bold())
+                                Text(selectedPreset.question.isEmpty ? "질문을 직접 입력해 주세요." : selectedPreset.question).font(.caption).foregroundStyle(.secondary)
                             }.accessibilityIdentifier("ai-default-question-preview")
                         }
                         if let reply = chat.draftReply {
@@ -134,6 +147,7 @@ struct ChatGPTMarginView: View {
                         }
                     }.padding(12)
                 }
+                .sheet(isPresented: $presetSettings) { NavigationStack { AIQuestionPresetSettings().toolbar { ToolbarItem(placement: .confirmationAction) { Button("완료") { presetSettings = false } } } } }
                 .sheet(isPresented: $memory) { ConversationMemoryView(id: chat.id, project: project) }
                 .sheet(item: $quoting) { message in ReplySelectionView(message: message) { ai.setReply($0, for: chat.id) } }
                 .sheet(isPresented: $settings) { ChatGPTPlanSettings() }
@@ -146,6 +160,9 @@ struct ChatGPTMarginView: View {
         .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(.quaternary)).shadow(color: .black.opacity(0.12), radius: 16)
         // The store owns accepted requests; closing/switching panels only saves
         // the draft. The stop button remains the explicit per-answer cancellation.
+        .onChange(of: presetData) { _, _ in if let conversationID { ai.refreshPreset(conversationID) } }
+        .onChange(of: sending) { _, value in if !value, let conversationID { ai.refreshPreset(conversationID) } }
+        .onAppear { if let conversationID { ai.refreshPreset(conversationID) } }
         .onDisappear { if let conversationID { ai.flushDraft(conversationID) } }
         .onChange(of: scenePhase) { _, phase in
             if phase == .background { connection.cancelSignIn(); ai.cancelPlanRequests() }

@@ -258,7 +258,7 @@ final class NoteStore: ObservableObject {
         return (path + ["요약"]).joined(separator: " / ")
     }
 
-    func createSummary(source: Notebook, sources: [SummarySource], title: String, model: String, account: String) throws -> UUID {
+    func createSummary(source: Notebook, sources: [SummarySource], title: String, model: String, account: String, instructions: String? = nil) throws -> UUID {
         guard let repository, !sources.isEmpty, note(source.id) != nil else { throw CocoaError(.fileReadNoSuchFile) }
         var destination = summaryDestination(for: source)
         if destination == nil {
@@ -270,7 +270,7 @@ final class NoteStore: ObservableObject {
         var snapshot = source
         snapshot.id = result.id
         snapshot.pages = source.pages.filter { page in sources.contains { $0.pageID == page.id } }
-        let work = SummaryWork(snapshot: snapshot, sources: sources)
+        let work = SummaryWork(snapshot: snapshot, sources: sources, instructions: instructions)
         do {
             // File copies freeze PDF, drawings and inserted images before any await.
             try repository.copyAssets(from: source.id, to: result.id)

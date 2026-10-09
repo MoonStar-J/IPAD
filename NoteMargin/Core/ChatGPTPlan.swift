@@ -38,6 +38,38 @@ enum TutorMode: String, Codable, CaseIterable, Identifiable {
     """
 }
 
+struct AIQuestionPreset: Codable, Equatable, Identifiable {
+    let id: String
+    var name: String
+    var question: String
+    var instructions: String
+    static func legacy(_ mode: TutorMode) -> Self {
+        .init(id: mode.rawValue, name: mode.title, question: mode.defaultQuestion, instructions: mode.instruction)
+    }
+    static let direct = Self(id: "direct", name: "직접 질문", question: "", instructions: "")
+    static var builtins: [Self] { TutorMode.allCases.map(legacy) }
+    func question(for draft: String) -> String {
+        draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? question : draft
+    }
+    static func selected(id: String?, mode: TutorMode?, from presets: [Self]) -> Self {
+        presets.first { $0.id == (id ?? (mode ?? .free).rawValue) } ?? .direct
+    }
+}
+
+enum AIQuestionPreferences {
+    static let key = "ai.questionPresets"
+    static func decode(_ data: Data) throws -> [AIQuestionPreset] {
+        if data.isEmpty { return AIQuestionPreset.builtins }
+        let presets = try JSONDecoder().decode([AIQuestionPreset].self, from: data)
+        guard Set(presets.map(\.id)).count == presets.count,
+              presets.allSatisfy({ !$0.id.isEmpty && $0.id != AIQuestionPreset.direct.id }) else { throw CocoaError(.fileReadCorruptFile) }
+        return presets
+    }
+    static func restore(_ presets: [AIQuestionPreset]) -> [AIQuestionPreset] {
+        AIQuestionPreset.builtins + presets.filter { TutorMode(rawValue: $0.id) == nil }
+    }
+}
+
 enum AnswerStatus: String, Codable {
     case streaming, completed, failed, incomplete, interrupted, cancelled
     var title: String {

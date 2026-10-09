@@ -9,6 +9,7 @@ final class MarginAIStore: ObservableObject {
     @Published var errorMessage: String?
     private let connection: ChatGPTPlanConnection
     private let http: PlanHTTP
+    private let preferences: UserDefaults
     private var repository: MarginChatRepository?
     private var loaded = Set<UUID>()
     private var requests: [UUID: Task<Void, Never>] = [:]
@@ -18,8 +19,8 @@ final class MarginAIStore: ObservableObject {
     private var unsaved = Set<UUID>()
     private var planRequestIDs: [UUID: UUID] = [:]
 
-    init(repository: MarginChatRepository? = nil, connection: ChatGPTPlanConnection? = nil, http: PlanHTTP = .shared) {
-        self.connection = connection ?? .shared; self.http = http
+    init(repository: MarginChatRepository? = nil, connection: ChatGPTPlanConnection? = nil, http: PlanHTTP = .shared, preferences: UserDefaults = .standard) {
+        self.connection = connection ?? .shared; self.http = http; self.preferences = preferences
         do {
             if let repository { self.repository = repository }
             else {
@@ -128,10 +129,34 @@ final class MarginAIStore: ObservableObject {
 
     func configure(_ id: UUID, mode: TutorMode? = nil, conditions: String? = nil, includeImage: Bool? = nil) {
         guard var chat = conversation(id), !sending.contains(id) else { return }
-        if let mode { chat.mode = mode }
+        if let mode { chat.mode = mode; chat.presetID = mode.rawValue; chat.preset = .legacy(mode); chat.draftPreset = nil; chat.draftInstructions = nil; chat.sourceChanged() }
         if let conditions, chat.pinnedConditions != conditions { chat.pinnedConditions = conditions; chat.sourceChanged() }
         if let includeImage { chat.includeImage = includeImage }
         chat.schemaVersion = 3
+        persist(chat, retainOnFailure: true)
+    }
+    func selectPreset(_ id: UUID, presetID: String) {
+        guard var chat = conversation(id), !sending.contains(id) else { return }
+        chat.presetID = presetID; chat.draftPreset = nil; chat.draftInstructions = nil
+        do { try refreshPreset(&chat); persist(chat, retainOnFailure: true) }
+        catch { failures[id] = error.localizedDescription }
+    }
+    private func refreshPreset(_ chat: inout MarginConversation) throws {
+        let presets = try AIQuestionPreferences.decode(preferences.data(forKey: AIQuestionPreferences.key) ?? Data())
+        let selected = AIQuestionPreset.selected(id: chat.presetID, mode: chat.mode, from: presets)
+        if chat.preset != selected { chat.preset = selected; chat.sourceChanged() }
+    }
+    func refreshPreset(_ id: UUID) {
+        guard var chat = conversation(id), !sending.contains(id) else { return }
+        do { try refreshPreset(&chat); if chat != conversation(id) { persist(chat, retainOnFailure: true) } }
+        catch { failures[id] = "프리셋 설정을 읽지 못했습니다. 설정을 확인해 주세요." }
+    }
+    func retryQuestion(_ id: UUID) {
+        guard var chat = conversation(id), !sending.contains(id),
+              let question = chat.messages.last(where: { $0.role == .user }) else { return }
+        chat.draft = question.text; chat.draftReply = question.replyTo
+        chat.draftPreset = question.preset ?? .legacy(question.mode ?? .free)
+        chat.draftInstructions = chat.runs?.last(where: { $0.kind == .answer })?.frozenInstructions
         persist(chat, retainOnFailure: true)
     }
     func cancelPlanRequests() {
@@ -151,10 +176,10 @@ final class MarginAIStore: ObservableObject {
         let previousUser = chat.messages.last(where: { $0.role == .user })
         let reuse = rejected?.role == .assistant && rejected?.text.isEmpty == true &&
             rejected?.diagnostic?.httpStatus == 400 && previousUser?.text == question &&
-            previousUser?.replyTo == chat.draftReply
+            previousUser?.replyTo == chat.draftReply && previousUser?.preset == (chat.draftPreset ?? chat.preset)
         if !reuse {
             chat.messages.append(MarginMessage(id: chat.draftMessageID ?? UUID(), role: .user, text: question,
-                mode: chat.mode ?? .free, model: model, revision: 1, replyTo: chat.draftReply))
+                mode: chat.mode, preset: chat.draftPreset ?? chat.preset, model: model, revision: 1, replyTo: chat.draftReply))
         }
     }
     @discardableResult func sendPlan(_ question: String, conversationID id: UUID, project: NoteProject?) -> Bool {
@@ -166,7 +191,10 @@ final class MarginAIStore: ObservableObject {
         if let previous = chat.accountRegistrationID, previous != account {
             failures[id] = "다른 계정에서 만든 대화입니다. 원래 계정을 선택하거나 새 영역 대화를 만들어 주세요."; return false
         }
-        let question = (chat.mode ?? .free).question(for: question)
+        do { try refreshPreset(&chat) } catch { failures[id] = "프리셋 설정을 읽지 못했습니다."; return false }
+        let preset = chat.draftPreset ?? chat.preset ?? .legacy(chat.mode ?? .free)
+        let question = preset.question(for: question)
+        guard !question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { failures[id] = "질문을 입력하거나 기본 질문이 있는 프리셋을 선택해 주세요."; return false }
         let model = connection.model, generation = connection.generation, requestID = UUID()
         chat.migrateMemory()
         chat.contextRevision = chat.revision + 1
@@ -178,10 +206,10 @@ final class MarginAIStore: ObservableObject {
             let plan = try ContextBuilder.build(chat: chat, projectInstructions: project?.agentInstructions ?? "")
             (body, manifest) = try PlanRequest.serialize(plan, model: model, policy: chat.policy)
         } catch { failures[id] = error.localizedDescription; return false }
-        let assistant = MarginMessage(role: .assistant, text: "", status: .streaming, mode: chat.mode ?? .free, model: model)
+        let assistant = MarginMessage(role: .assistant, text: "", status: .streaming, mode: chat.mode, preset: preset, model: model)
         chat.runs = (chat.runs ?? []) + [ContextRun(id: requestID, kind: .answer, manifest: manifest, model: model,
             authGeneration: generation, responseMessageID: assistant.id, frozenInstructions: body.instructions)]
-        chat.messages.append(assistant); chat.draft = ""; chat.draftReply = nil; chat.draftMessageID = UUID(); chat.lastModel = model; chat.lastProvider = "chatgpt-plan"
+        chat.messages.append(assistant); chat.draft = ""; chat.draftReply = nil; chat.draftPreset = nil; chat.draftInstructions = nil; chat.draftMessageID = UUID(); chat.lastModel = model; chat.lastProvider = "chatgpt-plan"
         chat.accountRegistrationID = account; chat.schemaVersion = 3; chat.updatedAt = Date()
         guard persist(chat) else { return false }
         failures[id] = nil; sending.insert(id); planRequestIDs[id] = requestID
@@ -204,7 +232,7 @@ final class MarginAIStore: ObservableObject {
                 updated.messages[index].diagnostic = result.failure.map(PlanDiagnostic.init)
                 updated.updatedAt = Date()
                 if result.failure?.kind == .context, updated.draft?.isEmpty != false {
-                    updated.draft = question; updated.draftReply = reply
+                    updated.draft = question; updated.draftReply = reply; updated.draftPreset = preset; updated.draftInstructions = body.instructions
                 }
                 if let run = updated.runs?.firstIndex(where: { $0.id == requestID }) {
                     updated.runs?[run].state = result.status
@@ -316,7 +344,10 @@ final class MarginAIStore: ObservableObject {
     func previewContext(_ id: UUID, project: NoteProject?, model: String) throws -> (ContextPlan, ContextManifest) {
         guard var chat = conversation(id), chat.projectID == project?.id else { throw ContextAction.invalidScope }
         chat.contextRevision = chat.revision + 1
-        appendPendingQuestion((chat.mode ?? .free).question(for: chat.draft ?? ""), to: &chat, model: model)
+        try refreshPreset(&chat)
+        let question = (chat.draftPreset ?? chat.preset ?? .legacy(chat.mode ?? .free)).question(for: chat.draft ?? "")
+        guard !question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw SummaryError.message("질문을 입력해 주세요.") }
+        appendPendingQuestion(question, to: &chat, model: model)
         let plan: ContextPlan
         do { plan = try ContextBuilder.build(chat: chat, projectInstructions: project?.agentInstructions ?? "") }
         catch ContextAction.overflow { plan = try ContextBuilder.assemble(chat: chat, projectInstructions: project?.agentInstructions ?? "", snapshot: nil) }
