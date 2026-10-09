@@ -250,6 +250,14 @@ import PDFKit
         let blankID = try XCTUnwrap(store.importPDF(prepared, layout: .paged))
         let blankResult = try XCTUnwrap(service.start(sourceID: blankID, title: "blank summary", choices: nil, region: nil))
         try await finish()
+        if store.note(blankResult)?.summary?.state != .failed {
+            for input in try store.summaryWork(blankResult).inputs {
+                let attachment = XCTAttachment(data: try store.summaryAsset(blankResult, name: input.imageAsset), uniformTypeIdentifier: "public.png")
+                attachment.name = "Blank-PDF-" + input.source.id
+                attachment.lifetime = .keepAlways
+                add(attachment)
+            }
+        }
         XCTAssertEqual(store.note(blankResult)?.summary?.state, .failed)
         XCTAssertTrue(SummaryProtocol.bodies.isEmpty)
         XCTAssertThrowsError(try SummaryPrompt.validate("내용 [S99]", sources: ["S1"]))

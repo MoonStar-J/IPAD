@@ -243,10 +243,14 @@ import Combine
     private static func hasVisiblePixels(_ data: Data) throws -> Bool {
         guard let image = UIImage(data: data)?.cgImage else { throw CocoaError(.fileReadCorruptFile) }
         var pixels = [UInt8](repeating: 255, count: image.width * image.height * 4)
-        guard let context = CGContext(data: &pixels, width: image.width, height: image.height, bitsPerComponent: 8,
-                                      bytesPerRow: image.width * 4, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { throw CocoaError(.fileReadCorruptFile) }
-        context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
-        return stride(from: 0, to: pixels.count, by: 4).contains { pixels[$0] < 255 || pixels[$0+1] < 255 || pixels[$0+2] < 255 }
+        return try pixels.withUnsafeMutableBytes { buffer in
+            guard let context = CGContext(data: buffer.baseAddress, width: image.width, height: image.height, bitsPerComponent: 8,
+                                          bytesPerRow: image.width * 4, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { throw CocoaError(.fileReadCorruptFile) }
+            context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+            let bytes = buffer.bindMemory(to: UInt8.self)
+            // Device PDF rendering dithers white by one 8-bit level (254–255).
+            return stride(from: 0, to: bytes.count, by: 4).contains { bytes[$0] < 254 || bytes[$0+1] < 254 || bytes[$0+2] < 254 }
+        }
     }
 
     private func imageRequest(id: UUID, inputs: [SummaryInput], model: String) throws -> PlanRequest {

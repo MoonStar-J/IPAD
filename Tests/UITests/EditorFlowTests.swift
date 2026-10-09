@@ -119,6 +119,7 @@ final class EditorFlowTests: XCTestCase {
         app.buttons["완료"].tap()
         XCTAssertTrue(name.waitForExistence(timeout: 5))
         XCTAssertEqual(name.value as? String, "Editing fixture 요약 초안")
+        if !app.buttons["범위 다시 선택"].isHittable { app.swipeUp() }
         app.buttons["범위 다시 선택"].tap()
         app.buttons["선택한 부분 요약하기"].tap()
         XCTAssertFalse(app.buttons["summary-next"].isEnabled)
@@ -159,12 +160,46 @@ final class EditorFlowTests: XCTestCase {
             XCTAssertTrue(app.webViews.firstMatch.waitForExistence(timeout: 10))
             XCTAssertTrue(app.staticTexts["학습 요약"].firstMatch.waitForExistence(timeout: 10))
             app.buttons["원문 복사"].tap()
-            let attachment = XCTAttachment(screenshot: app.screenshot())
+            let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
             attachment.name = "Summary-" + theme; attachment.lifetime = .keepAlways; add(attachment)
             app.buttons["editor-library-back"].tap()
             XCTAssertTrue(card.waitForExistence(timeout: 5))
             app.terminate()
         }
+    }
+    // Explicit opt-in only: this uses the device's connected account and consumes usage.
+    @MainActor func testConnectedAccountSummaryEndToEnd() throws {
+        guard ProcessInfo.processInfo.environment["NOTEMARGIN_LIVE_SUMMARY"] == "1" else {
+            throw XCTSkip("Enable NOTEMARGIN_LIVE_SUMMARY for a single real-account summary.")
+        }
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchEnvironment["NOTEMARGIN_UI_FIXTURE"] = UUID().uuidString
+        app.launchArguments = ["--live-summary-fixture"]
+        app.launch()
+        app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Editing fixture,'")).firstMatch.tap()
+        app.buttons["editor-summary"].tap()
+        app.buttons["summary-next"].tap()
+        let create = app.buttons["summary-create"]
+        if !create.isHittable { app.swipeUp() }
+        XCTAssertTrue(create.waitForExistence(timeout: 10))
+        let ready = NSPredicate { _, _ in create.isEnabled }
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: ready, object: nil)], timeout: 30), .completed, "Connect an image-capable ChatGPT account/model on the iPad before running this test.")
+        create.tap()
+        let finished = NSPredicate { _, _ in app.staticTexts["완료"].exists || app.staticTexts["미완료 · 실패"].exists }
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: finished, object: nil)], timeout: 180), .completed)
+        XCTAssertTrue(app.staticTexts["완료"].exists, app.debugDescription)
+        app.buttons["summary-open"].tap()
+        XCTAssertTrue(app.webViews.firstMatch.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "미분")).firstMatch.waitForExistence(timeout: 10))
+        let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        attachment.name = "Live-summary-saved"; attachment.lifetime = .keepAlways; add(attachment)
+        app.terminate(); app.launch()
+        app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "모든 노트")).firstMatch.tap()
+        let card = app.buttons["Editing fixture, 요약"]
+        XCTAssertTrue(card.waitForExistence(timeout: 10)); card.tap()
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "미분")).firstMatch.waitForExistence(timeout: 10))
+        XCTAssertFalse(app.buttons["이 요약에서 다시 시도"].exists)
     }
     @MainActor func makeNote(_ app: XCUIApplication, infinite: Bool = false, finger: Bool = true, appearance: String = "light") -> String {
         app.launchArguments = ["-fingerDrawing", finger ? "YES" : "NO", "--pencil-test-touch", "--shape-diagnostics", "-app.appearance", appearance]

@@ -66,6 +66,9 @@ final class NoteStore: ObservableObject {
                         PKStrokePoint(location: p, timeOffset: Double(i) * 0.01, size: CGSize(width: 2, height: 2), opacity: 1, force: 1, azimuth: 0, altitude: .pi / 2)
                     }, creationDate: Date()))
                     note.pages = [NotePage(paper: .ruled, canvasMode: ProcessInfo.processInfo.arguments.contains("--infinite-editing-fixture") ? "infinite" : nil, inkShapes: [InkShape(strokeID: InkStrokeID(stroke), kind: result.kind.rawValue, points: result.fittedPoints, fingerprint: DrawingSession.fingerprint(stroke))])]
+                    if ProcessInfo.processInfo.arguments.contains("--live-summary-fixture") {
+                        note.pages[0].elements = [PageElement(kind: .text, text: "미분 학습 노트\nf(x) = x²의 도함수는 f′(x) = 2x이다.\nx = 3에서 접선의 기울기는 6이다.\n아래 손으로 그린 도형은 원이다.", x: 40, y: 60, width: 640, height: 200)]
+                    }
                     var fixtureLibrary = Library(); fixtureLibrary.notebooks = [note]
                     if ProcessInfo.processInfo.arguments.contains("--trashed-editing-fixture") {
                         fixtureLibrary.notebooks[0].deletedAt = Date()
