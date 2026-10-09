@@ -89,15 +89,16 @@ final class EditorFlowTests: XCTestCase {
         XCTAssertFalse(empty.isEnabled)
         let attachment = XCTAttachment(screenshot: app.screenshot()); attachment.name = "Trash-empty"; attachment.lifetime = .keepAlways; add(attachment)
     }
-    @MainActor func testDriveConnectionEntryExplainsMissingConfiguration() {
+    @MainActor func testDriveConnectionEntryOffersGoogleSignIn() {
         continueAfterFailure = false
         let app = XCUIApplication()
         app.launchEnvironment["NOTEMARGIN_UI_FIXTURE"] = UUID().uuidString
         app.launch()
         XCTAssertTrue(app.buttons["library-import-pdf"].waitForExistence(timeout: 15)); app.buttons["library-import-pdf"].tap()
         XCTAssertTrue(app.buttons["pdf-import-google-drive"].waitForExistence(timeout: 5)); app.buttons["pdf-import-google-drive"].tap()
-        XCTAssertTrue(app.staticTexts["앱 설정 필요"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'GOOGLE_CLIENT_ID'")).firstMatch.exists)
+        XCTAssertTrue(app.buttons["Google에 로그인"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["다른 Google 계정 연결"].exists)
+        XCTAssertFalse(app.staticTexts["앱 설정 필요"].exists)
         app.buttons["완료"].tap()
         XCTAssertTrue(app.buttons["pdf-import-files"].isHittable)
     }

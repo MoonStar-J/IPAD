@@ -28,4 +28,4 @@ iPad에서 PDF를 읽고 Apple Pencil로 필기하며, 선택한 내용에 대�
 
 ![필기 영역과 여백 대화](docs/previews/capture-destination-readable-dark.png)
 
-¹ Google Drive는 앱 빌드에 Google OAuth 클라이언트 등록이 필요합니다. 현재 저장소에는 계정별 등록 값이 포함되어 있지 않습니다.
+¹ Google Drive는 앱 빌드에 Google OAuth 클라이언트 등록이 필요합니다. 기본 NoteMargin 타깃에는 제공된 iOS Client ID가 설정되어 있습니다. Google Cloud의 API 활성화·동의 화면 설정 확인과 실제 계정 검증은 별도로 필요합니다.
