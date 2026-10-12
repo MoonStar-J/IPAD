@@ -48,6 +48,12 @@ struct AIQuestionPreset: Codable, Equatable, Identifiable {
     }
     static let direct = Self(id: "direct", name: "직접 질문", question: "", instructions: "")
     static var builtins: [Self] { TutorMode.allCases.map(legacy) }
+    // Only unchanged built-in fields are translated for display. Request snapshots
+    // and user-edited values remain verbatim, including when the UI language changes.
+    private var original: Self? { TutorMode(rawValue: id).map(Self.legacy) ?? (id == Self.direct.id ? Self.direct : nil) }
+    func displayName(in language: AppLanguage = .current) -> String { name == original?.name ? localized(name, language: language) : name }
+    func displayQuestion(in language: AppLanguage = .current) -> String { question == original?.question ? localized(question, language: language) : question }
+    func displayInstructions(in language: AppLanguage = .current) -> String { instructions == original?.instructions ? localized(instructions, language: language) : instructions }
     func question(for draft: String) -> String {
         draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? question : draft
     }
@@ -73,7 +79,7 @@ enum AIQuestionPreferences {
 enum AnswerStatus: String, Codable {
     case streaming, completed, failed, incomplete, interrupted, cancelled
     var title: String {
-        switch self { case .streaming: return "답변 중"; case .completed: return "완료"; case .failed: return "실패 · 부분 답변"; case .incomplete: return "미완료"; case .interrupted: return "중단됨"; case .cancelled: return "취소됨" }
+        switch self { case .streaming: return localized("답변 중"); case .completed: return localized("완료"); case .failed: return localized("실패 · 부분 답변"); case .incomplete: return localized("미완료"); case .interrupted: return localized("중단됨"); case .cancelled: return localized("취소됨") }
     }
 }
 
@@ -100,7 +106,7 @@ struct ChatGPTModelCatalog: Decodable {
 enum PlanConnectionState: String {
     case disconnected, signingIn, permissionRequired, ready, reauthenticationRequired, rateLimited, error
     var title: String {
-        switch self { case .disconnected: return "미연결"; case .signingIn: return "로그인 중"; case .permissionRequired: return "구독 사용 미허용"; case .ready: return "ChatGPT 구독 사용 중"; case .reauthenticationRequired: return "재로그인 필요"; case .rateLimited: return "사용 제한"; case .error: return "연결 오류" }
+        switch self { case .disconnected: return localized("미연결"); case .signingIn: return localized("로그인 중"); case .permissionRequired: return localized("구독 사용 미허용"); case .ready: return localized("ChatGPT 구독 사용 중"); case .reauthenticationRequired: return localized("재로그인 필요"); case .rateLimited: return localized("사용 제한"); case .error: return localized("연결 오류") }
     }
 }
 
@@ -116,15 +122,15 @@ struct PlanFailure: Error, LocalizedError, Equatable {
     var contentType: String?
     var errorDescription: String? {
         switch kind {
-        case .permission: return "이 연결에 구독 사용 권한이 없습니다. ChatGPT 설정에서 이 앱의 권한을 확인하세요."
-        case .ineligible: return "선택한 계정·워크스페이스 또는 정책에서 구독 사용을 허용하지 않습니다."
-        case .limit: return "플랜 또는 이 앱의 사용 한도에 도달했습니다. 사용량 관리에서 확인하세요."
-        case .unsupported: return "이 모델·입력 또는 옵션이 지원되지 않습니다. 모델과 첨부를 확인하세요."
-        case .authentication: return "연결의 인증을 확인하지 못했습니다. 계정 설정을 확인해 주세요."
-        case .network: return "연결이 끊겼거나 일시적으로 사용할 수 없습니다. 부분 답변을 보존했습니다. 자동 재전송하지 않습니다."
-        case .protocolError: return "응답 형식을 확인하지 못했습니다. 자동 재전송하지 않습니다."
-        case .context: return "대화가 전송 크기 한도를 넘었습니다. 조건을 임의로 제외하지 않았습니다. 새 영역 대화를 만들거나 질문을 줄여 주세요."
-        case .cancelled: return "요청을 취소했습니다. 이미 처리된 사용량이 있을 수 있습니다."
+        case .permission: return localized("이 연결에 구독 사용 권한이 없습니다. ChatGPT 설정에서 이 앱의 권한을 확인하세요.")
+        case .ineligible: return localized("선택한 계정·워크스페이스 또는 정책에서 구독 사용을 허용하지 않습니다.")
+        case .limit: return localized("플랜 또는 이 앱의 사용 한도에 도달했습니다. 사용량 관리에서 확인하세요.")
+        case .unsupported: return localized("이 모델·입력 또는 옵션이 지원되지 않습니다. 모델과 첨부를 확인하세요.")
+        case .authentication: return localized("연결의 인증을 확인하지 못했습니다. 계정 설정을 확인해 주세요.")
+        case .network: return localized("연결이 끊겼거나 일시적으로 사용할 수 없습니다. 부분 답변을 보존했습니다. 자동 재전송하지 않습니다.")
+        case .protocolError: return localized("응답 형식을 확인하지 못했습니다. 자동 재전송하지 않습니다.")
+        case .context: return localized("대화가 전송 크기 한도를 넘었습니다. 조건을 임의로 제외하지 않았습니다. 새 영역 대화를 만들거나 질문을 줄여 주세요.")
+        case .cancelled: return localized("요청을 취소했습니다. 이미 처리된 사용량이 있을 수 있습니다.")
         }
     }
     // An individual request failure does not invalidate a verified account.
@@ -237,7 +243,7 @@ struct PlanDiagnostic: Codable, Equatable {
     let bodyShape: String?
     var contentType: String?
     var summary: String {
-        [Optional(code), httpStatus.map { "HTTP \($0)" }, contentType, parameter.map { "항목: " + $0 }, requestID.map { "요청: " + $0 }].compactMap { $0 }.joined(separator: " · ")
+        [Optional(code), httpStatus.map { "HTTP \($0)" }, contentType, parameter.map { localized("항목: ") + $0 }, requestID.map { localized("요청: ") + $0 }].compactMap { $0 }.joined(separator: " · ")
     }
     init(_ failure: PlanFailure) {
         code = failure.code; httpStatus = failure.httpStatus; requestID = failure.requestID

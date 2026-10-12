@@ -14,6 +14,44 @@ import Security
             PKStrokePoint(location: p, timeOffset: Double(i)*0.01, size: CGSize(width: 2,height: 2), opacity: 1, force: 1, azimuth: 0, altitude: .pi/2)
         }, creationDate: date))
     }
+    func testLanguageRefreshPreservesCanvasDrawingUndoAndViewport() throws {
+        let previous = UserDefaults.standard.object(forKey: AppLanguage.key)
+        defer { UserDefaults.standard.set(previous, forKey: AppLanguage.key) }
+        let store = try store()
+        let id = try XCTUnwrap(store.createNote(title: "보존할 노트", paper: .grid, cover: .blue, folderID: nil, infinite: true))
+        let note = store.note(id)!, page = note.pages[0]
+        let session = DrawingSession(); session.load(noteID: id, pageID: page.id, store: store)
+        let host = CanvasHostView(session: session); session.host = host
+        host.frame = CGRect(x: 0, y: 0, width: 800, height: 1000)
+        func configure() {
+            host.updateAccessibilityLanguage()
+            host.configure(note: note, page: page, store: store, fingerDrawing: false, editingObjects: false,
+                           toolsVisible: true, onSelect: { _ in }, onMove: { _, _, _ in }, onTurnPage: { _ in false })
+            host.layoutIfNeeded()
+        }
+        configure()
+        let drawing = PKDrawing(strokes: [stroke([CGPoint(x: 50, y: 80), CGPoint(x: 190, y: 160)])])
+        XCTAssertTrue(session.commitDrawing(drawing, action: "필기"))
+        session.canvas.setContentOffset(CGPoint(x: 200, y: 300), animated: false)
+        host.canvasDidScroll()
+        let canvas = session.canvas, origin = session.canvasOrigin, offset = canvas.contentOffset, zoom = canvas.zoomScale
+        for language in ["en", "ko", "en"] {
+            UserDefaults.standard.set(language, forKey: AppLanguage.key); configure()
+            XCTAssertTrue(session.canvas === canvas)
+            XCTAssertEqual(session.drawing, drawing)
+            XCTAssertEqual(session.canvasOrigin, origin)
+            XCTAssertEqual(canvas.contentOffset, offset)
+            XCTAssertEqual(canvas.zoomScale, zoom)
+            XCTAssertEqual(canvas.accessibilityLabel, language == "en" ? "Writing canvas" : "필기 용지")
+        }
+        session.undo(); XCTAssertTrue(session.drawing.strokes.isEmpty)
+        session.redo(); XCTAssertEqual(session.drawing, drawing)
+        XCTAssertTrue(store.flushDrawings())
+        XCTAssertEqual(try store.drawing(noteID: id, pageID: page.id), drawing)
+        XCTAssertEqual(store.note(id)?.title, "보존할 노트")
+        session.stop()
+    }
+
     func testSelectedPDFOrderFrozenInputsAndFailureCleanup() async throws {
         let store = try store()
         let id = try XCTUnwrap(store.createNote(title: "Selected", paper: .plain, cover: .blue, folderID: nil))

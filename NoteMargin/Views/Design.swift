@@ -40,6 +40,7 @@ struct NoteCover: View {
 }
 
 struct NotebookForm: View {
+    @AppStorage(AppLanguage.key) private var appLanguage: AppLanguage = .korean
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var store: NoteStore
     var existing: Notebook?
@@ -62,39 +63,39 @@ struct NotebookForm: View {
                         Spacer()
                     }.listRowBackground(Color.clear)
                 }
-                Section("노트 이름") { TextField("제목 없는 노트", text: $title).submitLabel(.done).accessibilityIdentifier("create-note-title") }
-                Section("표지 색상") {
+                Section(localized("노트 이름", language: appLanguage)) { TextField(localized("제목 없는 노트", language: appLanguage), text: $title).submitLabel(.done).accessibilityIdentifier("create-note-title") }
+                Section(localized("표지 색상", language: appLanguage)) {
                     HStack(spacing: 20) {
                         ForEach(CoverColor.allCases) { value in
                             Button { cover = value } label: {
                                 Circle().fill(value.color).frame(width: 38, height: 38)
                                     .overlay { if value == cover { Image(systemName: "checkmark").foregroundStyle(.white).bold() } }
                                     .frame(minWidth: 44, minHeight: 44)
-                            }.buttonStyle(.plain).accessibilityLabel(value.title)
+                            }.buttonStyle(.plain).accessibilityLabel(localized(value.title, language: appLanguage))
                                 .accessibilityAddTraits(value == cover ? .isSelected : [])
                         }
                     }.frame(maxWidth: .infinity)
                 }
                 if existing == nil {
-                    Section("노트 형식") {
-                        Picker("캔버스", selection: $infinite) {
-                            Text("고정 페이지").tag(false)
-                            Text("무한 캔버스").tag(true)
+                    Section(localized("노트 형식", language: appLanguage)) {
+                        Picker(localized("캔버스", language: appLanguage), selection: $infinite) {
+                            Text(localized("고정 페이지", language: appLanguage)).tag(false)
+                            Text(localized("무한 캔버스", language: appLanguage)).tag(true)
                         }.pickerStyle(.segmented).accessibilityIdentifier("note-canvas-mode")
                     }
-                    Section("첫 페이지 용지") {
-                        Picker("용지", selection: $paper) {
-                            ForEach(PaperStyle.allCases) { Text($0.title).tag($0) }
+                    Section(localized("첫 페이지 용지", language: appLanguage)) {
+                        Picker(localized("용지", language: appLanguage), selection: $paper) {
+                            ForEach(PaperStyle.allCases) { Text(localized($0.title, language: appLanguage)).tag($0) }
                         }.pickerStyle(.segmented)
                     }
                 }
             }
-            .navigationTitle(existing == nil ? "새로운 노트" : "노트 설정")
+            .navigationTitle(existing == nil ? localized("새로운 노트", language: appLanguage) : localized("노트 설정", language: appLanguage))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("취소") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) { Button(localized("취소", language: appLanguage)) { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button(existing == nil ? "만들기" : "완료") {
+                    Button(existing == nil ? localized("만들기", language: appLanguage) : localized("완료", language: appLanguage)) {
                         if let existing {
                             if store.updateNote(existing.id, { $0.title = title.trimmedOrUntitled; $0.cover = cover }) { dismiss() }
                         } else if let id = store.createNote(title: title, paper: paper, cover: cover, folderID: folderID, projectID: projectID, infinite: infinite) {
@@ -112,14 +113,15 @@ struct NotebookForm: View {
 }
 
 struct StoreErrorAlert: ViewModifier {
+    @AppStorage(AppLanguage.key) private var appLanguage: AppLanguage = .korean
     @EnvironmentObject private var store: NoteStore
     func body(content: Content) -> some View {
-        content.alert("작업을 완료하지 못했습니다", isPresented: Binding(
+        content.alert(localized("작업을 완료하지 못했습니다", language: appLanguage), isPresented: Binding(
             get: { store.errorMessage != nil },
             set: { if !$0 { store.errorMessage = nil } }
         )) {
-            Button("확인", role: .cancel) { store.errorMessage = nil }
-        } message: { Text(store.errorMessage ?? "") }
+            Button(localized("확인", language: appLanguage), role: .cancel) { store.errorMessage = nil }
+        } message: { Text(store.errorMessage?.text ?? "") }
     }
 }
 
@@ -137,13 +139,13 @@ enum InkTool: String, CaseIterable, Identifiable {
     var isEraser: Bool { self == .eraser || self == .pixelEraser }
     var title: String {
         switch self {
-        case .pen: "펜"
-        case .pencil: "연필"
-        case .marker: "형광펜"
-        case .eraser: "획 지우개"
-        case .pixelEraser: "부분 지우개"
-        case .lasso: "자유 선택"
-        case .rectangle: "네모 선택"
+        case .pen: localized("펜")
+        case .pencil: localized("연필")
+        case .marker: localized("형광펜")
+        case .eraser: localized("획 지우개")
+        case .pixelEraser: localized("부분 지우개")
+        case .lasso: localized("자유 선택")
+        case .rectangle: localized("네모 선택")
         }
     }
 }
@@ -212,6 +214,7 @@ enum InkPalette {
 }
 
 struct DrawingToolsView: View {
+    @AppStorage(AppLanguage.key) private var appLanguage: AppLanguage = .korean
     @ObservedObject var session: DrawingSession
     @Binding var expanded: Bool
     var vertical = false
@@ -241,8 +244,8 @@ struct DrawingToolsView: View {
                         .frame(width: vertical ? 44 : 18, height: vertical ? 18 : 44)
                         .contentShape(Rectangle())
                         .gesture(moveGesture)
-                        .accessibilityLabel("도구 팔레트 이동 손잡이")
-                        .accessibilityHint("끌어서 화면의 위, 아래, 왼쪽, 오른쪽 가장자리에 놓습니다")
+                        .accessibilityLabel(localized("도구 팔레트 이동 손잡이", language: appLanguage))
+                        .accessibilityHint(localized("끌어서 화면의 위, 아래, 왼쪽, 오른쪽 가장자리에 놓습니다", language: appLanguage))
                         .accessibilityIdentifier("ink-tools-drag")
                     colorRail
                 }
@@ -259,8 +262,8 @@ struct DrawingToolsView: View {
                             Capsule().fill(session.selectedTool.isInk ? session.inkColor : Color.accentColor).frame(width: 18, height: 4).padding(.bottom, 8)
                         }.overlay(Circle().stroke(Color.primary.opacity(0.15), lineWidth: 1))
                 }.highPriorityGesture(moveGesture)
-                    .accessibilityHint("누르면 펼치고, 끌면 화면 가장자리로 이동합니다")
-                    .accessibilityLabel(session.selectedTool.title + " · 필기 도구 펼치기").accessibilityIdentifier("ink-tools-expand")
+                    .accessibilityHint(localized("누르면 펼치고, 끌면 화면 가장자리로 이동합니다", language: appLanguage))
+                    .accessibilityLabel(session.selectedTool.title + localized(" · 필기 도구 펼치기", language: appLanguage)).accessibilityIdentifier("ink-tools-expand")
             }
         }.buttonStyle(.plain).foregroundStyle(.primary)
             .shadow(color: .black.opacity(0.12), radius: 8, y: 3)
@@ -276,33 +279,33 @@ struct DrawingToolsView: View {
                             .foregroundStyle(session.selectedTool == tool ? Color.accentColor : Color.primary)
                             .background(session.selectedTool == tool ? Color.accentColor.opacity(0.14) : Color.clear, in: RoundedRectangle(cornerRadius: 10))
                             .contentShape(Rectangle())
-                    }.accessibilityLabel(tool.title).accessibilityIdentifier("ink-tool-" + tool.rawValue)
+                    }.accessibilityLabel(localized(tool.title, language: appLanguage)).accessibilityIdentifier("ink-tool-" + tool.rawValue)
                         .accessibilityAddTraits(session.selectedTool == tool ? .isSelected : [])
                 }
                 eraserToolButton
                 selectionToolButton
                 if session.selectedTool.isSelection {
                     selectionModeMenu
-                    Text(session.selectedStrokeCount == 0 ? "선택" : "\(session.selectedStrokeCount)획")
+                    Text(session.selectedStrokeCount == 0 ? localized("선택", language: appLanguage) : localized("%@획", "\(session.selectedStrokeCount)", language: appLanguage))
                         .font(.caption).frame(width: 44, height: 44)
                         .accessibilityLabel(selectionStatus).accessibilityIdentifier("ink-selection-status")
                     selectionMenu.frame(width: 44, height: 44)
                 } else if session.selectedTool.isInk {
                     Button { widthSettings = true } label: {
-                        Text(session.inkWidth.formatted(.number.precision(.fractionLength(1))))
+                        Text(session.inkWidth.formatted(.number.precision(.fractionLength(1)).locale(appLanguage.locale)))
                             .font(.callout.monospacedDigit()).frame(width: 44, height: 44).contentShape(Rectangle())
-                    }.accessibilityLabel("도구 굵기 및 자").accessibilityIdentifier("ink-width-settings")
+                    }.accessibilityLabel(localized("도구 굵기 및 자", language: appLanguage)).accessibilityIdentifier("ink-width-settings")
                         .popover(isPresented: $widthSettings) { widthControls.padding().frame(width: 280).presentationCompactAdaptation(.popover) }
                 }
                 undoButtons
                 Button { expanded = false } label: {
                     Image(systemName: vertical ? "chevron.right" : "chevron.down").frame(width: 44, height: 44).contentShape(Rectangle())
-                }.accessibilityLabel("필기 도구 접기").accessibilityIdentifier("ink-tools-collapse")
+                }.accessibilityLabel(localized("필기 도구 접기", language: appLanguage)).accessibilityIdentifier("ink-tools-collapse")
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .accessibilityIdentifier("ink-tools-tool-rail")
-        .accessibilityLabel("필기 도구 목록")
+        .accessibilityLabel(localized("필기 도구 목록", language: appLanguage))
     }
     private var eraserTool: InkTool {
         session.selectedTool.isEraser ? session.selectedTool : session.lastEraserTool
@@ -318,10 +321,10 @@ struct DrawingToolsView: View {
                 .background(session.selectedTool.isEraser ? Color.accentColor.opacity(0.14) : Color.clear, in: RoundedRectangle(cornerRadius: 10))
                 .contentShape(Rectangle())
         }
-        .accessibilityLabel("지우개")
-        .accessibilityValue(eraserTool.title + " · " + session.eraserWidth.formatted(.number.precision(.fractionLength(1))))
+        .accessibilityLabel(localized("지우개", language: appLanguage))
+        .accessibilityValue(eraserTool.title + " · " + session.eraserWidth.formatted(.number.precision(.fractionLength(1)).locale(appLanguage.locale)))
         .accessibilityIdentifier("ink-tool-eraser")
-        .accessibilityHint(session.selectedTool.isEraser ? "다시 누르면 지우는 방식과 폭을 변경합니다" : "마지막 지우개를 선택합니다")
+        .accessibilityHint(session.selectedTool.isEraser ? localized("다시 누르면 지우는 방식과 폭을 변경합니다", language: appLanguage) : localized("마지막 지우개를 선택합니다", language: appLanguage))
         .accessibilityAddTraits(session.selectedTool.isEraser ? .isSelected : [])
         .popover(isPresented: $eraserSettings) {
             eraserControls.padding(16).frame(width: 280).presentationCompactAdaptation(.popover)
@@ -329,23 +332,23 @@ struct DrawingToolsView: View {
     }
     private var eraserControls: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("지우개").font(.headline)
-            Picker("지우는 방식", selection: Binding(get: { eraserTool }, set: { session.selectTool($0) })) {
-                Text("획").tag(InkTool.eraser).accessibilityIdentifier("ink-eraser-mode-stroke")
-                Text("부분").tag(InkTool.pixelEraser).accessibilityIdentifier("ink-eraser-mode-partial")
+            Text(localized("지우개", language: appLanguage)).font(.headline)
+            Picker(localized("지우는 방식", language: appLanguage), selection: Binding(get: { eraserTool }, set: { session.selectTool($0) })) {
+                Text(localized("획", language: appLanguage)).tag(InkTool.eraser).accessibilityIdentifier("ink-eraser-mode-stroke")
+                Text(localized("부분", language: appLanguage)).tag(InkTool.pixelEraser).accessibilityIdentifier("ink-eraser-mode-partial")
             }.pickerStyle(.segmented).accessibilityIdentifier("ink-eraser-mode")
             HStack {
-                Text("폭")
+                Text(localized("폭", language: appLanguage))
                 Spacer()
-                Text(session.eraserWidth.formatted(.number.precision(.fractionLength(1))))
+                Text(session.eraserWidth.formatted(.number.precision(.fractionLength(1)).locale(appLanguage.locale)))
                     .monospacedDigit().foregroundStyle(.secondary)
             }
             Slider(value: $session.eraserWidth, in: session.eraserWidthRange, step: 1)
-                .accessibilityLabel("지우개 폭").accessibilityIdentifier("ink-eraser-width-slider")
+                .accessibilityLabel(localized("지우개 폭", language: appLanguage)).accessibilityIdentifier("ink-eraser-width-slider")
                 .onChange(of: session.eraserWidth) { _, _ in session.applyTool() }
             HStack {
                 Spacer()
-                Button("완료") { eraserSettings = false }.accessibilityIdentifier("ink-eraser-settings-done")
+                Button(localized("완료", language: appLanguage)) { eraserSettings = false }.accessibilityIdentifier("ink-eraser-settings-done")
             }
         }
         .foregroundStyle(.primary)
@@ -355,7 +358,7 @@ struct DrawingToolsView: View {
     private var selectionTool: InkTool {
         session.selectedTool.isSelection ? session.selectedTool : session.lastSelectionTool
     }
-    private var selectionModeTitle: String { selectionTool == .lasso ? "자유형" : "박스형" }
+    private var selectionModeTitle: String { selectionTool == .lasso ? localized("자유형", language: appLanguage) : localized("박스형", language: appLanguage) }
     private var selectionToolButton: some View {
         Button { session.selectTool(session.lastSelectionTool) } label: {
             InkToolGlyph(tool: selectionTool).stroke(style: StrokeStyle(lineWidth: 1.7, lineCap: .round, lineJoin: .round))
@@ -364,23 +367,23 @@ struct DrawingToolsView: View {
                 .background(session.selectedTool.isSelection ? Color.accentColor.opacity(0.14) : Color.clear, in: RoundedRectangle(cornerRadius: 10))
                 .contentShape(Rectangle())
         }
-        .accessibilityLabel("선택").accessibilityValue(selectionModeTitle)
+        .accessibilityLabel(localized("선택", language: appLanguage)).accessibilityValue(selectionModeTitle)
         .accessibilityIdentifier("ink-tool-selection")
-        .accessibilityHint("마지막으로 사용한 방식으로 필기를 선택합니다")
+        .accessibilityHint(localized("마지막으로 사용한 방식으로 필기를 선택합니다", language: appLanguage))
         .accessibilityAddTraits(session.selectedTool.isSelection ? .isSelected : [])
     }
     private var selectionModeMenu: some View {
         Menu {
             Button { session.selectTool(.lasso) } label: {
-                Label("자유형", systemImage: selectionTool == .lasso ? "checkmark" : "lasso")
+                Label(localized("자유형", language: appLanguage), systemImage: selectionTool == .lasso ? "checkmark" : "lasso")
             }.accessibilityIdentifier("ink-selection-mode-freeform")
             Button { session.selectTool(.rectangle) } label: {
-                Label("박스형", systemImage: selectionTool == .rectangle ? "checkmark" : "rectangle.dashed")
+                Label(localized("박스형", language: appLanguage), systemImage: selectionTool == .rectangle ? "checkmark" : "rectangle.dashed")
             }.accessibilityIdentifier("ink-selection-mode-box")
         } label: {
             Text(selectionModeTitle).font(.caption).frame(width: 44, height: 44).contentShape(Rectangle())
         }
-        .accessibilityLabel("선택 방식").accessibilityValue(selectionModeTitle)
+        .accessibilityLabel(localized("선택 방식", language: appLanguage)).accessibilityValue(selectionModeTitle)
         .accessibilityIdentifier("ink-selection-mode")
     }
     private var colorRail: some View {
@@ -390,7 +393,7 @@ struct DrawingToolsView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .accessibilityIdentifier("ink-tools-color-rail")
-        .accessibilityLabel("펜 색상 목록")
+        .accessibilityLabel(localized("펜 색상 목록", language: appLanguage))
     }
     private var palette: [String] { InkPalette.values(storedColors) }
     private var selectedColorIndex: Int? {
@@ -408,12 +411,12 @@ struct DrawingToolsView: View {
                 .overlay(Circle().stroke(.gray.opacity(0.6), lineWidth: 1))
                 .padding(4).overlay(Circle().stroke(selected ? Color.accentColor : .clear, lineWidth: 2))
                 .frame(width: 44, height: 44).contentShape(Rectangle())
-        }.accessibilityLabel("펜 색상 \(index + 1)").accessibilityValue(hex)
+        }.accessibilityLabel(localized("펜 색상 %@", "\(index + 1)", language: appLanguage)).accessibilityValue(hex)
             .accessibilityIdentifier("ink-color-\(index)")
-            .accessibilityHint(selected ? "누르면 색상 변경 창을 엽니다" : "누르면 이 색상을 선택합니다")
+            .accessibilityHint(selected ? localized("누르면 색상 변경 창을 엽니다", language: appLanguage) : localized("누르면 이 색상을 선택합니다", language: appLanguage))
             .accessibilityAddTraits(selected ? .isSelected : [])
             .disabled(!session.selectedTool.isInk)
-            .accessibilityAction(named: "색상 변경") { editingColor = index; colorSettings = true }
+            .accessibilityAction(named: localized("색상 변경", language: appLanguage)) { editingColor = index; colorSettings = true }
             .popover(isPresented: Binding(get: { colorSettings && editingColor == index }, set: { colorSettings = $0 })) {
                 colorControls.padding().frame(width: 300).presentationCompactAdaptation(.popover)
             }
@@ -425,63 +428,63 @@ struct DrawingToolsView: View {
     }
     private var colorControls: some View {
         VStack(spacing: 12) {
-            Text("펜 색상 \(editingColor + 1) 변경").font(.headline)
+            Text(localized("펜 색상 %@ 변경", "\(editingColor + 1)", language: appLanguage)).font(.headline)
             HStack(spacing: 4) {
                 ForEach(colors, id: \.0) { name, color in
                     Button { setPaletteColor(color) } label: {
                         Circle().fill(color).frame(width: 28, height: 28).overlay(Circle().stroke(.gray, lineWidth: 1)).frame(width: 40, height: 44)
-                    }.accessibilityLabel(name + " 잉크")
+                    }.accessibilityLabel(localized(name, language: appLanguage) + localized(" 잉크", language: appLanguage))
                 }
             }
-            ColorPicker("사용자 지정 색상", selection: Binding(get: { InkPalette.color(palette[editingColor]) }, set: setPaletteColor), supportsOpacity: false)
+            ColorPicker(localized("사용자 지정 색상", language: appLanguage), selection: Binding(get: { InkPalette.color(palette[editingColor]) }, set: setPaletteColor), supportsOpacity: false)
             Text("#" + palette[editingColor]).font(.caption.monospaced())
-            Button("완료") { colorSettings = false }
+            Button(localized("완료", language: appLanguage)) { colorSettings = false }
         }
     }
     private var widthControls: some View {
         VStack(spacing: 12) {
-            Text(session.selectedTool.title + " 굵기").font(.headline)
-            Slider(value: $session.inkWidth, in: 0.1...12, step: 0.1).accessibilityLabel("도구 굵기")
+            Text(session.selectedTool.title + localized(" 굵기", language: appLanguage)).font(.headline)
+            Slider(value: $session.inkWidth, in: 0.1...12, step: 0.1).accessibilityLabel(localized("도구 굵기", language: appLanguage))
                 .accessibilityIdentifier("ink-width-slider")
                 .onChange(of: session.inkWidth) { _, _ in session.applyTool() }
-            Text(session.inkWidth.formatted(.number.precision(.fractionLength(1)))).monospacedDigit()
-            Toggle("자", isOn: $session.rulerActive).disabled(!session.selectedTool.isInk)
+            Text(session.inkWidth.formatted(.number.precision(.fractionLength(1)).locale(appLanguage.locale))).monospacedDigit()
+            Toggle(localized("자", language: appLanguage), isOn: $session.rulerActive).disabled(!session.selectedTool.isInk)
                 .onChange(of: session.rulerActive) { _, _ in session.applyTool() }
         }
     }
     private var undoButtons: some View {
         let layout = vertical ? AnyLayout(VStackLayout(spacing: 0)) : AnyLayout(HStackLayout(spacing: 0))
         return layout {
-            Button { session.undo() } label: { Image(systemName: "arrow.uturn.backward").frame(width: 44, height: 44).contentShape(Rectangle()) }.disabled(!session.canUndo).accessibilityLabel("실행 취소")
-            Button { session.redo() } label: { Image(systemName: "arrow.uturn.forward").frame(width: 44, height: 44).contentShape(Rectangle()) }.disabled(!session.canRedo).accessibilityLabel("다시 실행")
+            Button { session.undo() } label: { Image(systemName: "arrow.uturn.backward").frame(width: 44, height: 44).contentShape(Rectangle()) }.disabled(!session.canUndo).accessibilityLabel(localized("실행 취소", language: appLanguage))
+            Button { session.redo() } label: { Image(systemName: "arrow.uturn.forward").frame(width: 44, height: 44).contentShape(Rectangle()) }.disabled(!session.canRedo).accessibilityLabel(localized("다시 실행", language: appLanguage))
         }
     }
     private var selectionStatus: String {
-        if session.selectedStrokeCount > 0 { return "\(session.selectedStrokeCount)획 선택 · 안쪽을 끌어 이동" }
-        return selectionTool == .lasso ? "필기를 자유형으로 둘러싸세요" : "필기를 네모로 둘러싸세요"
+        if session.selectedStrokeCount > 0 { return localized("%@획 선택 · 안쪽을 끌어 이동", "\(session.selectedStrokeCount)", language: appLanguage) }
+        return selectionTool == .lasso ? localized("필기를 자유형으로 둘러싸세요", language: appLanguage) : localized("필기를 네모로 둘러싸세요", language: appLanguage)
     }
     private var selectionMenu: some View {
         Menu {
             Text(selectionStatus)
-            Text("모서리로 크기 조절 · 안쪽을 끌어 이동 · 두 손가락으로 화면 이동")
-            Button("복사", systemImage: "doc.on.doc") { session.host?.copySelectedInk() }.disabled(session.selectedStrokeCount == 0)
-            Button("잘라내기", systemImage: "scissors") { session.host?.copySelectedInk(cut: true) }.disabled(session.selectedStrokeCount == 0)
-            Button("복제", systemImage: "plus.square.on.square") { session.host?.pasteInk(duplicate: true) }.disabled(session.selectedStrokeCount == 0)
-            Button("붙여넣기", systemImage: "doc.on.clipboard") { session.host?.pasteInk() }.disabled(DrawingSession.copiedInk == nil)
-            Button(session.selectionIsGrouped ? "그룹 해제" : "그룹화", systemImage: "square.3.layers.3d") {
+            Text(localized("모서리로 크기 조절 · 안쪽을 끌어 이동 · 두 손가락으로 화면 이동", language: appLanguage))
+            Button(localized("복사", language: appLanguage), systemImage: "doc.on.doc") { session.host?.copySelectedInk() }.disabled(session.selectedStrokeCount == 0)
+            Button(localized("잘라내기", language: appLanguage), systemImage: "scissors") { session.host?.copySelectedInk(cut: true) }.disabled(session.selectedStrokeCount == 0)
+            Button(localized("복제", language: appLanguage), systemImage: "plus.square.on.square") { session.host?.pasteInk(duplicate: true) }.disabled(session.selectedStrokeCount == 0)
+            Button(localized("붙여넣기", language: appLanguage), systemImage: "doc.on.clipboard") { session.host?.pasteInk() }.disabled(DrawingSession.copiedInk == nil)
+            Button(session.selectionIsGrouped ? localized("그룹 해제", language: appLanguage) : localized("그룹화", language: appLanguage), systemImage: "square.3.layers.3d") {
                 if session.selectionIsGrouped { session.host?.ungroupSelectedInk() }
                 else { session.host?.groupSelectedInk() }
             }.disabled(session.selectedStrokeCount < 2 && !session.selectionIsGrouped)
-            Button("저장", systemImage: "square.and.arrow.down") { session.saveSelectedInk() }
+            Button(localized("저장", language: appLanguage), systemImage: "square.and.arrow.down") { session.saveSelectedInk() }
                 .disabled(session.selectedStrokeCount == 0)
-            Menu("필기 크기", systemImage: "arrow.up.left.and.arrow.down.right") {
-                Button("작게 (90%)") { session.host?.scaleSelectedInk(by: 0.9) }
-                Button("크게 (110%)") { session.host?.scaleSelectedInk(by: 1.1) }
+            Menu(localized("필기 크기", language: appLanguage), systemImage: "arrow.up.left.and.arrow.down.right") {
+                Button(localized("작게 (90%)", language: appLanguage)) { session.host?.scaleSelectedInk(by: 0.9) }
+                Button(localized("크게 (110%)", language: appLanguage)) { session.host?.scaleSelectedInk(by: 1.1) }
             }.disabled(session.selectedStrokeCount == 0)
-            Button("삭제", systemImage: "trash", role: .destructive) { session.host?.deleteSelectedInk() }.disabled(session.selectedStrokeCount == 0)
-            Button("선택 해제") { session.host?.clearInkSelection() }
+            Button(localized("삭제", language: appLanguage), systemImage: "trash", role: .destructive) { session.host?.deleteSelectedInk() }.disabled(session.selectedStrokeCount == 0)
+            Button(localized("선택 해제", language: appLanguage)) { session.host?.clearInkSelection() }
         } label: { Image(systemName: "ellipsis.circle").frame(width: 44, height: 44).contentShape(Rectangle()) }
-            .accessibilityLabel("편집").accessibilityIdentifier("ink-selection-menu")
+            .accessibilityLabel(localized("편집", language: appLanguage)).accessibilityIdentifier("ink-selection-menu")
     }
 }
 
@@ -489,22 +492,23 @@ struct DrawingToolsView: View {
 /// Selection actions are independent of the palette's scroll/collapse state.
 /// The host publishes the final selection rect, not every live pointer sample.
 private struct InkSelectionActionBar: View {
+    @AppStorage(AppLanguage.key) private var appLanguage: AppLanguage = .korean
     @ObservedObject var session: DrawingSession
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 2) {
-                action("복제", icon: "plus.square.on.square", id: "duplicate") { session.host?.pasteInk(duplicate: true) }
-                action("잘라내기", icon: "scissors", id: "cut") { session.host?.copySelectedInk(cut: true) }
-                action("복사", icon: "doc.on.doc", id: "copy") { session.host?.copySelectedInk() }
-                action("붙여넣기", icon: "doc.on.clipboard", id: "paste") { session.host?.pasteInk() }
+                action(localized("복제", language: appLanguage), icon: "plus.square.on.square", id: "duplicate") { session.host?.pasteInk(duplicate: true) }
+                action(localized("잘라내기", language: appLanguage), icon: "scissors", id: "cut") { session.host?.copySelectedInk(cut: true) }
+                action(localized("복사", language: appLanguage), icon: "doc.on.doc", id: "copy") { session.host?.copySelectedInk() }
+                action(localized("붙여넣기", language: appLanguage), icon: "doc.on.clipboard", id: "paste") { session.host?.pasteInk() }
                     .disabled(DrawingSession.copiedInk == nil)
-                action(session.selectionIsGrouped ? "그룹 해제" : "그룹화", icon: "square.3.layers.3d", id: "group") {
+                action(session.selectionIsGrouped ? localized("그룹 해제", language: appLanguage) : localized("그룹화", language: appLanguage), icon: "square.3.layers.3d", id: "group") {
                     if session.selectionIsGrouped { session.host?.ungroupSelectedInk() }
                     else { session.host?.groupSelectedInk() }
                 }.disabled(session.selectedStrokeCount < 2 && !session.selectionIsGrouped)
-                action("삭제", icon: "trash", id: "delete", destructive: true) { session.host?.deleteSelectedInk() }
-                action("저장", icon: "square.and.arrow.down", id: "save") { session.saveSelectedInk() }
+                action(localized("삭제", language: appLanguage), icon: "trash", id: "delete", destructive: true) { session.host?.deleteSelectedInk() }
+                action(localized("저장", language: appLanguage), icon: "square.and.arrow.down", id: "save") { session.saveSelectedInk() }
             }
         }
         .padding(6)
@@ -620,6 +624,7 @@ extension ToolDock {
 }
 
 struct DockedDrawingTools: View {
+    @AppStorage(AppLanguage.key) private var appLanguage: AppLanguage = .korean
     @ObservedObject var session: DrawingSession
     @AppStorage("inkTools.dock.edge") private var edge = "bottom"
     @AppStorage("inkTools.dock.fraction") private var fraction = 1.0
@@ -660,10 +665,10 @@ struct DockedDrawingTools: View {
                     DrawingToolsView(session: session, expanded: .constant(true))
                         .frame(width: min(430, geometry.size.width-24), height: 56).padding(8)
                 }
-                .accessibilityAction(named: "위쪽으로 이동") { edge = "top"; fraction = 0.5 }
-                .accessibilityAction(named: "아래쪽으로 이동") { edge = "bottom"; fraction = 0.5 }
-                .accessibilityAction(named: "왼쪽으로 이동") { edge = "left"; fraction = 0.5 }
-                .accessibilityAction(named: "오른쪽으로 이동") { edge = "right"; fraction = 0.5 }
+                .accessibilityAction(named: localized("위쪽으로 이동", language: appLanguage)) { edge = "top"; fraction = 0.5 }
+                .accessibilityAction(named: localized("아래쪽으로 이동", language: appLanguage)) { edge = "bottom"; fraction = 0.5 }
+                .accessibilityAction(named: localized("왼쪽으로 이동", language: appLanguage)) { edge = "left"; fraction = 0.5 }
+                .accessibilityAction(named: localized("오른쪽으로 이동", language: appLanguage)) { edge = "right"; fraction = 0.5 }
             }
             if session.selectedStrokeCount > 0,
                let selectionRect = session.selectionActionRect,

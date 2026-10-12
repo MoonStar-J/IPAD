@@ -4,8 +4,8 @@ import Combine
 
 @MainActor final class NoteSummaryService: ObservableObject {
     @Published private(set) var activeID: UUID?
-    @Published private(set) var message = ""
-    @Published private(set) var failure: String?
+    @Published private(set) var message: AppMessage = ""
+    @Published private(set) var failure: AppMessage?
     @Published private(set) var unsaved = false
     private weak var store: NoteStore?
     private let connection: ChatGPTPlanConnection
@@ -69,10 +69,10 @@ import Combine
                           abs(clipped.minX) < 1e9, abs(clipped.minY) < 1e9, abs(clipped.maxX) < 1e9, abs(clipped.maxY) < 1e9 else { throw CocoaError(.fileReadCorruptFile) }
                     let x0 = Int(floor(clipped.minX / size.width)), x1 = Int(floor(clipped.maxX / size.width))
                     let y0 = Int(floor(clipped.minY / size.height)), y1 = Int(floor(clipped.maxY / size.height))
-                    guard (x1-x0+1) * (y1-y0+1) <= 10_000 else { throw SummaryError.message("요약 영역이 너무 넓습니다. 사각형으로 범위를 나눠 주세요.") }
+                    guard (x1-x0+1) * (y1-y0+1) <= 10_000 else { throw SummaryError.message(AppMessage("요약 영역이 너무 넓습니다. 사각형으로 범위를 나눠 주세요.")) }
                     for y in y0...y1 { for x in x0...x1 { cells.insert(Cell(x: x, y: y)) } }
                 }
-                guard cells.count <= 10_000 else { throw SummaryError.message("요약 영역이 너무 많습니다. 범위를 나눠 주세요.") }
+                guard cells.count <= 10_000 else { throw SummaryError.message(AppMessage("요약 영역이 너무 많습니다. 범위를 나눠 주세요.")) }
                 rectangles = cells.sorted { $0.y == $1.y ? $0.x < $1.x : $0.y < $1.y }.map {
                     let tile = CGRect(x: Double($0.x)*size.width, y: Double($0.y)*size.height, width: size.width, height: size.height).insetBy(dx: -12, dy: -12)
                     return region.map { tile.intersection($0) } ?? tile
@@ -88,18 +88,18 @@ import Combine
                 result.append(SummarySource(id: "S\(result.count + 1)", pageID: page.id, label: label, rect: rect))
             }
         }
-        guard hasContent, !result.isEmpty else { throw SummaryError.message("선택 범위에 요약할 내용이 없습니다.") }
+        guard hasContent, !result.isEmpty else { throw SummaryError.message(AppMessage("선택 범위에 요약할 내용이 없습니다.")) }
         return result
     }
 
     private func verifyConnection(summary: NoteSummary? = nil) throws -> (String, String) {
         guard connection.state == .ready, let account = connection.selected,
               connection.models.contains(where: { $0.slug == connection.model }) else {
-            throw SummaryError.message("ChatGPT 연결과 사용할 모델을 확인해 주세요.")
+            throw SummaryError.message(AppMessage("ChatGPT 연결과 사용할 모델을 확인해 주세요."))
         }
-        guard PlanModelSupport.acceptsImage(connection.model) else { throw SummaryError.message("선택 모델의 이미지 읽기 지원이 확인되지 않았습니다. 이미지 지원 모델을 선택해 주세요.") }
+        guard PlanModelSupport.acceptsImage(connection.model) else { throw SummaryError.message(AppMessage("선택 모델의 이미지 읽기 지원이 확인되지 않았습니다. 이미지 지원 모델을 선택해 주세요.")) }
         if let summary, summary.account != account || summary.model != connection.model {
-            throw SummaryError.message("생성 당시 계정과 모델(\(summary.model))을 선택한 뒤 다시 시도해 주세요.")
+            throw SummaryError.message(AppMessage("생성 당시 계정과 모델(%@)을 선택한 뒤 다시 시도해 주세요.", "\(summary.model)"))
         }
         return (account, connection.model)
     }
@@ -111,12 +111,12 @@ import Combine
             let (account, model) = try verifyConnection()
             let instructions = SummaryPrompt.resolve(request: prompt, saved: UserDefaults.standard.string(forKey: SummaryPrompt.defaultKey) ?? "")
             try SummaryPrompt.validateInstructions(instructions, policy: ContextBudget())
-            guard store.flushDrawings(), let source = store.note(sourceID) else { throw SummaryError.message(store.errorMessage ?? "원본 저장에 실패했습니다.") }
+            guard store.flushDrawings(), let source = store.note(sourceID) else { throw SummaryError.message(store.errorMessage ?? AppMessage("원본 저장에 실패했습니다.")) }
             let sources = try Self.sources(note: source, choices: choices, region: region, store: store)
             let id = try store.createSummary(source: source, sources: sources, title: title, model: model, account: account, instructions: instructions)
             resume(id)
             return id
-        } catch { failure = error.localizedDescription; return nil }
+        } catch { failure = AppMessage(error); return nil }
     }
     func cancel() { task?.cancel() }
     func saveAgain() {
@@ -126,7 +126,7 @@ import Combine
             if saved.final != nil { saved.failure = nil }
             try store.saveSummary(retained.id, work: saved, state: retained.state)
             self.retained = nil; unsaved = false; failure = nil
-        } catch { failure = "받은 결과를 저장하지 못했습니다. 다시 저장해 주세요. " + error.localizedDescription }
+        } catch { failure = AppMessage("받은 결과를 저장하지 못했습니다. 다시 저장해 주세요. %@", error: error) }
     }
     func resume(_ id: UUID) {
         guard !busy, !unsaved, let store, let summary = store.note(id)?.summary else { return }
@@ -146,13 +146,13 @@ import Combine
                     saved.batches.replaceSubrange(index...index, with: [Array(batch[..<middle]), Array(batch[middle...])])
                 } else if !saved.mergeInputs.isEmpty {
                     saved.policy.inputTokens = max(4000, saved.policy.inputTokens / 2)
-                } else { throw SummaryError.message("한 영역도 요청 한도를 넘었습니다. 보존된 부분 결과를 확인하고 더 작은 범위로 새 요약을 만들어 주세요.") }
+                } else { throw SummaryError.message(AppMessage("한 영역도 요청 한도를 넘었습니다. 보존된 부분 결과를 확인하고 더 작은 범위로 새 요약을 만들어 주세요.")) }
                 saved.contextRejected = false
             }
             saved.failure = nil
             work = saved; activeID = id; failure = nil; generation = connection.generation
             task = Task { [weak self] in await self?.run(id, summary: summary) }
-        } catch { failure = error.localizedDescription }
+        } catch { failure = AppMessage(error) }
     }
 
     private func save(_ id: UUID, state: NoteSummary.State) throws {
@@ -160,7 +160,7 @@ import Combine
         do { try store.saveSummary(id, work: work, state: state); lastSave = Date() }
         catch {
             retained = (id, work, state); unsaved = true
-            throw SummaryError.message("결과를 저장하지 못했습니다. GPT 재요청 없이 ‘다시 저장’을 눌러 주세요. " + error.localizedDescription)
+            throw SummaryError.message(AppMessage("결과를 저장하지 못했습니다. GPT 재요청 없이 ‘다시 저장’을 눌러 주세요. %@", error: error))
         }
     }
     private func check(_ id: UUID) throws {
@@ -177,7 +177,7 @@ import Combine
             while let current = work, current.inputs.count < current.sources.count {
                 try check(id)
                 let index = current.inputs.count, source = current.sources[index]
-                message = "준비 중 · \(index) / \(current.sources.count)영역"
+                message = AppMessage("준비 중 · %@ / %@영역", "\(index)", "\(current.sources.count)")
                 let input: SummaryInput = try autoreleasepool {
                     guard let page = current.snapshot.pages.first(where: { $0.id == source.pageID }) else { throw CocoaError(.fileReadCorruptFile) }
                     for element in page.elements where element.kind == .image && source.rect.intersects(CGRect(x: element.x, y: element.y, width: element.width, height: element.height)) {
@@ -200,13 +200,13 @@ import Combine
                 try save(id, state: .preparing)
                 await Task.yield()
             }
-            guard work!.inputs.contains(where: \.contentPresent) else { throw SummaryError.message("선택 범위에 요약할 내용이 없습니다. GPT 요청을 보내지 않았습니다.") }
+            guard work!.inputs.contains(where: \.contentPresent) else { throw SummaryError.message(AppMessage("선택 범위에 요약할 내용이 없습니다. GPT 요청을 보내지 않았습니다.")) }
             if work!.batches.isEmpty { work!.batches = try SummaryPrompt.batches(work!.inputs, policy: work!.policy, instructions: work!.resolvedInstructions) }
             try save(id, state: .summarizing)
             while work!.fragments.count < work!.batches.count {
                 try check(id)
                 let index = work!.fragments.count, batch = work!.batches[index]
-                message = "요약 중 · \(index) / \(work!.batches.count)묶음"
+                message = AppMessage("요약 중 · %@ / %@묶음", "\(index)", "\(work!.batches.count)")
                 let inputs = batch.map { work!.inputs[$0] }
                 let body = try imageRequest(id: id, inputs: inputs, model: summary.model)
                 let result = try await request(body, id: id, account: summary.account)
@@ -219,25 +219,25 @@ import Combine
             if work!.fragments.count == 1 { work!.final = work!.fragments[0].text }
             else { try await merge(id: id, summary: summary) }
             try check(id)
-            message = "저장 중"
+            message = AppMessage("저장 중")
             try save(id, state: .completed)
-            message = "완료"
+            message = AppMessage("완료")
         } catch {
             if store?.note(id) == nil {
-                retained = nil; unsaved = false; failure = "요약 노트가 삭제되어 작업을 중단했습니다."
+                retained = nil; unsaved = false; failure = AppMessage("요약 노트가 삭제되어 작업을 중단했습니다.")
                 return
             }
             let cancelled = Task.isCancelled || error is CancellationError
             let state: NoteSummary.State = cancelled ? .cancelled : .failed
-            let text = cancelled ? "중단했습니다. 완료된 묶음은 보존되며 다시 시도할 수 있습니다." : error.localizedDescription
-            work?.failure = text
+            let text = cancelled ? AppMessage("중단했습니다. 완료된 묶음은 보존되며 다시 시도할 수 있습니다.") : AppMessage(error)
+            work?.failure = text.text
             if let error = error as? PlanFailure {
                 work?.contextRejected = error.kind == .context
                 if generation == connection.generation { connection.handle(error, duringInference: true) }
             }
             failure = text
             if !unsaved {
-                do { try save(id, state: state) } catch { failure = error.localizedDescription }
+                do { try save(id, state: state) } catch { failure = AppMessage(error) }
             } else if let work { retained = (id, work, work.final == nil ? state : .completed) }
         }
     }
@@ -259,7 +259,7 @@ import Combine
         guard let store else { throw CocoaError(.fileNoSuchFile) }
         let content = try inputs.flatMap { input -> [PlanRequest.Content] in
             let data = try store.summaryAsset(id, name: input.imageAsset)
-            guard data.count == input.imageBytes, MemoryHash.data(data) == input.imageHash, UIImage(data: data) != nil else { throw SummaryError.message("보존된 입력을 읽을 수 없습니다. 원본으로 새 요약을 만들어 주세요.") }
+            guard data.count == input.imageBytes, MemoryHash.data(data) == input.imageHash, UIImage(data: data) != nil else { throw SummaryError.message(AppMessage("보존된 입력을 읽을 수 없습니다. 원본으로 새 요약을 만들어 주세요.")) }
             return [.init(type: "input_text", text: "[\(input.source.id)] \(input.source.label)\n보조 추출 텍스트:\n" + input.text),
                     .init(type: "input_image", image_url: "data:image/png;base64," + data.base64EncodedString())]
         }
@@ -276,12 +276,12 @@ import Combine
             guard let self, self.activeID == id, self.generation == self.connection.generation, !self.unsaved else { return }
             if !result.text.isEmpty { self.work?.partial = result.text }
             if result.status == .streaming && Date().timeIntervalSince(self.lastSave) >= 1 {
-                do { try self.save(id, state: .summarizing) } catch { self.failure = error.localizedDescription; self.task?.cancel() }
+                do { try self.save(id, state: .summarizing) } catch { self.failure = AppMessage(error); self.task?.cancel() }
             }
         }
         try check(id)
         if let failure = result.failure { throw failure }
-        guard result.status == .completed else { throw SummaryError.message("응답이 완료되지 않았습니다. 부분 결과를 보존했습니다.") }
+        guard result.status == .completed else { throw SummaryError.message(AppMessage("응답이 완료되지 않았습니다. 부분 결과를 보존했습니다.")) }
         return result.text
     }
 
@@ -294,7 +294,7 @@ import Combine
                 let outputs = work!.mergeOutputs
                 if outputs.count == 1 { work!.final = outputs[0].text; break }
                 guard outputs.reduce(0, { $0 + $1.text.utf8.count }) < inputs.reduce(0, { $0 + $1.text.utf8.count }) else {
-                    throw SummaryError.message("통합 결과가 충분히 줄어들지 않았습니다. 중간 결과를 보존했습니다.")
+                    throw SummaryError.message(AppMessage("통합 결과가 충분히 줄어들지 않았습니다. 중간 결과를 보존했습니다."))
                 }
                 work!.mergeInputs = outputs; work!.mergeOutputs = []; work!.mergeCursor = 0
                 try save(id, state: .summarizing)
@@ -310,7 +310,7 @@ import Combine
                 // next stage merges these pieces again, retaining the same sources.
                 let fragment = inputs[end]
                 let limit = work!.policy.usable - work!.resolvedInstructions.utf8.count - 2048
-                guard limit >= 1000 else { throw SummaryError.message("통합 요청 한도가 너무 작습니다. 보존된 결과를 확인해 주세요.") }
+                guard limit >= 1000 else { throw SummaryError.message(AppMessage("통합 요청 한도가 너무 작습니다. 보존된 결과를 확인해 주세요.")) }
                 var pieces: [SummaryFragment] = [], text = "", size = 0
                 for character in fragment.text {
                     let count = String(character).utf8.count
@@ -328,7 +328,7 @@ import Combine
                 try save(id, state: .summarizing)
                 continue
             }
-            message = "통합 중 · \(work!.mergeCursor) / \(inputs.count)묶음"
+            message = AppMessage("통합 중 · %@ / %@묶음", "\(work!.mergeCursor)", "\(inputs.count)")
             let sources = Array(Set(selected.flatMap(\.sources))).sorted()
             let text = "다음 중간 요약을 하나로 통합하세요. 출처·핵심 조건·수식·불확실성을 보존하세요. 기존 출처 식별자를 유지하세요.\n\n" + selected.map(\.text).joined(separator: "\n\n---\n\n")
             let body = PlanRequest(model: summary.model, instructions: work!.resolvedInstructions, input: [.init(role: "user", content: [.init(type: "input_text", text: text)])])

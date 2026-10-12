@@ -28,7 +28,7 @@ enum ExportService {
         guard store.flushDrawings() else { throw CocoaError(.fileWriteUnknown) }
         try Task.checkCancellation()
         let choices = try pageChoices(note: note, store: store).filter { selection == nil || selection!.contains($0.id) }
-        guard !choices.isEmpty else { throw SummaryError.message("내보낼 페이지를 선택해 주세요.") }
+        guard !choices.isEmpty else { throw SummaryError.message(AppMessage("내보낼 페이지를 선택해 주세요.")) }
         let url = try exportURL(title: note.title, extension: "pdf")
         let directory = url.deletingLastPathComponent()
         var completed = false
@@ -127,7 +127,7 @@ enum ExportService {
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let safeTitle = String(title.map { "/\\:?%*|\"<>".contains($0) ? "_" : $0 }.prefix(80))
-        return directory.appendingPathComponent(safeTitle.isEmpty ? "노트" : safeTitle).appendingPathExtension(suffix)
+        return directory.appendingPathComponent(safeTitle.isEmpty ? localized("노트") : safeTitle).appendingPathExtension(suffix)
     }
 }
 

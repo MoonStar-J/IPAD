@@ -6,11 +6,11 @@ import Security
 final class GoogleDriveImport: NSObject, ObservableObject, ASWebAuthenticationPresentationContextProviding, URLSessionTaskDelegate {
     static let shared = GoogleDriveImport()
     @Published private(set) var busy = false
-    @Published private(set) var errorMessage: String?
+    @Published private(set) var errorMessage: AppMessage?
     @Published private var credential: Credential?
     private var attemptID: UUID?
     var isConnected: Bool { credential != nil }
-    var account: String { credential?.account ?? "Google 계정" }
+    var account: String { credential?.account ?? localized("Google 계정") }
     private var browser: ASWebAuthenticationSession?
     private var continuation: CheckedContinuation<URL, Error>?
     private var anchor: UIWindow?
@@ -35,7 +35,7 @@ final class GoogleDriveImport: NSObject, ObservableObject, ASWebAuthenticationPr
         configured = configuration; keychainService = service
         super.init()
         if let session { http = session }
-        do { try restoreCredential() } catch { errorMessage = error.localizedDescription }
+        do { try restoreCredential() } catch { errorMessage = AppMessage(error) }
     }
     var configurationMissing: Bool { configured == nil }
     private var keychainQuery: [String: Any] {
@@ -61,7 +61,7 @@ final class GoogleDriveImport: NSObject, ObservableObject, ASWebAuthenticationPr
             guard credential != nil else { return }
             try await loadAccount()
             errorMessage = nil
-        } catch is CancellationError {} catch { errorMessage = error.localizedDescription }
+        } catch is CancellationError {} catch { errorMessage = AppMessage(error) }
     }
     func connect(selectAccount: Bool = false) async {
         guard !busy else { return }
@@ -70,7 +70,7 @@ final class GoogleDriveImport: NSObject, ObservableObject, ASWebAuthenticationPr
             _ = try await authorize(selectAccount: selectAccount, picking: false)
             try await loadAccount()
             errorMessage = nil
-        } catch is CancellationError {} catch { errorMessage = error.localizedDescription }
+        } catch is CancellationError {} catch { errorMessage = AppMessage(error) }
     }
     func disconnect() throws {
         guard !busy else { return }
@@ -210,61 +210,63 @@ final class GoogleDriveImport: NSObject, ObservableObject, ASWebAuthenticationPr
 }
 
 struct GoogleDriveImportButton: View {
+    @AppStorage(AppLanguage.key) private var appLanguage: AppLanguage = .korean
     let start: (@escaping () async throws -> PDFImportContents) -> Void
     @ObservedObject private var drive = GoogleDriveImport.shared
     @State private var showingConnection = false
     var body: some View {
-        Button(drive.isConnected ? "Google Drive 연결 관리" : "Google Drive 연결", systemImage: "cloud") {
+        Button(drive.isConnected ? localized("Google Drive 연결 관리", language: appLanguage) : localized("Google Drive 연결", language: appLanguage), systemImage: "cloud") {
             showingConnection = true
         }.accessibilityIdentifier("pdf-import-google-drive")
             .sheet(isPresented: $showingConnection) { GoogleDriveConnectionView(drive: drive) }
         if drive.isConnected {
             Text(drive.account).font(.footnote).foregroundStyle(.secondary)
-            Button("Drive 파일 선택") { start { try await drive.pickPDF(selectAccount: false) } }
+            Button(localized("Drive 파일 선택", language: appLanguage)) { start { try await drive.pickPDF(selectAccount: false) } }
                 .disabled(drive.busy)
         }
-        Text("선택한 PDF만 접근합니다.").font(.footnote).foregroundStyle(.secondary)
+        Text(localized("선택한 PDF만 접근합니다.", language: appLanguage)).font(.footnote).foregroundStyle(.secondary)
     }
 }
 
 private struct GoogleDriveConnectionView: View {
+    @AppStorage(AppLanguage.key) private var appLanguage: AppLanguage = .korean
     @ObservedObject var drive: GoogleDriveImport
     @Environment(\.dismiss) private var dismiss
     @State private var operation: Task<Void, Never>?
-    @State private var localError: String?
+    @State private var localError: AppMessage?
     var body: some View {
         NavigationStack {
             List {
                 Section {
-                    Label(drive.isConnected ? "연결됨" : "연결 안 됨", systemImage: drive.isConnected ? "checkmark.circle" : "cloud")
+                    Label(drive.isConnected ? localized("연결됨", language: appLanguage) : localized("연결 안 됨", language: appLanguage), systemImage: drive.isConnected ? "checkmark.circle" : "cloud")
                     if drive.isConnected { Text(drive.account) }
-                    if let error = localError ?? drive.errorMessage { Text(error).foregroundStyle(.red) }
+                    if let error = localError ?? drive.errorMessage { Text(error.text).foregroundStyle(.red) }
                 }
                 if drive.configurationMissing {
-                    Section("앱 설정 필요") {
-                        Text("개발자가 Google Cloud에서 이 앱의 iOS OAuth 클라이언트를 등록해야 합니다.")
-                        Text("GOOGLE_CLIENT_ID와 GOOGLE_REVERSED_CLIENT_ID가 누락되었거나 일치하지 않습니다. 앱 빌드 설정을 완료한 버전이 필요합니다.")
+                    Section(localized("앱 설정 필요", language: appLanguage)) {
+                        Text(localized("개발자가 Google Cloud에서 이 앱의 iOS OAuth 클라이언트를 등록해야 합니다.", language: appLanguage))
+                        Text(localized("GOOGLE_CLIENT_ID와 GOOGLE_REVERSED_CLIENT_ID가 누락되었거나 일치하지 않습니다. 앱 빌드 설정을 완료한 버전이 필요합니다.", language: appLanguage))
                             .font(.footnote)
                     }
                 } else {
                     Section {
-                        Button(drive.isConnected ? "다시 연결" : "Google에 로그인") {
+                        Button(drive.isConnected ? localized("다시 연결", language: appLanguage) : localized("Google에 로그인", language: appLanguage)) {
                             operation = Task { await drive.connect() }
                         }.disabled(drive.busy)
-                        Button("다른 Google 계정 연결") {
+                        Button(localized("다른 Google 계정 연결", language: appLanguage)) {
                             operation = Task { await drive.connect(selectAccount: true) }
                         }.disabled(drive.busy)
                         if drive.isConnected {
-                            Button("이 기기에서 연결 해제", role: .destructive) {
-                                do { try drive.disconnect() } catch { localError = error.localizedDescription }
+                            Button(localized("이 기기에서 연결 해제", language: appLanguage), role: .destructive) {
+                                do { try drive.disconnect() } catch { localError = AppMessage(error) }
                             }.disabled(drive.busy)
                         }
-                        if drive.busy { ProgressView("Google 연결 중…") }
-                    } footer: { Text("연결 해제는 이 기기의 저장된 연결을 삭제합니다. Google 계정의 접근 허용은 계정 설정에서 철회할 수 있습니다.") }
+                        if drive.busy { ProgressView(localized("Google 연결 중…", language: appLanguage)) }
+                    } footer: { Text(localized("연결 해제는 이 기기의 저장된 연결을 삭제합니다. Google 계정의 접근 허용은 계정 설정에서 철회할 수 있습니다.", language: appLanguage)) }
                 }
             }
-            .navigationTitle("Google Drive 연결").navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("완료") { operation?.cancel(); dismiss() } } }
+            .navigationTitle(localized("Google Drive 연결", language: appLanguage)).navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button(localized("완료", language: appLanguage)) { operation?.cancel(); dismiss() } } }
             .task { await drive.restoreConnection() }
             .onDisappear { operation?.cancel() }
         }

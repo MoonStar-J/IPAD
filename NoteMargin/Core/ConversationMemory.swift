@@ -212,14 +212,14 @@ enum ContextAction: Error, LocalizedError, Equatable {
     case missingImage, invalidReference, overflow, payloadOverflow, staleSummary, nothingToCompress, invalidSummary, invalidScope
     var errorDescription: String? {
         switch self {
-        case .missingImage: return "필수 원본 이미지가 없거나 손상되었습니다. 원본을 복원하거나 새 문제로 다시 캡처해 주세요. 작성 중 질문은 보존됩니다."
-        case .invalidReference: return "인용한 답변의 원문·버전을 확인할 수 없습니다. ‘이 부분 질문’에서 다시 선택해 주세요."
-        case .overflow: return "필수 자료를 포함한 맥락이 앱 입력 예산을 넘습니다. ‘맥락 보기’에서 예산을 조절하거나 ‘대화 압축’을 실행해 주세요. 자료는 자동으로 빼지 않습니다."
-        case .payloadOverflow: return "이미지를 포함한 요청이 앱 전송 크기 제한을 넘습니다. 확인된 전사문 사용 또는 더 작은 영역의 새 문제를 선택해 주세요."
-        case .staleSummary: return "압축 중 원본이나 조건이 바뀌어 결과를 활성화하지 않았습니다. 원본은 보존되었습니다."
-        case .nothingToCompress: return "최근 대화와 보호 원문을 제외하면 압축할 과거 대화가 없습니다."
-        case .invalidSummary: return "압축 결과 형식을 확인하지 못했습니다. 원본은 보존했으며 자동으로 다시 요청하지 않습니다."
-        case .invalidScope: return "다른 문제의 자료가 연결되어 요청을 중단했습니다. 새 문제에서 다시 캡처해 주세요."
+        case .missingImage: return localized("필수 원본 이미지가 없거나 손상되었습니다. 원본을 복원하거나 새 문제로 다시 캡처해 주세요. 작성 중 질문은 보존됩니다.")
+        case .invalidReference: return localized("인용한 답변의 원문·버전을 확인할 수 없습니다. ‘이 부분 질문’에서 다시 선택해 주세요.")
+        case .overflow: return localized("필수 자료를 포함한 맥락이 앱 입력 예산을 넘습니다. ‘맥락 보기’에서 예산을 조절하거나 ‘대화 압축’을 실행해 주세요. 자료는 자동으로 빼지 않습니다.")
+        case .payloadOverflow: return localized("이미지를 포함한 요청이 앱 전송 크기 제한을 넘습니다. 확인된 전사문 사용 또는 더 작은 영역의 새 문제를 선택해 주세요.")
+        case .staleSummary: return localized("압축 중 원본이나 조건이 바뀌어 결과를 활성화하지 않았습니다. 원본은 보존되었습니다.")
+        case .nothingToCompress: return localized("최근 대화와 보호 원문을 제외하면 압축할 과거 대화가 없습니다.")
+        case .invalidSummary: return localized("압축 결과 형식을 확인하지 못했습니다. 원본은 보존했으며 자동으로 다시 요청하지 않습니다.")
+        case .invalidScope: return localized("다른 문제의 자료가 연결되어 요청을 중단했습니다. 새 문제에서 다시 캡처해 주세요.")
         }
     }
 }

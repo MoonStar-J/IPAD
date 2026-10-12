@@ -3,6 +3,7 @@ import SwiftUI
 /// The AI UI floats over the existing viewport. Opening a chat does not resize
 /// the PencilKit document or replace its drawing, zoom or scroll position.
 struct AIEditorCanvas: View {
+    @AppStorage(AppLanguage.key) private var appLanguage: AppLanguage = .korean
     let note: Notebook
     let page: NotePage
     @ObservedObject var session: DrawingSession
@@ -70,7 +71,7 @@ struct AIEditorCanvas: View {
                                 }.frame(width: 40, height: 40).shadow(color: .black.opacity(0.12), radius: 3, y: 1)
                             }
                             .buttonStyle(.plain).toolObstacle().position(x: geometry.size.width - 25, y: anchor.y)
-                            .accessibilityLabel("여백 대화 \(index + 1): \(chat.title)")
+                            .accessibilityLabel(localized("여백 대화 %@: %@", "\(index + 1)", "\(chat.title)", language: appLanguage))
                             .accessibilityIdentifier("ai-margin-pin-\(index)")
                         }
                     }
@@ -80,10 +81,10 @@ struct AIEditorCanvas: View {
                 if !editingObjects {
                     if selecting || summarySelection.wrappedValue {
                         VStack(alignment: .leading, spacing: 8) {
-                            Text(summarySelection.wrappedValue ? "모서리를 끌어 요약할 영역을 조절하세요" : "모서리를 끌어 질문할 영역을 조절하세요").font(.caption).foregroundStyle(.primary)
+                            Text(summarySelection.wrappedValue ? localized("모서리를 끌어 요약할 영역을 조절하세요", language: appLanguage) : localized("모서리를 끌어 질문할 영역을 조절하세요", language: appLanguage)).font(.caption).foregroundStyle(.primary)
                             HStack {
-                                Button("취소") { selecting = false; summarySelection.wrappedValue = false; selection = nil }.foregroundStyle(.primary)
-                                Button(summarySelection.wrappedValue ? "이 영역 요약" : (captureTarget == nil ? "이 영역으로 질문" : "현재 문제에 추가")) { if summarySelection.wrappedValue { if let selection { summarySelection.wrappedValue = false; onSummaryRegion(selection) } } else if captureTarget != nil || noteChats.isEmpty { capture() } else { choosingTarget = true } }.buttonStyle(.borderedProminent).foregroundStyle(Color(uiColor: .systemBackground))
+                                Button(localized("취소", language: appLanguage)) { selecting = false; summarySelection.wrappedValue = false; selection = nil }.foregroundStyle(.primary)
+                                Button(summarySelection.wrappedValue ? localized("이 영역 요약", language: appLanguage) : (captureTarget == nil ? localized("이 영역으로 질문", language: appLanguage) : localized("현재 문제에 추가", language: appLanguage))) { if summarySelection.wrappedValue { if let selection { summarySelection.wrappedValue = false; onSummaryRegion(selection) } } else if captureTarget != nil || noteChats.isEmpty { capture() } else { choosingTarget = true } }.buttonStyle(.borderedProminent).foregroundStyle(Color(uiColor: .systemBackground))
                                     .disabled(selection == nil).accessibilityIdentifier("ai-region-confirm")
                                     .popover(isPresented: $choosingTarget) { captureDestinationPicker }
                             }
@@ -94,18 +95,18 @@ struct AIEditorCanvas: View {
                             Button {
                                 session.host?.cancelStrokeErasing()
                                 activeChatID = nil; captureTarget = nil; selection = nil; selecting = true
-                            } label: { Label("질문", systemImage: "sparkles").font(.subheadline.weight(.medium)) }
+                            } label: { Label(localized("질문", language: appLanguage), systemImage: "sparkles").font(.subheadline.weight(.medium)) }
                                 .accessibilityIdentifier("ai-question-start").disabled(session.loadError != nil)
                             if !noteHistory.isEmpty {
                                 Divider().frame(height: 18)
                                 Button { showingHistory = true } label: { Image(systemName: "bubble.left.and.bubble.right") }
-                                    .accessibilityLabel("이 노트의 문제별 AI 대화 목록")
+                                    .accessibilityLabel(localized("이 노트의 문제별 AI 대화 목록", language: appLanguage))
                                     .popover(isPresented: $showingHistory) {
                                         List(noteHistory) { chat in
                                             Button { showingHistory = false; activeChatID = chat.id } label: {
                                                 VStack(alignment: .leading, spacing: 5) {
                                                     Text(chat.title).lineLimit(2).foregroundStyle(.primary)
-                                                    Text(chat.belongs(to: note) ? chat.projectTitle : "이전 프로젝트 · \(chat.projectTitle)")
+                                                    Text(chat.belongs(to: note) ? chat.projectTitle : localized("이전 프로젝트 · %@", "\(chat.projectTitle)", language: appLanguage))
                                                         .font(.caption).foregroundStyle(.secondary)
                                                 }.frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 6)
                                             }.buttonStyle(.plain)
@@ -162,23 +163,23 @@ struct AIEditorCanvas: View {
         .onChange(of: page.id) { _, _ in selecting = false; selection = nil; activeChatID = nil; showingHistory = false; choosingTarget = false }
         .onChange(of: editingObjects) { _, editing in if editing { selecting = false; activeChatID = nil } }
         .onChange(of: note.projectID) { _, _ in selecting = false; activeChatID = nil }
-        .alert("AI 대화를 처리하지 못했습니다", isPresented: Binding(get: { ai.errorMessage != nil }, set: { if !$0 { ai.errorMessage = nil } })) {
-            Button("확인", role: .cancel) { ai.errorMessage = nil }
-        } message: { Text(ai.errorMessage ?? "") }
+        .alert(localized("AI 대화를 처리하지 못했습니다", language: appLanguage), isPresented: Binding(get: { ai.errorMessage != nil }, set: { if !$0 { ai.errorMessage = nil } })) {
+            Button(localized("확인", language: appLanguage), role: .cancel) { ai.errorMessage = nil }
+        } message: { Text(ai.errorMessage?.text ?? "") }
     }
 
     private var captureDestinationPicker: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Text("대화 선택").font(.headline).foregroundStyle(.primary)
+                Text(localized("대화 선택", language: appLanguage)).font(.headline).foregroundStyle(.primary)
                 Spacer()
                 Button { choosingTarget = false } label: {
                     Image(systemName: "xmark").font(.subheadline.weight(.semibold))
                         .foregroundStyle(.secondary).frame(width: 36, height: 36)
                         .background(Color(uiColor: .tertiarySystemFill), in: Circle())
-                }.buttonStyle(.plain).accessibilityLabel("대화 선택 닫기")
+                }.buttonStyle(.plain).accessibilityLabel(localized("대화 선택 닫기", language: appLanguage))
             }.padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 8)
-            Text("선택한 영역을 새 대화 또는 기존 대화에 추가합니다.")
+            Text(localized("선택한 영역을 새 대화 또는 기존 대화에 추가합니다.", language: appLanguage))
                 .font(.subheadline).foregroundStyle(.secondary)
                 .padding(.horizontal, 16).padding(.bottom, 16)
             ScrollView {
@@ -186,9 +187,9 @@ struct AIEditorCanvas: View {
                     Button {
                         choosingTarget = false; captureTarget = nil; capture()
                     } label: {
-                        captureDestinationRow(title: "새 문제", detail: "새 대화 시작", symbol: "plus.bubble")
+                        captureDestinationRow(title: localized("새 문제", language: appLanguage), detail: localized("새 대화 시작", language: appLanguage), symbol: "plus.bubble")
                     }
-                    .buttonStyle(.plain).accessibilityLabel("새 문제")
+                    .buttonStyle(.plain).accessibilityLabel(localized("새 문제", language: appLanguage))
                     .accessibilityIdentifier("ai-capture-new-conversation")
                     ForEach(noteChats) { chat in
                         let sending = ai.sending.contains(chat.id)
@@ -196,11 +197,11 @@ struct AIEditorCanvas: View {
                             choosingTarget = false; captureTarget = chat.id; capture()
                         } label: {
                             captureDestinationRow(title: chat.title,
-                                                  detail: sending ? "답변 생성 중" : "현재 문제에 추가",
+                                                  detail: sending ? localized("답변 생성 중", language: appLanguage) : localized("현재 문제에 추가", language: appLanguage),
                                                   symbol: sending ? "ellipsis.bubble" : "bubble.left.and.bubble.right")
                         }
                         .buttonStyle(.plain).disabled(sending)
-                        .accessibilityLabel("현재 문제에 추가: " + String(chat.title.prefix(48)))
+                        .accessibilityLabel(localized("현재 문제에 추가: ", language: appLanguage) + String(chat.title.prefix(48)))
                         .accessibilityIdentifier("ai-capture-existing-" + chat.id.uuidString)
                     }
                 }.padding(.horizontal, 12).padding(.bottom, 12)
@@ -237,6 +238,6 @@ struct AIEditorCanvas: View {
             } else if let id = ai.create(note: note, project: note.projectID.flatMap { store.project($0) }, region: region) {
                 selecting = false; activeChatID = id
             }
-        } catch { ai.errorMessage = "선택 영역을 준비하지 못했습니다. \(error.localizedDescription)" }
+        } catch { ai.errorMessage = AppMessage("선택 영역을 준비하지 못했습니다. %@", error: error) }
     }
 }

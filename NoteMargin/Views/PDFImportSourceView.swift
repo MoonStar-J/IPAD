@@ -5,7 +5,7 @@ import UniformTypeIdentifiers
 /// cannot cancel a cloud read or lose its prepared bytes.
 @MainActor
 final class PDFImportFlow: ObservableObject {
-    enum Stage { case sources, reading, options(PreparedPDFImport), failed(String) }
+    enum Stage { case sources, reading, options(PreparedPDFImport), failed(AppMessage) }
     @Published private(set) var stage: Stage = .sources
     private var task: Task<Void, Never>?
     private var generation = UUID()
@@ -24,7 +24,7 @@ final class PDFImportFlow: ObservableObject {
                 try Task.checkCancellation()
                 guard let self, self.generation == token else { return }
                 guard var prepared = store.preparePDF(data: contents.data, title: contents.title, folderID: folderID) else {
-                    self.stage = .failed(store.errorMessage ?? "PDF를 열 수 없습니다. 암호가 해제된 PDF를 선택해 주세요.")
+                    self.stage = .failed(store.errorMessage ?? AppMessage("PDF를 열 수 없습니다. 암호가 해제된 PDF를 선택해 주세요."))
                     store.errorMessage = nil; self.task = nil; return
                 }
                 prepared.projectID = projectID
@@ -32,7 +32,7 @@ final class PDFImportFlow: ObservableObject {
             } catch is CancellationError {
                 if self?.generation == token { self?.stage = .sources }
             } catch {
-                if self?.generation == token { self?.stage = .failed(error.localizedDescription) }
+                if self?.generation == token { self?.stage = .failed(AppMessage(error)) }
             }
             if self?.generation == token { self?.task = nil }
         }
@@ -48,6 +48,7 @@ final class PDFImportFlow: ObservableObject {
 }
 
 struct PDFImportSourceView: View {
+    @AppStorage(AppLanguage.key) private var appLanguage: AppLanguage = .korean
     @ObservedObject var flow: PDFImportFlow
     let folderID: UUID?
     let projectID: UUID?
@@ -64,14 +65,14 @@ struct PDFImportSourceView: View {
                     List {
                         Section {
                             Text(prepared.title).font(.headline)
-                            Text("\(prepared.pages.count)페이지").foregroundStyle(.secondary)
+                            Text(localized("page.count", "\(prepared.pages.count)", language: appLanguage)).foregroundStyle(.secondary)
                         }
-                        Section("페이지 배치") {
+                        Section(localized("페이지 배치", language: appLanguage)) {
                             ForEach(prepared.pages.count > 1 ? PDFImportLayout.allCases : [.paged]) { layout in
                                 Button {
                                     if let id = flow.create(layout: layout, store: store) { onImported(id) }
                                 } label: {
-                                    Label(layout.title, systemImage: layout == .continuous ? "scroll" : "rectangle.stack")
+                                    Label(localized(layout.title, language: appLanguage), systemImage: layout == .continuous ? "scroll" : "rectangle.stack")
                                         .padding(.vertical, 12)
                                 }.accessibilityIdentifier("pdf-layout-" + layout.rawValue)
                             }
@@ -79,18 +80,18 @@ struct PDFImportSourceView: View {
                     }.accessibilityIdentifier("pdf-import-options")
                 case .reading:
                     VStack(spacing: 20) {
-                        ProgressView("PDF를 준비하는 중…")
-                        Button("취소") { flow.cancel() }
+                        ProgressView(localized("PDF를 준비하는 중…", language: appLanguage))
+                        Button(localized("취소", language: appLanguage)) { flow.cancel() }
                     }
                 case .sources, .failed:
                     List {
                         if case .failed(let message) = flow.stage {
-                            Section { Text(message).foregroundStyle(.red) } header: { Text("가져오지 못했습니다") }
+                            Section { Text(message.text).foregroundStyle(.red) } header: { Text(localized("가져오지 못했습니다", language: appLanguage)) }
                         }
                         Section {
-                            Button { showingPicker = true } label: { Label("파일에서 선택", systemImage: "folder") }
+                            Button { showingPicker = true } label: { Label(localized("파일에서 선택", language: appLanguage), systemImage: "folder") }
                                 .accessibilityIdentifier("pdf-import-files")
-                        } footer: { Text("내 iPad, iCloud Drive와 파일 앱의 저장 공간에서 PDF를 가져옵니다.") }
+                        } footer: { Text(localized("내 iPad, iCloud Drive와 파일 앱의 저장 공간에서 PDF를 가져옵니다.", language: appLanguage)) }
                         Section("Google Drive") {
                             GoogleDriveImportButton { contents in
                                 flow.start(store: store, folderID: folderID, projectID: projectID, read: contents)
@@ -99,9 +100,9 @@ struct PDFImportSourceView: View {
                     }
                 }
             }
-            .navigationTitle("PDF 가져오기").navigationBarTitleDisplayMode(.inline)
+            .navigationTitle(localized("PDF 가져오기", language: appLanguage)).navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) {
-                Button("닫기") { flow.cancel(); dismiss() }
+                Button(localized("닫기", language: appLanguage)) { flow.cancel(); dismiss() }
             } }
             .sheet(isPresented: $showingPicker) {
                 PDFDocumentPicker { url in

@@ -1,6 +1,94 @@
 import XCTest
 
 final class EditorFlowTests: XCTestCase {
+    @MainActor func testLanguageSwitchPersistsAndPreservesEditing() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchEnvironment["NOTEMARGIN_UI_FIXTURE"] = UUID().uuidString
+        app.launchArguments = ["--editing-diagnostics", "-fingerDrawing", "NO", "-app.appearance", "light"]
+        app.launch()
+        let settings = app.buttons["app-settings"]
+        XCTAssertTrue(settings.waitForExistence(timeout: 15))
+        let originallyEnglish = settings.label == "Settings"
+        settings.tap()
+        app.buttons["app-language"].tap(); app.buttons["English"].tap()
+        XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(app.buttons["Default Summary Prompt"].exists)
+        let appearance = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Appearance'" )).firstMatch
+        XCTAssertTrue(appearance.label.contains("Light"), appearance.label)
+        func capture(_ name: String) {
+            let image = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            image.name = name; image.lifetime = .keepAlways; add(image)
+        }
+        capture("Language-English-Settings")
+        let landscape = app.frame.width > app.frame.height
+        XCUIDevice.shared.orientation = .portrait
+        XCTAssertTrue(appearance.label.contains("Light"), appearance.label)
+        capture("Language-English-Settings-Portrait")
+        XCUIDevice.shared.orientation = landscape ? .landscapeLeft : .portrait
+        app.buttons["Default Summary Prompt"].tap()
+        XCTAssertTrue(app.textViews["default-summary-prompt"].waitForExistence(timeout: 5))
+        capture("Language-English-Default-Prompt")
+        app.navigationBars["Default Summary Prompt"].buttons["Settings"].tap()
+        app.buttons["AI Question Presets"].tap()
+        capture("Language-English-Presets")
+        app.navigationBars["AI Question Presets"].buttons["Settings"].tap()
+        app.buttons["Done"].tap()
+        app.terminate(); app.launch()
+        XCTAssertTrue(settings.waitForExistence(timeout: 15)); XCTAssertEqual(settings.label, "Settings")
+        app.staticTexts["Editing fixture"].firstMatch.tap()
+        let canvas = app.scrollViews["notebook-canvas"].firstMatch
+        XCTAssertTrue(canvas.waitForExistence(timeout: 10))
+        let numbers = (canvas.value as? String ?? "").split(separator: ",").compactMap { Double($0) }
+        XCTAssertEqual(numbers.count, 7)
+        let start = canvas.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: numbers[0] + numbers[2] / 2, dy: numbers[1] + numbers[3] / 2))
+        start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 70, dy: 35)), withVelocity: .slow, thenHoldForDuration: 0.1)
+        var drawing = canvas.value as? String
+        let zoom = app.buttons["editor-zoom"].value as? String
+        XCTAssertTrue(app.buttons["Undo"].firstMatch.isEnabled)
+        app.buttons["editor-summary"].tap(); app.buttons["summary-next"].tap()
+        let prompt = app.textFields["summary-prompt"]
+        XCTAssertTrue(prompt.waitForExistence(timeout: 5))
+        prompt.tap(); prompt.typeText("사용자 초안 keep verbatim")
+        if app.buttons["키보드 가리기"].exists { app.buttons["키보드 가리기"].tap() }
+        capture("Language-English-Summary")
+        app.buttons["Close"].tap()
+        drawing = canvas.value as? String
+        app.buttons["More"].firstMatch.tap(); app.buttons["한국어"].tap()
+        XCTAssertTrue(app.buttons["실행 취소"].firstMatch.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(app.buttons["실행 취소"].firstMatch.isEnabled)
+        XCTAssertEqual(canvas.value as? String, drawing)
+        XCTAssertEqual(app.buttons["editor-zoom"].value as? String, zoom)
+        app.buttons["editor-summary"].tap()
+        XCTAssertEqual(app.textFields["summary-prompt"].value as? String, "사용자 초안 keep verbatim")
+        app.buttons["닫기"].tap()
+        app.buttons["실행 취소"].firstMatch.tap()
+        XCTAssertNotEqual(canvas.value as? String, drawing)
+        app.buttons["다시 실행"].firstMatch.tap()
+        // Native PencilKit raster bounds can differ slightly at different zoom levels after
+        // replay. Language switching above is compared exactly; drawing values
+        // and Undo/Redo are also checked directly in the canvas unit test.
+        let replay = (canvas.value as? String ?? "").split(separator: ",").compactMap { Double($0) }
+        let before = (drawing ?? "").split(separator: ",").compactMap { Double($0) }
+        XCTAssertEqual(replay.count, 7); XCTAssertEqual(before.count, 7)
+        for index in 0..<4 { XCTAssertEqual(replay[index], before[index], accuracy: 3) }
+        XCTAssertEqual(Array(replay[4...]), Array(before[4...]))
+        app.buttons["더 보기"].firstMatch.tap(); app.buttons["English"].tap()
+        XCTAssertEqual(canvas.label, "Writing canvas")
+        capture("Language-English-Editor")
+        app.buttons["Share"].firstMatch.tap(); app.buttons["Export Selected Pages as PDF"].tap()
+        XCTAssertTrue(app.buttons["Page 1, not selected"].waitForExistence(timeout: 5), app.debugDescription)
+        capture("Language-English-Export")
+        app.buttons["Cancel"].tap()
+        app.buttons["editor-library-back"].tap()
+        app.buttons["Import PDF"].tap()
+        XCTAssertTrue(app.buttons["pdf-import-files"].waitForExistence(timeout: 5))
+        capture("Language-English-Import")
+        app.buttons["Close"].tap()
+        settings.tap(); app.buttons["app-language"].tap(); app.buttons[originallyEnglish ? "English" : "한국어"].tap()
+        app.buttons[originallyEnglish ? "Done" : "완료"].tap()
+    }
+
     @MainActor func testFirstShapeDragAndCornerResize() throws { try checkShapeEditing(infinite: false) }
     @MainActor func testInfiniteShapeDragAndCornerResize() throws { try checkShapeEditing(infinite: true) }
     @MainActor private func checkShapeEditing(infinite: Bool) throws {

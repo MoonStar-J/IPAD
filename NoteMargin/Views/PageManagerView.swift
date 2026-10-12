@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct PageManagerView: View {
+    @AppStorage(AppLanguage.key) private var appLanguage: AppLanguage = .korean
     let noteID: UUID
     let selectedPageID: UUID
     var onSelect: (UUID) -> Void
@@ -21,19 +22,19 @@ struct PageManagerView: View {
                             HStack(spacing: 20) {
                                 PageThumbnail(note: note, page: page).frame(width: 68, height: 92)
                                 VStack(alignment: .leading, spacing: 6) {
-                                    Text("\(index + 1)페이지").font(.headline).foregroundStyle(.primary)
-                                    Text(page.isContinuousPDF ? "PDF \(page.pdfRegions.count)페이지 연결됨" : (page.pdfRegions.isEmpty ? page.paper.title : "PDF 페이지")).font(.caption).foregroundStyle(.secondary)
+                                    Text(localized("%@페이지", "\(index + 1)", language: appLanguage)).font(.headline).foregroundStyle(.primary)
+                                    Text(page.isContinuousPDF ? localized("PDF %@페이지 연결됨", "\(page.pdfRegions.count)", language: appLanguage) : (page.pdfRegions.isEmpty ? page.paper.title : localized("PDF 페이지", language: appLanguage))).font(.caption).foregroundStyle(.secondary)
                                 }
                                 Spacer()
                                 if selectedPageID == page.id { Image(systemName: "checkmark.circle.fill").foregroundStyle(Color.accentColor) }
                             }.padding(.vertical, 6)
                         }
                         .contextMenu {
-                            Button("복제", systemImage: "plus.square.on.square") { _ = store.duplicatePage(noteID: noteID, pageID: page.id) }
-                            Button("삭제", systemImage: "trash", role: .destructive) { deleteTarget = page.id }.disabled(note.pages.count <= 1)
+                            Button(localized("복제", language: appLanguage), systemImage: "plus.square.on.square") { _ = store.duplicatePage(noteID: noteID, pageID: page.id) }
+                            Button(localized("삭제", language: appLanguage), systemImage: "trash", role: .destructive) { deleteTarget = page.id }.disabled(note.pages.count <= 1)
                         }
                         .swipeActions {
-                            Button("삭제", role: .destructive) { deleteTarget = page.id }.disabled(note.pages.count <= 1)
+                            Button(localized("삭제", language: appLanguage), role: .destructive) { deleteTarget = page.id }.disabled(note.pages.count <= 1)
                         }
                     }
                     .onMove { source, destination in
@@ -41,27 +42,27 @@ struct PageManagerView: View {
                     }
                 }
             }
-            .navigationTitle("페이지")
+            .navigationTitle(localized("페이지", language: appLanguage))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("완료") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) { Button(localized("완료", language: appLanguage)) { dismiss() } }
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     EditButton()
                     Menu {
                         ForEach(PaperStyle.allCases) { paper in
-                            Button(paper.title) {
+                            Button(localized(paper.title, language: appLanguage)) {
                                 if let id = store.addPage(noteID: noteID, after: nil, paper: paper) { onSelect(id); dismiss() }
                             }
                         }
-                    } label: { Label("페이지 추가", systemImage: "plus") }
+                    } label: { Label(localized("페이지 추가", language: appLanguage), systemImage: "plus") }
                 }
             }
-            .alert("이 페이지를 삭제할까요?", isPresented: Binding(get: { deleteTarget != nil }, set: { if !$0 { deleteTarget = nil } })) {
-                Button("취소", role: .cancel) { }
-                Button("페이지 삭제", role: .destructive) {
+            .alert(localized("이 페이지를 삭제할까요?", language: appLanguage), isPresented: Binding(get: { deleteTarget != nil }, set: { if !$0 { deleteTarget = nil } })) {
+                Button(localized("취소", language: appLanguage), role: .cancel) { }
+                Button(localized("페이지 삭제", language: appLanguage), role: .destructive) {
                     if let id = deleteTarget { store.deletePage(noteID: noteID, pageID: id) }
                 }
-            } message: { Text("페이지의 필기와 삽입한 항목을 복원할 수 없습니다.") }
+            } message: { Text(localized("페이지의 필기와 삽입한 항목을 복원할 수 없습니다.", language: appLanguage)) }
             .storeErrorAlert()
         }
     }

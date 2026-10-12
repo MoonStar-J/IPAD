@@ -2,6 +2,7 @@ import SwiftUI
 import PencilKit
 
 struct NotebookCanvas: UIViewRepresentable {
+    @AppStorage(AppLanguage.key) private var appLanguage: AppLanguage = .korean
     let note: Notebook
     let page: NotePage
     @ObservedObject var session: DrawingSession
@@ -23,6 +24,7 @@ struct NotebookCanvas: UIViewRepresentable {
     }
 
     func updateUIView(_ view: CanvasHostView, context: Context) {
+        view.updateAccessibilityLanguage()
         view.configure(note: note, page: page, store: store, fingerDrawing: fingerDrawing,
                        editingObjects: editingObjects, toolsVisible: toolsVisible,
                        onSelect: onSelectElement, onMove: onMoveElement, onTurnPage: onTurnPage, selectingRegion: selectingRegion,
@@ -40,6 +42,11 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
     private let paper = PaperView()
     private let regionSelection = RegionSelectionView()
     private var onViewportChange: ((CGAffineTransform, CGRect) -> Void)?
+    func updateAccessibilityLanguage() {
+        canvas.accessibilityLabel = localized("필기 용지")
+        canvas.accessibilityHint = localized("Apple Pencil로 필기합니다. 손가락으로 화면을 확대하거나 이동할 수 있습니다.")
+        regionSelection.accessibilityLabel = localized("질문 영역 선택. 사각형을 이동하거나 모서리를 끌어 크기를 조절하세요.")
+    }
     private var lastReportedTransform = CGAffineTransform.identity
     private var lastReportedBounds = CGRect.zero
     private var lastReportedRegion: CGRect?
@@ -176,7 +183,7 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
             strokeEraser.require(toFail: swipe)
             inkPan.require(toFail: swipe)
         }
-        canvas.accessibilityLabel = "필기 용지"
+        canvas.accessibilityLabel = localized("필기 용지")
         canvas.accessibilityIdentifier = "notebook-canvas"
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("--editing-diagnostics") {
@@ -188,7 +195,7 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
             }
         }
         #endif
-        canvas.accessibilityHint = "Apple Pencil로 필기합니다. 손가락으로 화면을 확대하거나 이동할 수 있습니다."
+        canvas.accessibilityHint = localized("Apple Pencil로 필기합니다. 손가락으로 화면을 확대하거나 이동할 수 있습니다.")
     }
 
     func replaceCanvas(_ previous: PKCanvasView) {
@@ -810,7 +817,7 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
         case .ended:
             updateInkDrag(to: point)
             if inkDragging, inkSelection != nil {
-                transformSelectedInk(inkDragTransform, action: inkResizing ? "필기 크기 조절" : "필기 이동")
+                transformSelectedInk(inkDragTransform, action: inkResizing ? localized("필기 크기 조절") : localized("필기 이동"))
             } else if inkResizing, let rect = inkProposedRect {
                 selectInk(in: rect)
             } else if let path = freeformPath {
@@ -1024,15 +1031,15 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
                         ((currentPage?.height ?? rect.maxY) - rect.minY) / max(1, rect.height))
         let scale = currentPage?.isInfinite == true ? max(0.1, factor) : max(0.1, min(factor, limit))
         transformSelectedInk(CGAffineTransform(a: scale, b: 0, c: 0, d: scale,
-                                              tx: rect.minX * (1 - scale), ty: rect.minY * (1 - scale)), action: "필기 크기 조절")
+                                              tx: rect.minX * (1 - scale), ty: rect.minY * (1 - scale)), action: localized("필기 크기 조절"))
     }
     func copySelectedInk(cut: Bool = false) {
         guard let selected = inkSelection, !selected.indices.isEmpty else { return }
         DrawingSession.copiedInk = selected.drawing
         session.objectWillChange.send()
-        if cut { deleteSelectedInk(action: "필기 잘라내기") }
+        if cut { deleteSelectedInk(action: localized("필기 잘라내기")) }
     }
-    func deleteSelectedInk(action: String = "필기 삭제") {
+    func deleteSelectedInk(action: String = localized("필기 삭제")) {
         guard let selected = inkSelection else { return }
         clearInkSelection()
         session.commitDrawing(selected.removing, action: action)
@@ -1049,7 +1056,7 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
         let oldCount = session.drawing.strokes.count
         let result = PKDrawing(strokes: session.drawing.strokes + inserted.strokes)
         clearInkSelection()
-        session.commitDrawing(result, action: duplicate ? "필기 복제" : "필기 붙여넣기")
+        session.commitDrawing(result, action: duplicate ? localized("필기 복제") : localized("필기 붙여넣기"))
         inkSelection = RectangularInkSelection(drawing: result, indices: Set(oldCount..<result.strokes.count))
         inkSelectionRect = inkSelection?.bounds
         session.selectedStrokeCount = inserted.strokes.count
@@ -1150,7 +1157,7 @@ final class RegionSelectionView: UIView {
         isHidden = true
         addGestureRecognizer(UIPanGestureRecognizer(target: self, action: #selector(pan(_:))))
         accessibilityIdentifier = "ai-region-selection"
-        accessibilityLabel = "질문 영역 선택. 사각형을 이동하거나 모서리를 끌어 크기를 조절하세요."
+        accessibilityLabel = localized("질문 영역 선택. 사각형을 이동하거나 모서리를 끌어 크기를 조절하세요.")
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
     func clear() { selection = .zero }

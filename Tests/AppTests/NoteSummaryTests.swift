@@ -43,6 +43,84 @@ import PDFKit
         }
         XCTFail("request not sent")
     }
+    func testLanguageCatalogAndUserContentBoundaries() throws {
+        let previous = UserDefaults.standard.object(forKey: AppLanguage.key)
+        defer { UserDefaults.standard.set(previous, forKey: AppLanguage.key) }
+        let ko = try XCTUnwrap(NSDictionary(contentsOf: AppLanguage.korean.bundle.url(forResource: "Localizable", withExtension: "strings")!) as? [String: String])
+        let en = try XCTUnwrap(NSDictionary(contentsOf: AppLanguage.english.bundle.url(forResource: "Localizable", withExtension: "strings")!) as? [String: String])
+        XCTAssertEqual(Set(ko.keys), Set(en.keys))
+        XCTAssertGreaterThan(en.count, 550)
+        for (key, value) in en {
+            XCTAssertNil(value.range(of: "[가-힣]", options: .regularExpression), key)
+            let placeholders = try NSRegularExpression(pattern: "%([0-9]+\\$)?@")
+            XCTAssertEqual(placeholders.numberOfMatches(in: ko[key]!, range: NSRange(ko[key]!.startIndex..., in: ko[key]!)),
+                           placeholders.numberOfMatches(in: value, range: NSRange(value.startIndex..., in: value)), key)
+        }
+        UserDefaults.standard.removeObject(forKey: AppLanguage.key)
+        XCTAssertEqual(AppLanguage.current, .korean)
+        let original = AIQuestionPreset.legacy(.proof)
+        var custom = original; custom.name = "내 프리셋"; custom.question = "내 질문"; custom.instructions = "내 지침"
+        let encoder = JSONEncoder(); encoder.outputFormatting = .sortedKeys
+        let encoded = try encoder.encode([original, custom])
+        let instructions = SummaryPrompt.resolve(request: "", saved: "")
+        let error = AppMessage(SummaryError.message(AppMessage("질문을 입력해 주세요.")))
+        let progress = AppMessage("준비 중 · %@ / %@영역", "1", "3")
+        let systemError = AppMessage(NSError(domain: NSCocoaErrorDomain, code: 260, userInfo: [NSLocalizedDescriptionKey: "원본 시스템 오류"]))
+        UserDefaults.standard.set("en", forKey: AppLanguage.key)
+        XCTAssertEqual(localized("설정"), "Settings")
+        XCTAssertEqual(original.displayName(), "Rigorous Proof")
+        XCTAssertFalse(original.displayQuestion().contains("선택"))
+        XCTAssertEqual(custom.displayName(), custom.name)
+        XCTAssertEqual(custom.displayQuestion(), custom.question)
+        XCTAssertEqual(custom.displayInstructions(), custom.instructions)
+        var capture = MarginMessage(role: .user, text: "내 풀이 / 추가 자료 스크린샷")
+        XCTAssertEqual(capture.displayText(), capture.text, "Typed text remains verbatim")
+        capture.attachmentIDs = [UUID()]
+        XCTAssertEqual(capture.displayText(), "My solution / additional material screenshot")
+        XCTAssertEqual(capture.text, "내 풀이 / 추가 자료 스크린샷")
+        XCTAssertEqual(error.text, "Please enter a question.")
+        XCTAssertTrue(systemError.text.contains("code 260"))
+        XCTAssertEqual(progress.text, "Preparing · 1 / 3 areas")
+        XCTAssertEqual(try encoder.encode([original, custom]), encoded)
+        XCTAssertEqual(SummaryPrompt.resolve(request: "", saved: ""), instructions)
+        var work = SummaryWork(snapshot: Notebook(title: "사용자 이름"), sources: [])
+        work.partial = "기존 AI 답변 그대로"
+        let originalMarkdown = work.markdown
+        XCTAssertTrue(work.displayMarkdown.hasPrefix("# Incomplete Summary"))
+        XCTAssertTrue(work.displayMarkdown.hasSuffix(work.partial))
+        XCTAssertEqual(work.markdown, originalMarkdown)
+        work.final = "기존 최종 AI 답변 그대로"
+        XCTAssertEqual(work.displayMarkdown, work.final)
+        XCTAssertTrue(TutorMode.tutor.contains("기본적으로 한국어로 답하세요."))
+        XCTAssertEqual(SummarySource(id: "stable", pageID: UUID(), label: "PDF 3페이지", rect: .zero).displayLabel(), "PDF Page 3")
+        UserDefaults.standard.set("ko", forKey: AppLanguage.key)
+        XCTAssertEqual(error.text, "질문을 입력해 주세요.")
+        XCTAssertEqual(systemError.text, "원본 시스템 오류")
+        XCTAssertEqual(progress.text, "준비 중 · 1 / 3영역")
+    }
+
+    func testLanguageChangeDoesNotRestartSummary() async throws {
+        let previous = UserDefaults.standard.object(forKey: AppLanguage.key)
+        defer { UserDefaults.standard.set(previous, forKey: AppLanguage.key) }
+        UserDefaults.standard.set("ko", forKey: AppLanguage.key)
+        let source = try note(["직접 작성한 자료"])
+        SummaryProtocol.hold = true
+        let result = try XCTUnwrap(service.start(sourceID: source, title: "사용자 요약 이름", choices: nil, region: nil))
+        try await awaitRequest(1)
+        let request = SummaryProtocol.bodies[0]
+        let snapshot = try store.summaryWork(result)
+        UserDefaults.standard.set("en", forKey: AppLanguage.key)
+        XCTAssertTrue(service.busy)
+        XCTAssertEqual(service.activeID, result)
+        XCTAssertTrue(service.message.text.hasPrefix("Summarizing"), service.message.text)
+        XCTAssertEqual(SummaryProtocol.bodies.count, 1)
+        XCTAssertEqual(SummaryProtocol.bodies[0], request)
+        XCTAssertEqual(try store.summaryWork(result).resolvedInstructions, snapshot.resolvedInstructions)
+        XCTAssertEqual(store.note(source)?.title, "원본")
+        XCTAssertEqual(store.note(result)?.title, "사용자 요약 이름")
+        service.cancel(); try await finish()
+    }
+
     func testSummaryPromptPrecedenceFreezeLegacyAndLimits() async throws {
         let defaults = UserDefaults.standard, key = SummaryPrompt.defaultKey
         let previous = defaults.object(forKey: key)
@@ -148,7 +226,7 @@ import PDFKit
         XCTAssertNil(service.start(sourceID: id, title: "duplicate", choices: nil, region: nil))
         store.updatePage(noteID: id, pageID: source.pages[0].id) { $0.elements[0].text = "CHANGED-AFTER-START" }
         try await finish()
-        XCTAssertEqual(store.note(result)?.summary?.state, .completed, service.failure ?? "")
+        XCTAssertEqual(store.note(result)?.summary?.state, .completed, service.failure?.text ?? "")
         XCTAssertEqual(SummaryProtocol.bodies.count, 1)
         let body = String(data: SummaryProtocol.bodies[0], encoding: .utf8)!
         XCTAssertTrue(body.contains("SELECTED-A")); XCTAssertTrue(body.contains("SELECTED-C"))
@@ -214,7 +292,7 @@ import PDFKit
         store.queueDrawing(PKDrawing(strokes: [stroke]), noteID: id, pageID: pageID)
         let result = try XCTUnwrap(service.start(sourceID: id, title: "합성 요약", choices: nil, region: nil))
         try await finish()
-        XCTAssertEqual(store.note(result)?.summary?.state, .completed, service.failure ?? "")
+        XCTAssertEqual(store.note(result)?.summary?.state, .completed, service.failure?.text ?? "")
         let work = try store.summaryWork(result), input = try XCTUnwrap(work.inputs.first)
         XCTAssertTrue(input.text.contains("PDF definition")); XCTAssertTrue(input.text.contains("Inserted definition"))
         let exportURL = try await ExportService.exportPDF(note: store.note(id)!, store: store)
@@ -272,7 +350,7 @@ import PDFKit
         store.trash(id); XCTAssertTrue(store.permanentlyDelete(id))
         service = NoteSummaryService(store: store, connection: connection, http: http)
         service.resume(result); try await finish()
-        XCTAssertEqual(store.note(result)?.summary?.state, .completed, service.failure ?? "")
+        XCTAssertEqual(store.note(result)?.summary?.state, .completed, service.failure?.text ?? "")
         work = try store.summaryWork(result)
         XCTAssertEqual(work.fragments.count, work.batches.count)
         XCTAssertEqual(work.batches.flatMap { $0 }, Array(work.inputs.indices))
@@ -293,7 +371,7 @@ import PDFKit
         try store.saveSummary(result, work: work, state: .preparing)
         SummaryProtocol.verboseImages = true
         service.resume(result); try await finish()
-        XCTAssertEqual(store.note(result)?.summary?.state, .completed, service.failure ?? "")
+        XCTAssertEqual(store.note(result)?.summary?.state, .completed, service.failure?.text ?? "")
         work = try store.summaryWork(result)
         XCTAssertGreaterThan(SummaryProtocol.bodies.count, 6)
         XCTAssertEqual(Set(work.mergeInputs.flatMap(\.sources)), Set(sources.map(\.id)))
@@ -317,7 +395,7 @@ import PDFKit
         SummaryProtocol.hold = false
         await connection.refreshModels()
         service.resume(result); try await finish()
-        XCTAssertEqual(store.note(result)?.summary?.state, .completed, service.failure ?? "")
+        XCTAssertEqual(store.note(result)?.summary?.state, .completed, service.failure?.text ?? "")
         var work = try store.summaryWork(result); work.final = nil
         try store.saveSummary(result, work: work, state: .summarizing)
         let reopened = try NoteStore(repository: LibraryRepository(root: root))

@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct ObjectManagerView: View {
+    @AppStorage(AppLanguage.key) private var appLanguage: AppLanguage = .korean
     let noteID: UUID
     let pageID: UUID
     let selectedID: UUID?
@@ -23,7 +24,7 @@ struct ObjectManagerView: View {
                                 }
                             } label: {
                                 HStack {
-                                    Label(element.kind == .text ? element.text : "사진", systemImage: element.kind == .text ? "textformat" : "photo").lineLimit(2)
+                                    Label(element.kind == .text ? element.text : localized("사진", language: appLanguage), systemImage: element.kind == .text ? "textformat" : "photo").lineLimit(2)
                                     Spacer()
                                     if element.id == selectedID { Image(systemName: "checkmark.circle.fill").foregroundStyle(Color.accentColor) }
                                 }
@@ -34,13 +35,13 @@ struct ObjectManagerView: View {
                         }
                     }
                 } else {
-                    ContentUnavailableView("삽입한 항목이 없습니다", systemImage: "square.on.square", description: Text("상단의 + 버튼에서 텍스트나 사진을 추가하세요."))
+                    ContentUnavailableView(localized("삽입한 항목이 없습니다", language: appLanguage), systemImage: "square.on.square", description: Text(localized("상단의 + 버튼에서 텍스트나 사진을 추가하세요.", language: appLanguage)))
                 }
             }
-            .navigationTitle("텍스트와 사진")
+            .navigationTitle(localized("텍스트와 사진", language: appLanguage))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("완료") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) { Button(localized("완료", language: appLanguage)) { dismiss() } }
                 ToolbarItem(placement: .topBarTrailing) { EditButton() }
             }
             .storeErrorAlert()
@@ -49,6 +50,7 @@ struct ObjectManagerView: View {
 }
 
 struct ElementForm: View {
+    @AppStorage(AppLanguage.key) private var appLanguage: AppLanguage = .korean
     @State var element: PageElement
     let page: NotePage
     var embedded = false
@@ -63,36 +65,36 @@ struct ElementForm: View {
     private var form: some View {
         Form {
             if element.kind == .text {
-                Section("텍스트") {
+                Section(localized("텍스트", language: appLanguage)) {
                     TextEditor(text: $element.text).frame(minHeight: 180)
                         .font(.system(size: element.fontSize))
-                        .accessibilityLabel("삽입할 텍스트")
-                    Stepper("글자 크기 \(Int(element.fontSize))", value: $element.fontSize, in: 12...72, step: 2)
+                        .accessibilityLabel(localized("삽입할 텍스트", language: appLanguage))
+                    Stepper(localized("글자 크기 %@", "\(Int(element.fontSize))", language: appLanguage), value: $element.fontSize, in: 12...72, step: 2)
                 }
             }
             Section {
                 if page.isInfinite {
-                    coordinateField("가로 위치", value: $element.x)
-                    coordinateField("세로 위치", value: $element.y)
-                    coordinateField("너비", value: $element.width)
-                    coordinateField("높이", value: $element.height)
+                    coordinateField(localized("가로 위치", language: appLanguage), value: $element.x)
+                    coordinateField(localized("세로 위치", language: appLanguage), value: $element.y)
+                    coordinateField(localized("너비", language: appLanguage), value: $element.width)
+                    coordinateField(localized("높이", language: appLanguage), value: $element.height)
                 } else {
-                valueSlider("가로 위치", value: $element.x, range: 0...max(1, page.width - element.width))
-                valueSlider("세로 위치", value: $element.y, range: 0...max(1, page.height - element.height))
-                valueSlider("너비", value: $element.width, range: 40...max(40, page.width))
-                valueSlider("높이", value: $element.height, range: 40...max(40, page.height))
+                valueSlider(localized("가로 위치", language: appLanguage), value: $element.x, range: 0...max(1, page.width - element.width))
+                valueSlider(localized("세로 위치", language: appLanguage), value: $element.y, range: 0...max(1, page.height - element.height))
+                valueSlider(localized("너비", language: appLanguage), value: $element.width, range: 40...max(40, page.width))
+                valueSlider(localized("높이", language: appLanguage), value: $element.height, range: 40...max(40, page.height))
                 }
-            } header: { Text("위치와 크기") } footer: {
-                Text("용지에서 ‘텍스트·사진 이동’을 켜면 항목을 끌어서 옮길 수 있습니다. 텍스트가 잘리면 높이를 늘려주세요.")
+            } header: { Text(localized("위치와 크기", language: appLanguage)) } footer: {
+                Text(localized("용지에서 ‘텍스트·사진 이동’을 켜면 항목을 끌어서 옮길 수 있습니다. 텍스트가 잘리면 높이를 늘려주세요.", language: appLanguage))
             }
         }
-        .navigationTitle(element.kind == .text ? "텍스트 편집" : "사진 편집")
+        .navigationTitle(element.kind == .text ? localized("텍스트 편집", language: appLanguage) : localized("사진 편집", language: appLanguage))
         .navigationBarTitleDisplayMode(.inline)
         .storeErrorAlert()
         .toolbar {
-            if !embedded { ToolbarItem(placement: .cancellationAction) { Button("취소") { dismiss() } } }
+            if !embedded { ToolbarItem(placement: .cancellationAction) { Button(localized("취소", language: appLanguage)) { dismiss() } } }
             ToolbarItem(placement: .confirmationAction) {
-                Button("저장") {
+                Button(localized("저장", language: appLanguage)) {
                     guard [element.x, element.y, element.width, element.height].allSatisfy(\.isFinite), element.width > 0, element.height > 0 else { return }
                     if !page.isInfinite {
                     element.width = min(element.width, page.width)

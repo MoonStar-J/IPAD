@@ -7,7 +7,7 @@ import SwiftUI
     @Published private(set) var selected: String?
     @Published private(set) var models: [ChatGPTModel] = []
     @Published var model = ""
-    @Published var notice: String?
+    @Published var notice: AppMessage?
     @Published var welcome = false
     @Published private(set) var signingOut = false
     private(set) var generation = UUID()
@@ -18,7 +18,9 @@ import SwiftUI
     private var operation: Task<Void, Never>?
     struct PlanRegistrationLabel: Identifiable {
         let id: String
-        let title: String
+        let account: String?
+        let index: Int
+        func title(in language: AppLanguage) -> String { "\(account ?? localized("등록 중인 계정", language: language)) · \(index)" }
     }
     init(vault: PlanVault = KeychainPlanVault(), http: PlanHTTP = .shared) {
         self.vault = vault; self.http = http; credentials = PlanCredentialSession(vault: vault, http: http)
@@ -27,11 +29,11 @@ import SwiftUI
     private func reload() {
         do {
             let saved = try vault.read()
-            profiles = saved.registrations.enumerated().map { .init(id: $0.element.id, title: "\($0.element.identity?.email ?? "등록 중인 계정") · \($0.offset + 1)") }
+            profiles = saved.registrations.enumerated().map { .init(id: $0.element.id, account: $0.element.identity?.email, index: $0.offset + 1) }
             selected = saved.selected
             let profile = saved.registrations.first { $0.id == selected }
             state = profile?.tokens == nil ? .disconnected : profile?.tokens?.permitsPlan == true ? .ready : .permissionRequired
-        } catch { state = .error; notice = "보안 저장소를 열지 못했습니다. 기기를 잠금 해제한 뒤 다시 시도하세요." }
+        } catch { state = .error; notice = AppMessage("보안 저장소를 열지 못했습니다. 기기를 잠금 해제한 뒤 다시 시도하세요.") }
     }
     func connect(newAccount: Bool = false, requestConsent: Bool = false) {
         guard state != .signingIn, !signingOut else { return }
@@ -77,7 +79,7 @@ import SwiftUI
             var saved = try vault.read()
             if let i = saved.registrations.firstIndex(where: { $0.id == selected }) { saved.registrations[i].welcomed = true; try vault.write(saved) }
             welcome = false
-        } catch { notice = "설정을 저장하지 못했습니다." }
+        } catch { notice = AppMessage("설정을 저장하지 못했습니다.") }
     }
     func cancelSignIn() { operation?.cancel(); signIn?.cancel(); signIn = nil }
     func select(_ client: String) {
@@ -128,13 +130,13 @@ import SwiftUI
                     saved.registrations[i].pendingReceivedAt = nil; saved.registrations[i].receivedAt = nil
                     try vault.write(saved)
                 }
-                reload(); notice = revoked ? "로그아웃했습니다. 노트와 대화는 보존됩니다." : "기기에서 로그아웃했습니다. 원격 연결 해제는 확인하지 못했습니다. ChatGPT 설정에서 앱 연결을 해제할 수 있습니다."
-            } catch { state = .error; notice = "보안 저장소에서 자격 증명을 지우지 못했습니다. 다시 로그아웃해 주세요." }
+                reload(); notice = revoked ? AppMessage("로그아웃했습니다. 노트와 대화는 보존됩니다.") : AppMessage("기기에서 로그아웃했습니다. 원격 연결 해제는 확인하지 못했습니다. ChatGPT 설정에서 앱 연결을 해제할 수 있습니다.")
+            } catch { state = .error; notice = AppMessage("보안 저장소에서 자격 증명을 지우지 못했습니다. 다시 로그아웃해 주세요.") }
         }
     }
     func handle(_ error: Error, duringInference: Bool = false) {
         let failure = error as? PlanFailure ?? PlanFailure(kind: .network, code: "network_error")
-        notice = failure.localizedDescription
+        notice = AppMessage(failure)
         state = failure.connectionState(after: state, duringInference: duringInference)
     }
 }

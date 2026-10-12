@@ -14,8 +14,8 @@ struct PreparedPDFImport: Identifiable {
 @MainActor
 final class NoteStore: ObservableObject {
     @Published private(set) var library = Library()
-    @Published var errorMessage: String?
-    @Published private(set) var loadingError: String?
+    @Published var errorMessage: AppMessage?
+    @Published private(set) var loadingError: AppMessage?
     @Published private(set) var hasUnsavedChanges = false
     private var repository: LibraryRepository?
     private var aiStore = MarginAIStore.shared
@@ -95,7 +95,7 @@ final class NoteStore: ObservableObject {
             library = try DrawingPersistence.queue.sync { try repository.loadProjectLibrary() }
             self.repository = repository
             loadingError = nil
-        } catch { loadingError = error.localizedDescription }
+        } catch { loadingError = AppMessage(error) }
     }
 
     func note(_ id: UUID) -> Notebook? { library.notebooks.first { $0.id == id } }
@@ -128,7 +128,7 @@ final class NoteStore: ObservableObject {
     }
     @discardableResult func move(_ item: LibraryItem, to parentID: UUID?) -> Bool {
         guard library.canMove(item, to: parentID) else {
-            errorMessage = "이 위치로 이동할 수 없습니다. 프로젝트는 자신이나 하위 프로젝트 안으로 이동할 수 없습니다."
+            errorMessage = AppMessage("이 위치로 이동할 수 없습니다. 프로젝트는 자신이나 하위 프로젝트 안으로 이동할 수 없습니다.")
             return false
         }
         guard flushDrawings() else { return false }
@@ -148,7 +148,7 @@ final class NoteStore: ObservableObject {
             try DrawingPersistence.queue.sync { try repository.save(next) }
             if library != next { library = next }
             return true
-        } catch { errorMessage = "저장하지 못했습니다. \(error.localizedDescription)"; return false }
+        } catch { errorMessage = AppMessage("저장하지 못했습니다. %@", error: error); return false }
     }
 
     @discardableResult
@@ -169,7 +169,7 @@ final class NoteStore: ObservableObject {
         undoManager?.registerUndo(withTarget: self) { [weak undoManager] target in
             target.setAIElement(noteID: noteID, pageID: pageID, element: element, present: !present, undoManager: undoManager)
         }
-        undoManager?.setActionName("AI 답변 카드")
+        undoManager?.setActionName(localized("AI 답변 카드"))
     }
 
     @discardableResult
@@ -227,7 +227,7 @@ final class NoteStore: ObservableObject {
             // Even if disk rollback is blocked (for example by a full volume),
             // the original remains available to readers and to a later retry.
             queueDrawing(original, noteID: noteID, pageID: pageID)
-            errorMessage = "필기 그룹을 저장하지 못했습니다. 기존 필기는 보존되어 있습니다. 저장을 다시 시도해 주세요. \(error.localizedDescription)"
+            errorMessage = AppMessage("필기 그룹을 저장하지 못했습니다. 기존 필기는 보존되어 있습니다. 저장을 다시 시도해 주세요. %@", error: error)
             return false
         }
     }
@@ -255,14 +255,14 @@ final class NoteStore: ObservableObject {
             return library.projectPath(destination.id).map(\.title).joined(separator: " / ")
         }
         let path = source.projectID.map { library.projectPath($0).map(\.title) } ?? []
-        return (path + ["요약"]).joined(separator: " / ")
+        return (path + [localized("요약")]).joined(separator: " / ")
     }
 
     func createSummary(source: Notebook, sources: [SummarySource], title: String, model: String, account: String, instructions: String? = nil) throws -> UUID {
         guard let repository, !sources.isEmpty, note(source.id) != nil else { throw CocoaError(.fileReadNoSuchFile) }
         var destination = summaryDestination(for: source)
         if destination == nil {
-            destination = NoteProject(title: "요약", parentID: source.projectID.flatMap { project($0)?.id }, isSummaryDestination: true)
+            destination = NoteProject(title: localized("요약"), parentID: source.projectID.flatMap { project($0)?.id }, isSummaryDestination: true)
         }
         var result = Notebook(title: title.trimmedOrUntitled, cover: source.cover, projectID: destination!.id)
         result.pages = []
@@ -279,7 +279,7 @@ final class NoteStore: ObservableObject {
             guard commit({ library in
                 if !library.projects.contains(where: { $0.id == destination!.id }) { library.projects.append(destination!) }
                 library.notebooks.append(result)
-            }) else { throw SummaryError.message(errorMessage ?? "요약 노트를 저장하지 못했습니다.") }
+            }) else { throw SummaryError.message(errorMessage ?? AppMessage("요약 노트를 저장하지 못했습니다.")) }
         } catch {
             try? repository.deleteAssets(noteID: result.id)
             throw error
@@ -306,7 +306,7 @@ final class NoteStore: ObservableObject {
         try writeSummaryAsset(JSONEncoder().encode(work), id: id, name: summary.workAsset)
         try writeSummaryAsset(Data(work.markdown.utf8), id: id, name: summary.bodyAsset)
         guard updateNote(id, { $0.summary?.state = state }) else {
-            throw SummaryError.message(errorMessage ?? "요약을 저장하지 못했습니다.")
+            throw SummaryError.message(errorMessage ?? AppMessage("요약을 저장하지 못했습니다."))
         }
     }
 
@@ -365,7 +365,7 @@ final class NoteStore: ObservableObject {
             guard commit({ $0.pendingAssetDeletions = remaining.isEmpty ? nil : Array(remaining) }) else { return false }
         }
         if !remaining.isEmpty {
-            errorMessage = "노트 목록에서는 삭제했지만 \(remaining.count)개 노트의 첨부·대화 정리를 완료하지 못했습니다. 최근 삭제된 항목에서 ‘첨부 정리 다시 시도’를 눌러 주세요."
+            errorMessage = AppMessage("노트 목록에서는 삭제했지만 %@개 노트의 첨부·대화 정리를 완료하지 못했습니다. 최근 삭제된 항목에서 ‘첨부 정리 다시 시도’를 눌러 주세요.", "\(remaining.count)")
             return false
         }
         return true
@@ -374,7 +374,7 @@ final class NoteStore: ObservableObject {
     func duplicate(_ id: UUID) -> UUID? {
         guard flushDrawings(), var copy = note(id), let repository else { return nil }
         copy.id = UUID()
-        copy.title += " 사본"
+        copy.title += localized(" 사본")
         copy.createdAt = Date()
         copy.updatedAt = Date()
         copy.deletedAt = nil
@@ -382,7 +382,7 @@ final class NoteStore: ObservableObject {
         do {
             try repository.copyAssets(from: id, to: copy.id)
             return commit { $0.notebooks.append(copy) } ? copy.id : nil
-        } catch { errorMessage = error.localizedDescription; return nil }
+        } catch { errorMessage = AppMessage(error); return nil }
     }
 
     func drawing(noteID: UUID, pageID: UUID) throws -> PKDrawing {
@@ -540,8 +540,8 @@ final class NoteStore: ObservableObject {
     }
 
     private func reportDrawingSaveError(_ error: Error) {
-        let message = "필기를 저장하지 못했습니다. 여유 공간을 확인한 후 다시 저장해 주세요. \(error.localizedDescription)"
-        if errorMessage != message { errorMessage = message }
+        let message = AppMessage("필기를 저장하지 못했습니다. 여유 공간을 확인한 후 다시 저장해 주세요. %@", error: error)
+        if errorMessage?.text != message.text { errorMessage = message }
     }
 
     func addPage(noteID: UUID, after pageID: UUID?, paper: PaperStyle) -> UUID? {
@@ -562,7 +562,7 @@ final class NoteStore: ObservableObject {
                 try repository.writeDrawing(data, noteID: noteID, pageID: page.id)
             }
             return updateNote(noteID) { $0.pages.insert(page, at: index + 1) } ? page.id : nil
-        } catch { errorMessage = error.localizedDescription; return nil }
+        } catch { errorMessage = AppMessage(error); return nil }
     }
 
     func deletePage(noteID: UUID, pageID: UUID) {
@@ -578,13 +578,13 @@ final class NoteStore: ObservableObject {
         do {
             let data = try Data(contentsOf: url)
             return preparePDF(data: data, title: url.deletingPathExtension().lastPathComponent, folderID: folderID)
-        } catch { errorMessage = "PDF를 가져오지 못했습니다. \(error.localizedDescription)"; return nil }
+        } catch { errorMessage = AppMessage("PDF를 가져오지 못했습니다. %@", error: error); return nil }
     }
 
     func preparePDF(data: Data, title: String, folderID: UUID?) -> PreparedPDFImport? {
         do {
             guard let document = PDFDocument(data: data), !document.isLocked, document.pageCount > 0 else {
-                errorMessage = "이 PDF를 열 수 없습니다. 암호가 해제된 PDF를 선택해 주세요."
+                errorMessage = AppMessage("이 PDF를 열 수 없습니다. 암호가 해제된 PDF를 선택해 주세요.")
                 return nil
             }
             let pages = try (0..<document.pageCount).map { index in
@@ -598,7 +598,7 @@ final class NoteStore: ObservableObject {
             }
             // Own the bytes before releasing file-provider access while the user chooses a layout.
             return PreparedPDFImport(title: title, data: data, pages: pages, folderID: folderID)
-        } catch { errorMessage = "PDF를 가져오지 못했습니다. \(error.localizedDescription)"; return nil }
+        } catch { errorMessage = AppMessage("PDF를 가져오지 못했습니다. %@", error: error); return nil }
     }
 
     func importPDF(_ prepared: PreparedPDFImport, layout: PDFImportLayout) -> UUID? {
@@ -613,7 +613,7 @@ final class NoteStore: ObservableObject {
                 return nil
             }
             return note.id
-        } catch { errorMessage = "PDF를 가져오지 못했습니다. \(error.localizedDescription)"; return nil }
+        } catch { errorMessage = AppMessage("PDF를 가져오지 못했습니다. %@", error: error); return nil }
     }
 
     func addImage(_ data: Data, noteID: UUID, pageID: UUID, center: CGPoint? = nil) {
@@ -627,7 +627,7 @@ final class NoteStore: ObservableObject {
             let origin = page.isInfinite ? center.map { CGPoint(x: $0.x-width/2, y: $0.y-height/2) } : nil
             let element = PageElement(kind: .image, assetName: name, x: Double(origin?.x ?? 40), y: Double(origin?.y ?? 40), width: width, height: height)
             updatePage(noteID: noteID, pageID: pageID) { $0.elements.append(element) }
-        } catch { errorMessage = error.localizedDescription }
+        } catch { errorMessage = AppMessage(error) }
     }
 }
 
@@ -640,6 +640,6 @@ private enum DrawingPersistence {
 extension String {
     var trimmedOrUntitled: String {
         let value = trimmingCharacters(in: .whitespacesAndNewlines)
-        return value.isEmpty ? "제목 없는 노트" : value
+        return value.isEmpty ? localized("제목 없는 노트") : value
     }
 }

@@ -108,7 +108,7 @@ final class DrawingSession: NSObject, ObservableObject, PKCanvasViewDelegate {
                 shapes.append(InkShape(strokeID: InkStrokeID(stroke), kind: result.kind.rawValue,
                     points: self.documentShape(result).fittedPoints, fingerprint: Self.fingerprint(stroke)))
             }
-            let accepted = self.replaceDrawing(self.documentDrawing(completed), on: self.canvas, action: "도형 보정", undoOriginal: self.documentDrawing(original), shapes: shapes)
+            let accepted = self.replaceDrawing(self.documentDrawing(completed), on: self.canvas, action: localized("도형 보정"), undoOriginal: self.documentDrawing(original), shapes: shapes)
             self.committingShape = false
             return accepted
         }
@@ -258,7 +258,7 @@ final class DrawingSession: NSObject, ObservableObject, PKCanvasViewDelegate {
     @Published var canUndo = false
     @Published var canRedo = false
     @Published var zoomPercent = 100
-    @Published var loadError: String?
+    @Published var loadError: AppMessage?
     weak var host: CanvasHostView?
     private weak var store: NoteStore?
     private var noteID: UUID?
@@ -361,7 +361,7 @@ final class DrawingSession: NSObject, ObservableObject, PKCanvasViewDelegate {
             canvas.drawing = try store.drawing(noteID: noteID, pageID: pageID)
         }
         catch {
-            loadError = "이 페이지의 필기를 불러올 수 없습니다. 원본을 보호하기 위해 편집을 중지했습니다. \(error.localizedDescription)"
+            loadError = AppMessage("이 페이지의 필기를 불러올 수 없습니다. 원본을 보호하기 위해 편집을 중지했습니다. %@", error: error)
             canvas.drawing = PKDrawing()
         }
         canvas.undoManager?.removeAllActions()
@@ -419,14 +419,14 @@ final class DrawingSession: NSObject, ObservableObject, PKCanvasViewDelegate {
         if ownsGroup { infiniteUndo.beginUndoGrouping() }
         defer { if ownsGroup { infiniteUndo.endUndoGrouping() } }
         infiniteUndo.registerUndo(withTarget: self) { session in
-            session.commitDrawing(original, action: "필기")
+            session.commitDrawing(original, action: localized("필기"))
         }
-        infiniteUndo.setActionName("필기")
+        infiniteUndo.setActionName(localized("필기"))
     }
 
     @discardableResult
     func commitStrokeErasing(_ drawing: PKDrawing) -> Bool {
-        commitDrawing(drawing, action: "획 지우기")
+        commitDrawing(drawing, action: localized("획 지우기"))
     }
 
     @discardableResult
@@ -557,11 +557,11 @@ final class DrawingSession: NSObject, ObservableObject, PKCanvasViewDelegate {
                 repaired[index] = Self.reidentifiedInk(PKDrawing(strokes: [strokes[index]])).strokes[0]
             }
             groups.append(InkGroup(strokeIDs: indices.sorted().map { Self.strokeID(repaired[$0]) }))
-            replaceGroupedSelection(PKDrawing(strokes: repaired), groups: groups, selectedIndices: indices, action: "필기 그룹화")
+            replaceGroupedSelection(PKDrawing(strokes: repaired), groups: groups, selectedIndices: indices, action: localized("필기 그룹화"))
             return
         }
         groups.append(InkGroup(strokeIDs: identifiers))
-        if store.setInkGroups(noteID: noteID, pageID: pageID, groups: groups, undoManager: undoManager, action: "필기 그룹화") {
+        if store.setInkGroups(noteID: noteID, pageID: pageID, groups: groups, undoManager: undoManager, action: localized("필기 그룹화")) {
             updateSelectionActions(rect: selectionActionRect, selectedDrawing: host.selectedInkDrawing)
             refreshUndo()
         }
@@ -595,7 +595,7 @@ final class DrawingSession: NSObject, ObservableObject, PKCanvasViewDelegate {
               let store, let noteID, let pageID else { return }
         let selected = Set(drawing.strokes.map(Self.strokeID))
         let groups = inkGroups.filter { selected.isDisjoint(with: $0.strokeIDs) }
-        if store.setInkGroups(noteID: noteID, pageID: pageID, groups: groups, undoManager: undoManager, action: "필기 그룹 해제") {
+        if store.setInkGroups(noteID: noteID, pageID: pageID, groups: groups, undoManager: undoManager, action: localized("필기 그룹 해제")) {
             updateSelectionActions(rect: selectionActionRect, selectedDrawing: drawing)
             refreshUndo()
         }
@@ -620,8 +620,8 @@ final class DrawingSession: NSObject, ObservableObject, PKCanvasViewDelegate {
         do {
             guard store?.flushDrawings() == true else { return }
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            let editable = directory.appendingPathComponent("선택한 필기.drawing")
-            let imageURL = directory.appendingPathComponent("선택한 필기.png")
+            let editable = directory.appendingPathComponent(localized("선택한 필기.drawing"))
+            let imageURL = directory.appendingPathComponent(localized("선택한 필기.png"))
             let normalized = drawing.transformed(using: CGAffineTransform(translationX: -bounds.minX, y: -bounds.minY))
             try normalized.dataRepresentation().write(to: editable, options: .atomic)
             // Bound raster memory even when the selection spans a very long PDF.
@@ -643,7 +643,7 @@ final class DrawingSession: NSObject, ObservableObject, PKCanvasViewDelegate {
             selectedInkExport = SelectedInkExport(urls: [editable, imageURL])
         } catch {
             try? FileManager.default.removeItem(at: directory)
-            store?.errorMessage = "선택한 필기를 저장할 수 없습니다. \(error.localizedDescription)"
+            store?.errorMessage = AppMessage("선택한 필기를 저장할 수 없습니다. %@", error: error)
         }
     }
 

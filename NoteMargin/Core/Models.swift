@@ -5,10 +5,10 @@ enum PaperStyle: String, Codable, CaseIterable, Identifiable {
     var id: String { rawValue }
     var title: String {
         switch self {
-        case .plain: return "무지"
-        case .ruled: return "줄 노트"
-        case .grid: return "격자"
-        case .dotted: return "도트"
+        case .plain: return localized("무지")
+        case .ruled: return localized("줄 노트")
+        case .grid: return localized("격자")
+        case .dotted: return localized("도트")
         }
     }
 }
@@ -18,11 +18,11 @@ enum CoverColor: String, Codable, CaseIterable, Identifiable {
     var id: String { rawValue }
     var title: String {
         switch self {
-        case .blue: return "블루"
-        case .sage: return "세이지"
-        case .sand: return "샌드"
-        case .rose: return "로즈"
-        case .graphite: return "그라파이트"
+        case .blue: return localized("블루")
+        case .sage: return localized("세이지")
+        case .sand: return localized("샌드")
+        case .rose: return localized("로즈")
+        case .graphite: return localized("그라파이트")
         }
     }
 }
@@ -43,7 +43,7 @@ struct PageElement: Codable, Identifiable, Equatable {
 enum PDFImportLayout: String, CaseIterable, Identifiable {
     case continuous, paged
     var id: String { rawValue }
-    var title: String { self == .continuous ? "하나로 이어 붙이기" : "페이지별로 보기" }
+    var title: String { self == .continuous ? localized("하나로 이어 붙이기") : localized("페이지별로 보기") }
 }
 
 struct PDFSegment: Codable, Equatable {
@@ -217,9 +217,9 @@ enum NoteSort: String, CaseIterable, Identifiable {
     var id: String { rawValue }
     var label: String {
         switch self {
-        case .modified: return "최근 수정순"
-        case .created: return "최근 생성순"
-        case .title: return "이름순"
+        case .modified: return localized("최근 수정순")
+        case .created: return localized("최근 생성순")
+        case .title: return localized("이름순")
         }
     }
 }

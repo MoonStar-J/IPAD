@@ -8,6 +8,7 @@ private enum EditorSheet: String, Identifiable {
 }
 
 struct EditorView: View {
+    @AppStorage(AppLanguage.key) private var appLanguage: AppLanguage = .korean
     let noteID: UUID
     @EnvironmentObject private var store: NoteStore
     @Environment(\.dismiss) private var dismiss
@@ -24,7 +25,7 @@ struct EditorView: View {
     @State private var sharingURLs: [URL] = []
     @State private var exporting = false
     @State private var exportTask: Task<Void, Never>?
-    @State private var exportProgress = "준비 중…"
+    @State private var exportProgress = AppMessage("준비 중…")
     @State private var exportChoices: [SummarySource] = []
     @State private var showingDeletePage = false
     @State private var importingPhoto = false
@@ -62,13 +63,13 @@ struct EditorView: View {
                 })
                 .overlay {
                     if let error = session.loadError {
-                        ContentUnavailableView("필기를 불러올 수 없습니다", systemImage: "exclamationmark.triangle", description: Text(error))
+                        ContentUnavailableView(localized("필기를 불러올 수 없습니다", language: appLanguage), systemImage: "exclamationmark.triangle", description: Text(error.text))
                             .background(.regularMaterial)
                     }
                 }
                 .overlay(alignment: .top) {
                     if !aiOverlayActive && showingSwipeHint && note.pages.count > 1 && !page.isContinuousPDF && !editingObjects {
-                        Label("세 손가락으로  ← 다음 · 이전 →", systemImage: "hand.draw")
+                        Label(localized("세 손가락으로  ← 다음 · 이전 →", language: appLanguage), systemImage: "hand.draw")
                             .font(.caption).padding(.horizontal, 16).padding(.vertical, 10)
                             .background(.regularMaterial, in: Capsule()).padding(.vertical, 64)
                             .allowsHitTesting(false)
@@ -80,9 +81,9 @@ struct EditorView: View {
                             editorHeader(note: note, page: page)
                             if editingObjects {
                                 HStack(spacing: 12) {
-                                    Text("텍스트·사진을 선택해 이동").font(.caption).foregroundStyle(.secondary)
-                                    Button("항목 편집") { sheet = .objects }
-                                    Button("완료") { editingObjects = false; selectedElementID = nil }.bold()
+                                    Text(localized("텍스트·사진을 선택해 이동", language: appLanguage)).font(.caption).foregroundStyle(.secondary)
+                                    Button(localized("항목 편집", language: appLanguage)) { sheet = .objects }
+                                    Button(localized("완료", language: appLanguage)) { editingObjects = false; selectedElementID = nil }.bold()
                                 }
                                 .font(.subheadline).padding(.horizontal, 14).frame(minHeight: 44)
                                 .modifier(EditorFloatingSurface()).toolObstacle()
@@ -139,16 +140,16 @@ struct EditorView: View {
                         }, open: { id in pendingSummaryID = id; sheet = nil })
                     }
                 }
-                .alert("이 페이지를 삭제할까요?", isPresented: $showingDeletePage) {
-                    Button("취소", role: .cancel) { }
-                    Button("페이지 삭제", role: .destructive) {
+                .alert(localized("이 페이지를 삭제할까요?", language: appLanguage), isPresented: $showingDeletePage) {
+                    Button(localized("취소", language: appLanguage), role: .cancel) { }
+                    Button(localized("페이지 삭제", language: appLanguage), role: .destructive) {
                         store.deletePage(noteID: noteID, pageID: page.id)
                     }
-                } message: { Text("페이지의 필기와 삽입한 항목을 복원할 수 없습니다.") }
+                } message: { Text(localized("페이지의 필기와 삽입한 항목을 복원할 수 없습니다.", language: appLanguage)) }
             } else {
                 ContentUnavailableView {
-                    Label("노트를 찾을 수 없습니다", systemImage: "book.closed")
-                } actions: { Button("닫기") { dismiss() } }
+                    Label(localized("노트를 찾을 수 없습니다", language: appLanguage), systemImage: "book.closed")
+                } actions: { Button(localized("닫기", language: appLanguage)) { dismiss() } }
             }
         }
         .toolbar(note?.summary == nil ? .hidden : .visible, for: .navigationBar)
@@ -169,21 +170,21 @@ struct EditorView: View {
                 do {
                     guard let data = try await item.loadTransferable(type: Data.self) else { throw CocoaError(.fileReadCorruptFile) }
                     store.addImage(data, noteID: noteID, pageID: pageID, center: center)
-                } catch { store.errorMessage = "사진을 가져오지 못했습니다. \(error.localizedDescription)" }
+                } catch { store.errorMessage = AppMessage("사진을 가져오지 못했습니다. %@", error: error) }
             }
         }
         .overlay {
             if exporting || importingPhoto {
                 VStack(spacing: 16) {
-                    ProgressView(exporting ? exportProgress : "사진 가져오는 중…")
-                    if exporting { Button("내보내기 취소") { exportTask?.cancel() } }
+                    ProgressView(exporting ? exportProgress.text : localized("사진 가져오는 중…", language: appLanguage))
+                    if exporting { Button(localized("내보내기 취소", language: appLanguage)) { exportTask?.cancel() } }
                 }
                     .padding(28).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18))
             }
         }
-        .alert("작업을 완료하지 못했습니다", isPresented: Binding(get: { store.errorMessage != nil && sheet == nil }, set: { if !$0 { store.errorMessage = nil } })) {
-            Button("확인", role: .cancel) { store.errorMessage = nil }
-        } message: { Text(store.errorMessage ?? "") }
+        .alert(localized("작업을 완료하지 못했습니다", language: appLanguage), isPresented: Binding(get: { store.errorMessage != nil && sheet == nil }, set: { if !$0 { store.errorMessage = nil } })) {
+            Button(localized("확인", language: appLanguage), role: .cancel) { store.errorMessage = nil }
+        } message: { Text(store.errorMessage?.text ?? "") }
     }
 
     private func editorHeader(note: Notebook, page: NotePage) -> some View {
@@ -205,7 +206,7 @@ struct EditorView: View {
                 Text(note.title).font(.subheadline.weight(.medium)).lineLimit(1)
                 Spacer()
                 Menu { editorActionButtons(note: note, page: page) } label: {
-                    Label("노트 도구", systemImage: "ellipsis")
+                    Label(localized("노트 도구", language: appLanguage), systemImage: "ellipsis")
                 }.modifier(EditorFloatingSurface()).toolObstacle()
             }
         }
@@ -217,23 +218,23 @@ struct EditorView: View {
 
     private var backButton: some View {
         Button { if store.flushDrawings() { session.stop(); dismiss() } } label: {
-            Label("보관함", systemImage: "chevron.left")
+            Label(localized("보관함", language: appLanguage), systemImage: "chevron.left")
         }.accessibilityIdentifier("editor-library-back")
     }
 
     private func pageControls(note: Notebook, page: NotePage) -> some View {
         HStack(spacing: 0) {
             if !page.isInfinite { Button { goToPage(pageIndex - 1) } label: { Image(systemName: "chevron.left") }
-                .disabled(pageIndex == 0).accessibilityLabel("이전 페이지")
+                .disabled(pageIndex == 0).accessibilityLabel(localized("이전 페이지", language: appLanguage))
             Button { sheet = .pages } label: {
                 Text("\(pageIndex + 1) / \(note.pages.count)").monospacedDigit().fixedSize()
-            }.accessibilityLabel("\(note.pages.count)페이지 중 \(pageIndex + 1)페이지, 페이지 관리")
+            }.accessibilityLabel(localized("%@페이지 중 %@페이지, 페이지 관리", "\(note.pages.count)", "\(pageIndex + 1)", language: appLanguage))
             Button { goToPage(pageIndex + 1) } label: { Image(systemName: "chevron.right") }
-                .disabled(pageIndex == note.pages.count - 1).accessibilityLabel("다음 페이지")
+                .disabled(pageIndex == note.pages.count - 1).accessibilityLabel(localized("다음 페이지", language: appLanguage))
             Divider().frame(height: 18).padding(.horizontal, 6) }
-            else { Text("무한 캔버스").padding(.horizontal, 8) }
+            else { Text(localized("무한 캔버스", language: appLanguage)).padding(.horizontal, 8) }
             Button("\(session.zoomPercent)%") { session.fitPage() }
-                .monospacedDigit().accessibilityLabel("용지에 맞게 확대 비율 초기화")
+                .monospacedDigit().accessibilityLabel(localized("용지에 맞게 확대 비율 초기화", language: appLanguage))
                 .accessibilityValue("\(session.zoomPercent)%").accessibilityIdentifier("editor-zoom")
         }
         .font(.caption).buttonStyle(EditorControlButtonStyle()).foregroundStyle(.primary)
@@ -243,59 +244,60 @@ struct EditorView: View {
     }
 
     @ViewBuilder private func editorActionButtons(note: Notebook, page: NotePage) -> some View {
-        Button { session.undo() } label: { Label("실행 취소", systemImage: "arrow.uturn.backward") }
+        Button { session.undo() } label: { Label(localized("실행 취소", language: appLanguage), systemImage: "arrow.uturn.backward") }
             .disabled(!session.canUndo || editingObjects).keyboardShortcut("z", modifiers: .command)
-        Button { session.redo() } label: { Label("다시 실행", systemImage: "arrow.uturn.forward") }
+        Button { session.redo() } label: { Label(localized("다시 실행", language: appLanguage), systemImage: "arrow.uturn.forward") }
             .disabled(!session.canRedo || editingObjects).keyboardShortcut("z", modifiers: [.command, .shift])
-        if !page.isInfinite { Button { sheet = .pages } label: { Label("페이지", systemImage: "rectangle.stack") } }
+        if !page.isInfinite { Button { sheet = .pages } label: { Label(localized("페이지", language: appLanguage), systemImage: "rectangle.stack") } }
         Menu {
-            Button("텍스트 추가", systemImage: "textformat") { sheet = .text }
-            Button("사진 추가", systemImage: "photo") { choosingPhoto = true }
+            Button(localized("텍스트 추가", language: appLanguage), systemImage: "textformat") { sheet = .text }
+            Button(localized("사진 추가", language: appLanguage), systemImage: "photo") { choosingPhoto = true }
             Divider()
-            Button("텍스트·사진 이동", systemImage: "cursorarrow.and.square.on.square.dashed") { editingObjects.toggle() }
-            Button("텍스트·사진 편집", systemImage: "slider.horizontal.3") { sheet = .objects }
+            Button(localized("텍스트·사진 이동", language: appLanguage), systemImage: "cursorarrow.and.square.on.square.dashed") { editingObjects.toggle() }
+            Button(localized("텍스트·사진 편집", language: appLanguage), systemImage: "slider.horizontal.3") { sheet = .objects }
             Divider()
-            if !page.isInfinite { Menu("페이지 추가", systemImage: "doc.badge.plus") {
+            if !page.isInfinite { Menu(localized("페이지 추가", language: appLanguage), systemImage: "doc.badge.plus") {
                 ForEach(PaperStyle.allCases) { paper in
-                    Button(paper.title) {
+                    Button(localized(paper.title, language: appLanguage)) {
                         if let id = store.addPage(noteID: noteID, after: page.id, paper: paper) { selectedPageID = id }
                     }
                 }
             } }
-        } label: { Label("삽입", systemImage: "plus") }
+        } label: { Label(localized("삽입", language: appLanguage), systemImage: "plus") }
         Menu {
-            Button("노트 전체를 PDF로 공유", systemImage: "doc.richtext") { export(asPDF: true) }
-            Button("선택한 페이지를 PDF로 내보내기", systemImage: "doc.on.doc") {
+            Button(localized("노트 전체를 PDF로 공유", language: appLanguage), systemImage: "doc.richtext") { export(asPDF: true) }
+            Button(localized("선택한 페이지를 PDF로 내보내기", language: appLanguage), systemImage: "doc.on.doc") {
                 guard store.flushDrawings() else { return }
                 do { exportChoices = try ExportService.pageChoices(note: note, store: store); sheet = .exportSelection }
-                catch { store.errorMessage = error.localizedDescription }
+                catch { store.errorMessage = AppMessage(error) }
             }
-            Button("현재 페이지를 이미지로 공유", systemImage: "photo") { export(asPDF: false) }
-        } label: { Label("공유", systemImage: "square.and.arrow.up") }.disabled(exporting)
-        Button { if store.flushDrawings() { sheet = .summary } } label: { Label("요약", systemImage: "text.alignleft") }
+            Button(localized("현재 페이지를 이미지로 공유", language: appLanguage), systemImage: "photo") { export(asPDF: false) }
+        } label: { Label(localized("공유", language: appLanguage), systemImage: "square.and.arrow.up") }.disabled(exporting)
+        Button { if store.flushDrawings() { sheet = .summary } } label: { Label(localized("요약", language: appLanguage), systemImage: "text.alignleft") }
             .accessibilityIdentifier("editor-summary")
         Menu {
             AppearancePicker()
-            Toggle("손가락으로도 필기", isOn: $fingerDrawing)
+            LanguagePicker()
+            Toggle(localized("손가락으로도 필기", language: appLanguage), isOn: $fingerDrawing)
             if note.pages.count > 1 && !page.isContinuousPDF {
-                Button("세 손가락 페이지 넘김 안내", systemImage: "hand.draw") { showingSwipeHint.toggle() }
+                Button(localized("세 손가락 페이지 넘김 안내", language: appLanguage), systemImage: "hand.draw") { showingSwipeHint.toggle() }
             }
-            Button("지금 저장", systemImage: "square.and.arrow.down") { store.flushDrawings() }
+            Button(localized("지금 저장", language: appLanguage), systemImage: "square.and.arrow.down") { store.flushDrawings() }
                 .accessibilityIdentifier("note-save-now")
-            Button(page.isInfinite ? "필기 위치로 돌아가기" : "화면에 용지 맞추기", systemImage: "arrow.down.right.and.arrow.up.left") { session.fitPage() }
+            Button(page.isInfinite ? localized("필기 위치로 돌아가기", language: appLanguage) : localized("화면에 용지 맞추기", language: appLanguage), systemImage: "arrow.down.right.and.arrow.up.left") { session.fitPage() }
             if page.pdfRegions.isEmpty {
-                Picker("용지 변경", selection: Binding(get: { page.paper }, set: { paper in
+                Picker(localized("용지 변경", language: appLanguage), selection: Binding(get: { page.paper }, set: { paper in
                     store.updatePage(noteID: noteID, pageID: page.id) { $0.paper = paper }
-                })) { ForEach(PaperStyle.allCases) { Text($0.title).tag($0) } }
+                })) { ForEach(PaperStyle.allCases) { Text(localized($0.title, language: appLanguage)).tag($0) } }
             }
             Divider()
-            Button("노트 이름 및 표지", systemImage: "book.closed") { sheet = .settings }
-            Button(note.isFavorite ? "즐겨찾기 해제" : "즐겨찾기", systemImage: "star") { store.updateNote(noteID) { $0.isFavorite.toggle() } }
-            Button("페이지 복제", systemImage: "plus.square.on.square") {
+            Button(localized("노트 이름 및 표지", language: appLanguage), systemImage: "book.closed") { sheet = .settings }
+            Button(note.isFavorite ? localized("즐겨찾기 해제", language: appLanguage) : localized("즐겨찾기", language: appLanguage), systemImage: "star") { store.updateNote(noteID) { $0.isFavorite.toggle() } }
+            Button(localized("페이지 복제", language: appLanguage), systemImage: "plus.square.on.square") {
                 if let id = store.duplicatePage(noteID: noteID, pageID: page.id) { selectedPageID = id }
             }
-            Button("페이지 삭제", systemImage: "trash", role: .destructive) { showingDeletePage = true }.disabled(note.pages.count <= 1)
-        } label: { Label("더 보기", systemImage: "ellipsis.circle") }
+            Button(localized("페이지 삭제", language: appLanguage), systemImage: "trash", role: .destructive) { showingDeletePage = true }.disabled(note.pages.count <= 1)
+        } label: { Label(localized("더 보기", language: appLanguage), systemImage: "ellipsis.circle") }
     }
 
     @discardableResult
@@ -307,18 +309,18 @@ struct EditorView: View {
 
     private func export(asPDF: Bool, selection: Set<String>? = nil) {
         guard store.flushDrawings(), let note, let page else { return }
-        exporting = true; exportProgress = "준비 중…"
+        exporting = true; exportProgress = AppMessage("준비 중…")
         exportTask = Task { @MainActor in
             await Task.yield()
             defer { exporting = false; exportTask = nil }
             do {
                 let url: URL
-                if asPDF { url = try await ExportService.exportPDF(note: note, store: store, selection: selection) { done, total in exportProgress = "내보내는 중 · \(done) / \(total)페이지" } }
+                if asPDF { url = try await ExportService.exportPDF(note: note, store: store, selection: selection) { done, total in exportProgress = AppMessage("내보내는 중 · %@ / %@페이지", "\(done)", "\(total)") } }
                 else { url = try ExportService.exportPNG(note: note, page: page, store: store) }
                 sharingURLs = [url]
                 sheet = .share
             } catch is CancellationError {
-            } catch { store.errorMessage = "내보내지 못했습니다. \(error.localizedDescription)" }
+            } catch { store.errorMessage = AppMessage("내보내지 못했습니다. %@", error: error) }
         }
     }
 }

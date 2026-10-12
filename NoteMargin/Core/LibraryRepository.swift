@@ -5,8 +5,8 @@ enum RepositoryError: LocalizedError {
     case invalidAssetName
     var errorDescription: String? {
         switch self {
-        case .unsupportedVersion(let version): return "지원하지 않는 보관함 버전입니다: \(version)"
-        case .invalidAssetName: return "파일 이름이 올바르지 않습니다."
+        case .unsupportedVersion(let version): return localized("지원하지 않는 보관함 버전입니다: %@", "\(version)")
+        case .invalidAssetName: return localized("파일 이름이 올바르지 않습니다.")
         }
     }
 }

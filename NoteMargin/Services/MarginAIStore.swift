@@ -5,8 +5,8 @@ final class MarginAIStore: ObservableObject {
     static let shared = MarginAIStore()
     @Published private(set) var conversations: [MarginConversation] = []
     @Published private(set) var sending = Set<UUID>()
-    @Published private(set) var failures: [UUID: String] = [:]
-    @Published var errorMessage: String?
+    @Published private(set) var failures: [UUID: AppMessage] = [:]
+    @Published var errorMessage: AppMessage?
     private let connection: ChatGPTPlanConnection
     private let http: PlanHTTP
     private let preferences: UserDefaults
@@ -28,7 +28,7 @@ final class MarginAIStore: ObservableObject {
                 let library = try LibraryRepository.applicationLibrary(in: documents)
                 self.repository = MarginChatRepository(root: library.root.appendingPathComponent("MarginChats", isDirectory: true))
             }
-        } catch { errorMessage = "AI 대화 저장소를 열지 못했습니다. \(error.localizedDescription)" }
+        } catch { errorMessage = AppMessage("AI 대화 저장소를 열지 못했습니다. %@", error: error) }
     }
 
     func load(noteID: UUID) {
@@ -44,7 +44,7 @@ final class MarginAIStore: ObservableObject {
             conversations.removeAll { $0.noteID == noteID }
             conversations.append(contentsOf: chats)
             loaded.insert(noteID)
-        } catch { errorMessage = "이 노트의 AI 대화를 불러오지 못했습니다. 원본은 보존됩니다. \(error.localizedDescription)" }
+        } catch { errorMessage = AppMessage("이 노트의 AI 대화를 불러오지 못했습니다. 원본은 보존됩니다. %@", error: error) }
     }
     func conversation(_ id: UUID) -> MarginConversation? { conversations.first { $0.id == id } }
     @discardableResult func linkWebConversation(_ url: URL, to id: UUID) -> Bool {
@@ -73,7 +73,7 @@ final class MarginAIStore: ObservableObject {
         load(noteID: note.id)
         guard loaded.contains(note.id) else { return nil }
         var chat = MarginConversation(noteID: note.id, pageID: region.pageID, projectID: note.projectID,
-                                      projectTitle: project?.title ?? "프로젝트 미지정", rect: region.rect,
+                                      projectTitle: project?.title ?? localized("프로젝트 미지정"), rect: region.rect,
                                       imageData: region.imageData, extractedText: region.extractedText,
                                       sourceDescription: region.sourceDescription)
         chat.migrateMemory()
@@ -91,9 +91,9 @@ final class MarginAIStore: ObservableObject {
         } catch {
             if retainOnFailure {
                 replace(chat); unsaved.insert(chat.id)
-                failures[chat.id] = "저장하지 못한 내용이 있습니다. 저장 공간을 확인한 뒤 ‘저장 다시 시도’를 눌러 주세요."
+                failures[chat.id] = AppMessage("저장하지 못한 내용이 있습니다. 저장 공간을 확인한 뒤 ‘저장 다시 시도’를 눌러 주세요.")
             }
-            errorMessage = "AI 대화를 저장하지 못했습니다. \(error.localizedDescription)"
+            errorMessage = AppMessage("AI 대화를 저장하지 못했습니다. %@", error: error)
             return false
         }
     }
@@ -113,7 +113,7 @@ final class MarginAIStore: ObservableObject {
             try repository?.delete(chat)
             draftSaves[id]?.cancel(); draftSaves[id] = nil
             conversations.removeAll { $0.id == id }; failures[id] = nil; unsaved.remove(id)
-        } catch { errorMessage = "대화를 삭제하지 못했습니다. \(error.localizedDescription)" }
+        } catch { errorMessage = AppMessage("대화를 삭제하지 못했습니다. %@", error: error) }
     }
     func deleteNote(_ noteID: UUID) throws {
         let ids = conversations.filter { $0.noteID == noteID }.map(\.id)
@@ -139,7 +139,7 @@ final class MarginAIStore: ObservableObject {
         guard var chat = conversation(id), !sending.contains(id) else { return }
         chat.presetID = presetID; chat.draftPreset = nil; chat.draftInstructions = nil
         do { try refreshPreset(&chat); persist(chat, retainOnFailure: true) }
-        catch { failures[id] = error.localizedDescription }
+        catch { failures[id] = AppMessage(error) }
     }
     private func refreshPreset(_ chat: inout MarginConversation) throws {
         let presets = try AIQuestionPreferences.decode(preferences.data(forKey: AIQuestionPreferences.key) ?? Data())
@@ -149,7 +149,7 @@ final class MarginAIStore: ObservableObject {
     func refreshPreset(_ id: UUID) {
         guard var chat = conversation(id), !sending.contains(id) else { return }
         do { try refreshPreset(&chat); if chat != conversation(id) { persist(chat, retainOnFailure: true) } }
-        catch { failures[id] = "프리셋 설정을 읽지 못했습니다. 설정을 확인해 주세요." }
+        catch { failures[id] = AppMessage("프리셋 설정을 읽지 못했습니다. 설정을 확인해 주세요.") }
     }
     func retryQuestion(_ id: UUID) {
         guard var chat = conversation(id), !sending.contains(id),
@@ -187,14 +187,14 @@ final class MarginAIStore: ObservableObject {
         guard var chat = conversation(id), !sending.contains(id), !unsaved.contains(id),
               connection.state == .ready, let account = connection.selected,
               connection.models.contains(where: { $0.slug == connection.model }) else { return false }
-        guard chat.projectID == project?.id else { failures[id] = "프로젝트가 변경되었습니다. 새 영역 대화를 만들어 주세요."; return false }
+        guard chat.projectID == project?.id else { failures[id] = AppMessage("프로젝트가 변경되었습니다. 새 영역 대화를 만들어 주세요."); return false }
         if let previous = chat.accountRegistrationID, previous != account {
-            failures[id] = "다른 계정에서 만든 대화입니다. 원래 계정을 선택하거나 새 영역 대화를 만들어 주세요."; return false
+            failures[id] = AppMessage("다른 계정에서 만든 대화입니다. 원래 계정을 선택하거나 새 영역 대화를 만들어 주세요."); return false
         }
-        do { try refreshPreset(&chat) } catch { failures[id] = "프리셋 설정을 읽지 못했습니다."; return false }
+        do { try refreshPreset(&chat) } catch { failures[id] = AppMessage("프리셋 설정을 읽지 못했습니다."); return false }
         let preset = chat.draftPreset ?? chat.preset ?? .legacy(chat.mode ?? .free)
         let question = preset.question(for: question)
-        guard !question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { failures[id] = "질문을 입력하거나 기본 질문이 있는 프리셋을 선택해 주세요."; return false }
+        guard !question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { failures[id] = AppMessage("질문을 입력하거나 기본 질문이 있는 프리셋을 선택해 주세요."); return false }
         let model = connection.model, generation = connection.generation, requestID = UUID()
         chat.migrateMemory()
         chat.contextRevision = chat.revision + 1
@@ -205,7 +205,7 @@ final class MarginAIStore: ObservableObject {
         do {
             let plan = try ContextBuilder.build(chat: chat, projectInstructions: project?.agentInstructions ?? "")
             (body, manifest) = try PlanRequest.serialize(plan, model: model, policy: chat.policy)
-        } catch { failures[id] = error.localizedDescription; return false }
+        } catch { failures[id] = AppMessage(error); return false }
         let assistant = MarginMessage(role: .assistant, text: "", status: .streaming, mode: chat.mode, preset: preset, model: model)
         chat.runs = (chat.runs ?? []) + [ContextRun(id: requestID, kind: .answer, manifest: manifest, model: model,
             authGeneration: generation, responseMessageID: assistant.id, frozenInstructions: body.instructions)]
@@ -260,8 +260,8 @@ final class MarginAIStore: ObservableObject {
                 }
                 try Task.checkCancellation()
                 apply(result)
-                if let failure = result.failure { self.failures[id] = failure.localizedDescription; connection.handle(failure, duringInference: true) }
-                else if result.status != .completed { self.failures[id] = "답변이 완료되지 않았습니다. 부분 답변을 보존했으며 자동으로 재전송하지 않습니다." }
+                if let failure = result.failure { self.failures[id] = AppMessage(failure); connection.handle(failure, duringInference: true) }
+                else if result.status != .completed { self.failures[id] = AppMessage("답변이 완료되지 않았습니다. 부분 답변을 보존했으며 자동으로 재전송하지 않습니다.") }
             } catch {
                 guard self.planRequestIDs[id] == requestID, generation == connection.generation,
                       var current = self.conversation(id), let j = current.messages.firstIndex(where: { $0.id == assistant.id }) else { return }
@@ -275,7 +275,7 @@ final class MarginAIStore: ObservableObject {
                 if let run = current.runs?.firstIndex(where: { $0.id == requestID }) { current.runs?[run].state = current.messages[j].status ?? .interrupted }
                 current.messages[j].diagnosticCode = failure.code
                 current.messages[j].diagnostic = PlanDiagnostic(failure)
-                self.persist(current, retainOnFailure: true); self.failures[id] = failure.localizedDescription
+                self.persist(current, retainOnFailure: true); self.failures[id] = AppMessage(failure)
                 if !cancelled { connection.handle(failure, duringInference: true) }
             }
         }
@@ -346,7 +346,7 @@ final class MarginAIStore: ObservableObject {
         chat.contextRevision = chat.revision + 1
         try refreshPreset(&chat)
         let question = (chat.draftPreset ?? chat.preset ?? .legacy(chat.mode ?? .free)).question(for: chat.draft ?? "")
-        guard !question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw SummaryError.message("질문을 입력해 주세요.") }
+        guard !question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw SummaryError.message(AppMessage("질문을 입력해 주세요.")) }
         appendPendingQuestion(question, to: &chat, model: model)
         let plan: ContextPlan
         do { plan = try ContextBuilder.build(chat: chat, projectInstructions: project?.agentInstructions ?? "") }
@@ -365,7 +365,7 @@ final class MarginAIStore: ObservableObject {
         do {
             job = try CompressionJob.prepare(chat: chat)
             (body, manifest) = try PlanRequest.serialize(job.plan, model: model, policy: chat.policy)
-        } catch { failures[id] = error.localizedDescription; return false }
+        } catch { failures[id] = AppMessage(error); return false }
         chat.accountRegistrationID = account
         chat.runs = (chat.runs ?? []) + [.init(id: requestID, kind: .compression, manifest: manifest, model: model, authGeneration: generation, responseMessageID: nil, frozenInstructions: body.instructions)]
         guard persist(chat) else { return false }
@@ -403,7 +403,7 @@ final class MarginAIStore: ObservableObject {
                     else if latest.runs?[i].state == .streaming { latest.runs?[i].state = .failed }
                 }
                 self.persist(latest, retainOnFailure: true)
-                self.failures[id] = Task.isCancelled ? "대화 압축을 취소했습니다. 원본 대화는 보존됩니다." : error.localizedDescription
+                self.failures[id] = Task.isCancelled ? AppMessage("대화 압축을 취소했습니다. 원본 대화는 보존됩니다.") : AppMessage(error)
             }
         }
         return true

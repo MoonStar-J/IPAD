@@ -5,13 +5,13 @@ struct NoteSummary: Codable, Equatable {
         case preparing, summarizing, saving, completed, interrupted, failed, cancelled
         var title: String {
             switch self {
-            case .preparing: return "준비 중"
-            case .summarizing: return "요약 중"
-            case .saving: return "저장 중"
-            case .completed: return "완료"
-            case .interrupted: return "미완료 · 중단됨"
-            case .failed: return "미완료 · 실패"
-            case .cancelled: return "미완료 · 취소됨"
+            case .preparing: return localized("준비 중")
+            case .summarizing: return localized("요약 중")
+            case .saving: return localized("저장 중")
+            case .completed: return localized("완료")
+            case .interrupted: return localized("미완료 · 중단됨")
+            case .failed: return localized("미완료 · 실패")
+            case .cancelled: return localized("미완료 · 취소됨")
             }
         }
         var running: Bool { self == .preparing || self == .summarizing || self == .saving }
@@ -32,6 +32,25 @@ struct SummarySource: Codable, Equatable, Identifiable {
     let pageID: UUID
     let label: String
     let rect: CGRect
+    func displayLabel(in language: AppLanguage = .current) -> String {
+        // These legacy labels contain only app-generated page/region metadata.
+        // Keep their serialized form and request contents unchanged.
+        let patterns = [
+            (#"^PDF ([0-9]+)페이지$"#, "PDF %@페이지"),
+            (#"^([0-9]+)페이지$"#, "%@페이지"),
+            (#"^영역 ([0-9]+)$"#, "영역 %@"),
+            (#"^영역 ([0-9]+) \(x: (-?[0-9]+), y: (-?[0-9]+)\)$"#, "영역 %@ (x: %@, y: %@)"),
+        ]
+        let parts = label.components(separatedBy: " · 구간 ")
+        let source = parts[0] as NSString
+        for (pattern, key) in patterns {
+            guard let match = try? NSRegularExpression(pattern: pattern).firstMatch(in: parts[0], range: NSRange(location: 0, length: source.length)) else { continue }
+            let arguments = (1..<match.numberOfRanges).map { source.substring(with: match.range(at: $0)) }
+            let title = String(format: localized(key, language: language), locale: language.locale, arguments: arguments)
+            return title + (parts.count == 2 ? localized(" · 구간 %@", parts[1], language: language) : "")
+        }
+        return label
+    }
 }
 struct SummaryInput: Codable, Equatable {
     let source: SummarySource
@@ -65,16 +84,21 @@ struct SummaryWork: Codable, Equatable {
     var instructions: String?
     var resolvedInstructions: String { instructions ?? SummaryPrompt.instructions }
 
-    var markdown: String {
+    var markdown: String { renderedMarkdown(localizeHeadings: false) }
+    var displayMarkdown: String { renderedMarkdown(localizeHeadings: true) }
+    private func renderedMarkdown(localizeHeadings: Bool) -> String {
         if let final { return final }
         let pieces = mergeInputs.isEmpty ? fragments : mergeOutputs + Array(mergeInputs.dropFirst(mergeCursor))
-        return (["# 미완료 요약\n\n전체 범위의 최종 요약이 아닙니다."] + pieces.map(\.text) + (partial.isEmpty ? [] : ["## 중단된 응답\n" + partial])).joined(separator: "\n\n---\n\n")
+        let heading = "# 미완료 요약\n\n전체 범위의 최종 요약이 아닙니다."
+        let partialHeading = "## 중단된 응답\n"
+        return ([localizeHeadings ? localized(heading) : heading] + pieces.map(\.text)
+                + (partial.isEmpty ? [] : [(localizeHeadings ? localized(partialHeading) : partialHeading) + partial])).joined(separator: "\n\n---\n\n")
     }
 }
 
 enum SummaryError: LocalizedError {
-    case message(String)
-    var errorDescription: String? { if case .message(let text) = self { return text }; return nil }
+    case message(AppMessage)
+    var errorDescription: String? { if case .message(let text) = self { return text.text }; return nil }
 }
 
 enum SummaryPrompt {
@@ -119,7 +143,7 @@ enum SummaryPrompt {
     static func validateInstructions(_ instructions: String, policy: ContextBudget) throws {
         guard instructions.utf8.count + 2048 < policy.usable,
               instructions.utf8.count * 6 + 4096 < policy.maxHTTPBytes else {
-            throw SummaryError.message("요약 프롬프트가 너무 깁니다. 자료를 넣을 공간이 부족하므로 지침을 줄여 주세요. 내용은 자동으로 자르지 않습니다.")
+            throw SummaryError.message(AppMessage("요약 프롬프트가 너무 깁니다. 자료를 넣을 공간이 부족하므로 지침을 줄여 주세요. 내용은 자동으로 자르지 않습니다."))
         }
     }
 
@@ -129,7 +153,7 @@ enum SummaryPrompt {
         for (index, input) in inputs.enumerated() {
             guard input.tokens + instructions.utf8.count <= policy.usable,
                   input.bytes + instructions.utf8.count * 6 + 4096 <= policy.maxHTTPBytes else {
-                throw SummaryError.message("한 영역이 앱의 안전한 요청 크기를 넘었습니다. 더 작은 영역으로 새 요약을 만들어 주세요.")
+                throw SummaryError.message(AppMessage("한 영역이 앱의 안전한 요청 크기를 넘었습니다. 더 작은 영역으로 새 요약을 만들어 주세요."))
             }
             if !current.isEmpty && (tokens + input.tokens > policy.usable || bytes + input.bytes > policy.maxHTTPBytes) {
                 result.append(current); current = []; tokens = instructions.utf8.count; bytes = instructions.utf8.count * 6 + 4096
@@ -141,12 +165,12 @@ enum SummaryPrompt {
     }
 
     static func validate(_ text: String, sources: [String]) throws {
-        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw SummaryError.message("요약 본문이 비어 있습니다.") }
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw SummaryError.message(AppMessage("요약 본문이 비어 있습니다.")) }
         let regex = try NSRegularExpression(pattern: #"\[S[0-9]+\]"#)
         let string = text as NSString
         let citations = regex.matches(in: text, range: NSRange(location: 0, length: string.length)).map { String(string.substring(with: $0.range).dropFirst().dropLast()) }
         guard !citations.isEmpty, Set(citations).isSubset(of: Set(sources)) else {
-            throw SummaryError.message("응답의 출처 표시를 확인하지 못했습니다. 부분 응답을 보존했습니다. 다시 시도해 주세요.")
+            throw SummaryError.message(AppMessage("응답의 출처 표시를 확인하지 못했습니다. 부분 응답을 보존했습니다. 다시 시도해 주세요."))
         }
     }
 }

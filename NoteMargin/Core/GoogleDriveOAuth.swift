@@ -59,13 +59,13 @@ enum DriveImportError: LocalizedError {
     case configuration, authorization, denied, selection, notPDF, download(Int), keychain
     var errorDescription: String? {
         switch self {
-        case .configuration: return "Google Drive 설정 필요: 이 앱의 iOS OAuth Client ID와 반환 URL 스킴을 Xcode 빌드 설정에 등록해 주세요."
-        case .authorization: return "Google 연결을 확인하지 못했습니다. 다시 로그인해 주세요."
-        case .denied: return "파일 접근 권한이 허용되지 않았습니다. 가져오려면 선택한 PDF의 접근을 허용해 주세요."
-        case .selection: return "PDF 파일 하나를 선택해 주세요."
-        case .notPDF: return "선택한 파일이 PDF가 아니거나 다운로드가 허용되지 않았습니다."
-        case .download(let status): return "Drive에서 파일을 가져오지 못했습니다 (HTTP \(status)). 연결과 파일 권한을 확인하고 다시 선택해 주세요."
-        case .keychain: return "Drive 연결 정보를 안전하게 저장하지 못했습니다. 기기 잠금을 해제하고 다시 시도해 주세요."
+        case .configuration: return localized("Google Drive 설정 필요: 이 앱의 iOS OAuth Client ID와 반환 URL 스킴을 Xcode 빌드 설정에 등록해 주세요.")
+        case .authorization: return localized("Google 연결을 확인하지 못했습니다. 다시 로그인해 주세요.")
+        case .denied: return localized("파일 접근 권한이 허용되지 않았습니다. 가져오려면 선택한 PDF의 접근을 허용해 주세요.")
+        case .selection: return localized("PDF 파일 하나를 선택해 주세요.")
+        case .notPDF: return localized("선택한 파일이 PDF가 아니거나 다운로드가 허용되지 않았습니다.")
+        case .download(let status): return localized("Drive에서 파일을 가져오지 못했습니다 (HTTP %@). 연결과 파일 권한을 확인하고 다시 선택해 주세요.", "\(status)")
+        case .keychain: return localized("Drive 연결 정보를 안전하게 저장하지 못했습니다. 기기 잠금을 해제하고 다시 시도해 주세요.")
         }
     }
 }
