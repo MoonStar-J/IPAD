@@ -126,10 +126,8 @@ struct AIEditorCanvas: View {
             }
             .overlay(alignment: .topTrailing) {
                 if let id = activeChatID, !selecting, !editingObjects {
-                    ChatGPTMarginView(conversationID: id, project: note.projectID.flatMap { store.project($0) }, onClose: { activeChatID = nil }, onSave: { text in
-                        let source = selection ?? ai.conversation(id)?.rect
-                        let element = PageElement(kind: .text, text: text, x: page.isInfinite ? Double(source?.minX ?? 24) : 24, y: page.isInfinite ? Double(source?.maxY ?? 100) : max(24, min(page.height - 200, selection?.maxY ?? 100)), width: min(600, page.width - 48), height: 180, fontSize: 18)
-                        store.setAIElement(noteID: note.id, pageID: page.id, element: element, present: true, undoManager: session.undoManager)
+                    ChatGPTMarginView(conversationID: id, project: note.projectID.flatMap { store.project($0) }, onClose: { activeChatID = nil }, onSave: { message, summarized in
+                        try await store.insertAnswer(message, conversationID: id, summarized: summarized, ai: ai, undoManager: session.undoManager)
                         session.refreshUndo()
                     }, onAttach: {
                         session.host?.cancelStrokeErasing()

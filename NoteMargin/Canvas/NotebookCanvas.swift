@@ -40,6 +40,8 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
     let session: DrawingSession
     private var canvas: PagingCanvasView { session.canvas }
     private let paper = PaperView()
+    private let markers = PaperView()
+    private var markerDrawing = PKDrawing()
     private let regionSelection = RegionSelectionView()
     private var onViewportChange: ((CGAffineTransform, CGRect) -> Void)?
     func updateAccessibilityLanguage() {
@@ -91,9 +93,19 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
     private var inkResizing = false
     private let selectionLayer = CAShapeLayer()
     private var objectPan: UIPanGestureRecognizer!
-    private var pageSwipes: [UISwipeGestureRecognizer] = []
+    private var pagePan: UIPanGestureRecognizer!
+    private var pageTransition: UIView?
+    private var outgoingPage: UIView?
+    private var incomingPage: UIView?
+    private var pageDirection = 0
+    private var pageDestination: UUID?
+    private var pageAnimator: UIViewPropertyAnimator?
+    private var transitionSettled = false
+    private var transitionRendered = false
     private var onTurnPage: ((Int) -> Bool)?
     private var objectTap: UITapGestureRecognizer!
+    private weak var store: NoteStore?
+    private var extendingPage = false
     private var currentPage: NotePage?
     private var currentNote: Notebook?
     private var selectedID: UUID?
@@ -114,6 +126,20 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
         paper.isOpaque = false
         paper.backgroundColor = .clear
         paper.isUserInteractionEnabled = false
+        markers.isOpaque = false; markers.backgroundColor = .clear; markers.opaqueTiles = false
+        markers.isUserInteractionEnabled = false; markers.layer.opacity = Float(PageRenderer.markerOpacity)
+        markers.render = { [weak self] context in
+            guard let self, let cache = self.retainedGeometry else { return }
+            let rect = context.boundingBoxOfClipPath
+            let strokes = cache.drawing.strokes
+            let scale = max(0.01, hypot(context.ctm.a, context.ctm.c))
+            for cell in NativeInkRasterCache.cells(in: rect, scale: scale) {
+                let indices = cache.candidates(intersecting: cell).filter { strokes[$0].ink.inkType == .marker }
+                if let tile = cache.nativeRasterCache.composite(indices, cell: cell, scale: scale) {
+                    UIImage(cgImage: tile.image).draw(in: tile.rect)
+                }
+            }
+        }
         selectionLayer.strokeColor = UIColor.systemBlue.cgColor
         selectionLayer.fillColor = UIColor.systemBlue.withAlphaComponent(0.07).cgColor
         selectionLayer.lineWidth = 2
@@ -124,14 +150,11 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
         objectTap = UITapGestureRecognizer(target: self, action: #selector(selectObject(_:)))
         addGestureRecognizer(objectPan)
         addGestureRecognizer(objectTap)
-        for direction: UISwipeGestureRecognizer.Direction in [.left, .right] {
-            let swipe = UISwipeGestureRecognizer(target: self, action: #selector(turnPage(_:)))
-            swipe.direction = direction
-            swipe.numberOfTouchesRequired = 3
-            swipe.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
-            addGestureRecognizer(swipe)
-            pageSwipes.append(swipe)
-        }
+        pagePan = UIPanGestureRecognizer(target: self, action: #selector(panPage(_:)))
+        pagePan.minimumNumberOfTouches = 3; pagePan.maximumNumberOfTouches = 3
+        pagePan.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
+        pagePan.delegate = self
+        addGestureRecognizer(pagePan)
         inkSelectionLayer.strokeColor = UIColor.systemBlue.cgColor
         inkSelectionLayer.fillColor = UIColor.systemBlue.withAlphaComponent(0.08).cgColor
         inkSelectionLayer.lineWidth = 2
@@ -161,8 +184,10 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
         canvas.bouncesZoom = false
         canvas.panGestureRecognizer.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
         canvas.frame = bounds
+        canvas.isUserInteractionEnabled = pageTransition == nil
         addSubview(canvas)
         canvas.insertSubview(paper, at: 0)
+        canvas.insertSubview(markers, aboveSubview: paper)
         addSubview(eraserPreview)
         addSubview(inkPreview)
         addSubview(regionSelection)
@@ -177,12 +202,11 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
         canvas.panGestureRecognizer.require(toFail: inkPan)
         canvas.drawingGestureRecognizer.require(toFail: inkPan)
         canvas.drawingGestureRecognizer.require(toFail: inkTap)
-        for swipe in pageSwipes {
-            canvas.panGestureRecognizer.require(toFail: swipe)
-            canvas.drawingGestureRecognizer.require(toFail: swipe)
-            strokeEraser.require(toFail: swipe)
-            inkPan.require(toFail: swipe)
-        }
+        canvas.panGestureRecognizer.require(toFail: pagePan)
+        canvas.drawingGestureRecognizer.require(toFail: pagePan)
+        strokeEraser.require(toFail: pagePan)
+        inkPan.require(toFail: pagePan)
+        if let pageTransition { bringSubviewToFront(pageTransition) }
         canvas.accessibilityLabel = localized("필기 용지")
         canvas.accessibilityIdentifier = "notebook-canvas"
         #if DEBUG
@@ -219,7 +243,9 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
                    onSelect: @escaping (UUID?) -> Void, onMove: @escaping (UUID, Double, Double) -> Void, onTurnPage: @escaping (Int) -> Bool,
                    selectingRegion: Bool = false, onRegionChange: ((CGRect?) -> Void)? = nil,
                    onViewportChange: ((CGAffineTransform, CGRect) -> Void)? = nil) {
+        self.store = store
         let pageChanged = currentPage?.id != page.id
+        let heightChanged = currentPage?.height != page.height
         let contentChanged = currentPage?.backgroundContent != page.backgroundContent || currentNote?.id != note.id || currentNote?.pdfAssetName != note.pdfAssetName
         currentNote = note
         currentPage = page
@@ -237,8 +263,8 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
         }
         regionSelection.isHidden = !selectingRegion
         if !selectingRegion { regionSelection.clear(); lastReportedRegion = nil }
-        let canTurn = note.pages.count > 1 && !page.isContinuousPDF && !page.isInfinite && !editingObjects && !selectingRegion && toolsVisible
-        pageSwipes.forEach { if $0.isEnabled != canTurn { $0.isEnabled = canTurn } }
+        let canTurn = note.pages.count > 1 && !page.isVertical && !page.isInfinite && !editingObjects && !selectingRegion && toolsVisible
+        if pagePan.isEnabled != canTurn { pagePan.isEnabled = canTurn }
         session.canvas.pageTurningEnabled = canTurn
         if pageChanged {
             canvas.minimumZoomScale = min(canvas.minimumZoomScale, 1)
@@ -249,12 +275,16 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
             selectedID = nil
             needsFit = true
         }
+        if heightChanged && !pageChanged && !page.isInfinite {
+            canvas.contentSize = CGSize(width: page.width * canvas.zoomScale, height: page.height * canvas.zoomScale)
+        }
+        paper.documentBounds = page.isInfinite ? workingBounds : CGRect(x: 0, y: 0, width: page.width, height: page.height)
         if contentChanged {
             paper.documentBounds = page.isInfinite ? workingBounds : CGRect(x: 0, y: 0, width: page.width, height: page.height)
             paper.render = { [weak store] context in
                 guard let store else { return }
                 context.saveGState()
-                if !page.isInfinite { context.clip(to: CGRect(x: 0, y: 0, width: page.width, height: page.height)) }
+                if !page.isInfinite && !page.isContinuousNote { context.clip(to: CGRect(x: 0, y: 0, width: page.width, height: page.height)) }
                 PageRenderer.drawBackground(page: page, note: note, store: store, context: context)
                 context.restoreGState()
             }
@@ -289,6 +319,7 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
             guard let self, self.window != nil else { return }
             self.session.setToolsVisible(self.showTools)
         }
+        updateMarkers(session.drawing)
         setNeedsLayout()
     }
 
@@ -309,12 +340,22 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
             if bounds.width > 0 && bounds.height > 0 {
                 if currentPage?.isInfinite == true {
                     if needsFit { restoreInfiniteViewport() } else { extendInfiniteViewport() }
-                } else { fitPage(animated: false) }
+                } else {
+                    let saved = currentPage?.isContinuousNote == true ? currentPage?.viewport : nil
+                    fitPage(animated: false)
+                    if let saved {
+                        canvas.setZoomScale(min(canvas.maximumZoomScale, max(canvas.minimumZoomScale, saved.zoom)), animated: false)
+                        canvas.contentSize = CGSize(width: (currentPage?.width ?? 768) * canvas.zoomScale, height: (currentPage?.height ?? 1024) * canvas.zoomScale)
+                        canvas.setContentOffset(CGPoint(x: saved.center.x * canvas.zoomScale - bounds.width/2,
+                                                       y: saved.center.y * canvas.zoomScale - bounds.height/2), animated: false)
+                    }
+                }
                 needsFit = false
             }
         }
         centerSheet()
         updateVisiblePaper()
+        if currentPage?.id == pageDestination, session.drawing.strokes.isEmpty { pageFinishedRendering() }
     }
 
     func fitPage(animated: Bool) {
@@ -325,7 +366,7 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
             return
         }
         let fitWidth = (bounds.width - 48) / page.width
-        let fit = max(0.01, page.isContinuousPDF ? fitWidth : min(fitWidth, (bounds.height - 48) / page.height))
+        let fit = max(0.01, page.isVertical ? fitWidth : min(fitWidth, (bounds.height - 48) / (page.pdfBackgroundHeight ?? page.height)))
         fitScale = fit
         canvas.minimumZoomScale = fit * 0.5
         canvas.maximumZoomScale = max(4, fit * 6)
@@ -415,11 +456,28 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
         let shifted = CGPoint(x:offset.x+(origin.x-oldOrigin.x)*z,y:offset.y+(origin.y-oldOrigin.y)*z)
         if canvas.contentOffset != shifted { canvas.contentOffset = shifted }
         paper.nativeOrigin = origin
+        markers.nativeOrigin = origin
         paper.documentBounds = workingBounds
         CATransaction.commit()
     }
+    private func extendContinuousPage() {
+        guard let page = currentPage, page.isContinuousNote, !extendingPage, canvas.zoomScale > 0,
+              let noteID = currentNote?.id else { return }
+        let bottom = bounds.applying(documentToViewport.inverted()).maxY
+        guard bottom > page.height - 384 else { return }
+        extendingPage = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.extendingPage = false
+            guard self.currentPage?.id == page.id else { return }
+            self.store?.updatePage(noteID: noteID, pageID: page.id) {
+                $0.height = max($0.height, ceil((bottom + 1024) / 1024) * 1024)
+            }
+        }
+    }
+
     func saveViewport() {
-        guard currentPage?.isInfinite == true else { return }
+        guard currentPage?.isInfinite == true || currentPage?.isContinuousNote == true else { return }
         let visible = bounds.applying(documentToViewport.inverted())
         session.saveViewport(CanvasViewport(center: CGPoint(x: visible.midX, y: visible.midY), zoom: canvas.zoomScale))
     }
@@ -428,9 +486,103 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
         return CGPoint(x: visible.midX, y: visible.midY)
     }
 
-    @objc private func turnPage(_ gesture: UISwipeGestureRecognizer) {
-        guard gesture.state == .ended, onTurnPage?(gesture.direction == .left ? 1 : -1) == true else { return }
-        // Do not snapshot/crossfade the whole host: that includes the previous ink.
+    override func gestureRecognizerShouldBegin(_ gesture: UIGestureRecognizer) -> Bool {
+        guard gesture === pagePan else { return pageTransition == nil }
+        let velocity = pagePan.velocity(in: self)
+        return pageTransition == nil && !drawingActive && !inkDragging && !hasAutomaticShapeSelection && abs(velocity.x) > abs(velocity.y)
+    }
+
+    @objc private func panPage(_ gesture: UIPanGestureRecognizer) {
+        switch gesture.state {
+        case .began: _ = beginPageTransition(direction: gesture.velocity(in: self).x < 0 ? 1 : -1)
+        case .changed: updatePageTransition(translation: gesture.translation(in: self).x)
+        case .ended:
+            let distance = -gesture.translation(in: self).x * CGFloat(pageDirection)
+            let velocity = -gesture.velocity(in: self).x * CGFloat(pageDirection)
+            endPageTransition(commit: distance > bounds.width * 0.3 || velocity > 600)
+        case .cancelled, .failed: endPageTransition(commit: false)
+        default: break
+        }
+    }
+
+    @discardableResult func beginPageTransition(direction: Int) -> Bool {
+        guard pageTransition == nil, !drawingActive, let note = currentNote, let page = currentPage,
+              !page.isInfinite, !page.isVertical, let index = note.pages.firstIndex(where: { $0.id == page.id }),
+              note.pages.indices.contains(index + direction), let store, store.flushDrawings() else { return false }
+        let target = note.pages[index + direction]
+        do {
+            let drawing = try store.drawing(noteID: note.id, pageID: target.id)
+            let container = UIView(frame: bounds); container.clipsToBounds = true
+            container.backgroundColor = .secondarySystemBackground; container.isUserInteractionEnabled = false
+            let outgoing = UIImageView(image: pageTransitionImage(page: page, drawing: session.drawing, transform: documentToViewport))
+            let scale = max(0.01, min((bounds.width-48)/target.width, (bounds.height-48)/(target.pdfBackgroundHeight ?? target.height)))
+            let transform = CGAffineTransform(a: scale, b: 0, c: 0, d: scale,
+                                              tx: max(24, (bounds.width-target.width*scale)/2), ty: max(24, (bounds.height-target.height*scale)/2))
+            let incoming = UIImageView(image: pageTransitionImage(page: target, drawing: drawing, transform: transform))
+            outgoing.frame = bounds; incoming.frame = bounds
+            container.addSubview(outgoing); container.addSubview(incoming); addSubview(container)
+            canvas.isUserInteractionEnabled = false
+            pageTransition = container; outgoingPage = outgoing; incomingPage = incoming
+            pageDirection = direction; pageDestination = target.id; transitionSettled = false; transitionRendered = false
+            updatePageTransition(translation: 0)
+            return true
+        } catch { store.errorMessage = AppMessage(error); return false }
+    }
+
+    private func pageTransitionImage(page: NotePage, drawing: PKDrawing, transform: CGAffineTransform) -> UIImage {
+        let format = UIGraphicsImageRendererFormat(); format.scale = traitCollection.displayScale; format.opaque = true
+        return UIGraphicsImageRenderer(bounds: bounds, format: format).image { output in
+            UIColor.secondarySystemBackground.setFill(); output.fill(bounds)
+            guard let store, let note = currentNote else { return }
+            output.cgContext.concatenate(transform)
+            let visible = bounds.applying(transform.inverted()).intersection(CGRect(x: 0, y: 0, width: page.width, height: page.height))
+            output.cgContext.clip(to: visible)
+            PageRenderer.drawBackground(page: page, note: note, store: store, context: output.cgContext)
+            UITraitCollection(userInterfaceStyle: .light).performAsCurrent {
+                PageRenderer.drawInk(drawing, in: visible, scale: max(0.01, transform.a * format.scale))
+            }
+        }
+    }
+
+    func updatePageTransition(translation: CGFloat) {
+        guard pageTransition != nil else { return }
+        let progress = min(1, max(0, -translation * CGFloat(pageDirection) / max(1, bounds.width)))
+        if UIAccessibility.isReduceMotionEnabled {
+            outgoingPage?.alpha = 1-progress; incomingPage?.alpha = progress
+        } else {
+            outgoingPage?.transform = CGAffineTransform(translationX: -CGFloat(pageDirection)*bounds.width*progress, y: 0)
+            incomingPage?.transform = CGAffineTransform(translationX: CGFloat(pageDirection)*bounds.width*(1-progress), y: 0)
+        }
+    }
+
+    func endPageTransition(commit requested: Bool) {
+        guard pageTransition != nil, pageAnimator == nil else { return }
+        let commit = requested && onTurnPage?(pageDirection) == true
+        if !commit { pageDestination = nil }
+        let animator = UIViewPropertyAnimator(duration: UIAccessibility.isReduceMotionEnabled ? 0.12 : 0.24, curve: .easeOut) {
+            self.updatePageTransition(translation: commit ? -CGFloat(self.pageDirection)*self.bounds.width : 0)
+        }
+        animator.addCompletion { [weak self] _ in
+            guard let self else { return }
+            self.pageAnimator = nil; self.transitionSettled = true
+            if !commit || self.transitionRendered { self.clearPageTransition() }
+        }
+        // updatePageTransition also accepts the animation's final layout.
+        pageAnimator = animator; animator.startAnimation()
+    }
+
+    func pageFinishedRendering() {
+        guard currentPage?.id == pageDestination else { return }
+        transitionRendered = true
+        if transitionSettled { clearPageTransition() }
+    }
+    private func clearPageTransition() {
+        pageTransition?.removeFromSuperview(); pageTransition = nil
+        outgoingPage = nil; incomingPage = nil; pageDestination = nil
+        canvas.isUserInteractionEnabled = true
+    }
+    func turnPage(direction: Int) {
+        if beginPageTransition(direction: direction) { endPageTransition(commit: true) }
     }
 
     // The same transform is used for the PDF, selections and object hit-testing.
@@ -447,9 +599,40 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
         paper.copyCachedTiles(to: background, fill: nil)
         background.setAffineTransform(documentToViewport)
         target.addSublayer(background)
+        let highlight = CALayer(); markers.copyCachedTiles(to: highlight, fill: nil)
+        highlight.opacity = Float(PageRenderer.markerOpacity); highlight.setAffineTransform(documentToViewport)
+        target.addSublayer(highlight)
+    }
+
+    func updateMarkers(_ drawing: PKDrawing) {
+        let strokes = drawing.strokes.filter { $0.ink.inkType == .marker }
+        let old = markerDrawing.strokes
+        guard old.count != strokes.count || !zip(old, strokes).allSatisfy({ InkStrokeAppearance.matches($0, $1) }) else {
+            if retainedGeometry == nil && !strokes.isEmpty { _ = geometry(for: drawing) }
+            return
+        }
+        var dirty = CGRect.null
+        var candidates = Dictionary(grouping: old.indices, by: { InkStrokeID(old[$0]) })
+        var retained = Set<Int>(), previous = -1
+        for stroke in strokes {
+            let key = InkStrokeID(stroke)
+            if let position = candidates[key]?.firstIndex(where: { InkStrokeAppearance.matches(old[$0], stroke) }),
+               let index = candidates[key]?.remove(at: position) {
+                retained.insert(index)
+                // A reorder can change marker overlap even when inks match.
+                if index < previous { dirty = dirty.union(markerDrawing.bounds).union(drawing.bounds) }
+                previous = index
+            } else { dirty = dirty.union(stroke.renderBounds) }
+        }
+        for index in old.indices where !retained.contains(index) { dirty = dirty.union(old[index].renderBounds) }
+        markerDrawing = PKDrawing(strokes: strokes)
+        _ = geometry(for: drawing)
+        markers.invalidate(dirty)
     }
 
     private func updateVisiblePaper() {
+        markers.documentBounds = paper.documentBounds; markers.nativeOrigin = paper.nativeOrigin
+        markers.updateViewport(documentToViewport, viewport: bounds, interacting: canvas.isTracking || canvas.isZooming || canvas.isDecelerating)
         paper.updateViewport(documentToViewport, viewport: bounds,
                              interacting: canvas.isTracking || canvas.isZooming || canvas.isDecelerating)
         if !inkPreview.isHidden { inkPreview.updateViewport(documentToViewport, paper: paper) }
@@ -537,8 +720,12 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
             paper.setDrawingActive(false)
             let remaining = transaction.geometryCache.removing(transaction.erasedIndices)
             eraserCommitDrawing = remaining.drawing
-            if session.commitStrokeErasing(remaining.drawing) { retainedGeometry = remaining }
-            else { cancelStrokeErasing() }
+            // The preview already rendered these surviving marker runs. Let the
+            // document tiles reuse them during the native commit as well.
+            retainedGeometry = remaining
+            if !session.commitStrokeErasing(remaining.drawing) {
+                retainedGeometry = transaction.geometryCache; cancelStrokeErasing()
+            }
             session.finishErasing()
         }
     }
@@ -596,9 +783,11 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
         }
         let previousCount = transaction.erasedIndices.count
         DrawingEngineMetrics.erasing {
-            transaction.extend(along: points)
-            eraserPreview.extend(along: points)
-            if transaction.erasedIndices.count != previousCount { eraserPreview.setErased(transaction.erasedIndices) }
+            DrawingEngineMetrics.measure(.eraserHitTest) { transaction.extend(along: points) }
+            DrawingEngineMetrics.measure(.eraserPreview) {
+                eraserPreview.extend(along: points)
+                if transaction.erasedIndices.count != previousCount { eraserPreview.setErased(transaction.erasedIndices) }
+            }
         }
     }
 
@@ -645,6 +834,7 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
             if waitingForInkRender { endInkPreview() }
         }
         paper.setDrawingActive(active)
+        markers.setDrawingActive(active)
         if !active { updateNativeDrawingPermission() }
         if !active { schedulePreviewWarmup() }
     }
@@ -660,6 +850,8 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
     }
 
     func canvasDidScroll() {
+        extendContinuousPage()
+
         guard !adjustingViewport else { return }
         if currentPage?.isInfinite == true { extendInfiniteViewport() }
         cancelInkDrag()
@@ -1391,6 +1583,7 @@ private final class InkInteractionScene {
     let root = CALayer()
     private let paperLayer = CALayer()
     private let inkLayer = CALayer()
+    private let markerLayer = CALayer()
     private var strokeLayers: [Int: CALayer] = [:]
     private var tileLayers: [NativeInkRasterCache.Key: CALayer] = [:]
     private var selected = Set<Int>()
@@ -1409,8 +1602,9 @@ private final class InkInteractionScene {
     var rasterizationCount: Int { rasterCache?.rasterizationCount ?? 0 }
 
     init() {
-        for layer in [root, paperLayer, inkLayer] { layer.anchorPoint = .zero }
-        root.addSublayer(paperLayer); root.addSublayer(inkLayer)
+        for layer in [root, paperLayer, markerLayer, inkLayer] { layer.anchorPoint = .zero }
+        root.addSublayer(paperLayer); root.addSublayer(markerLayer); root.addSublayer(inkLayer)
+        markerLayer.opacity = Float(PageRenderer.markerOpacity)
     }
     func prepare(cache: InkGeometryCache, selected: Set<Int> = [], paper: PaperView,
                  viewport: CGRect, transform: CGAffineTransform) {
@@ -1431,6 +1625,7 @@ private final class InkInteractionScene {
     }
     private func prepareVisibleInk() {
         guard let cache, let rasterCache else { return }
+        let strokes = cache.drawing.strokes
         let zoom = max(0.01, hypot(transform.a, transform.b))
         let scale = zoom * UIScreen.main.scale
         // A large selection becoming small needs fewer source pixels, not a
@@ -1449,35 +1644,34 @@ private final class InkInteractionScene {
         let sourceVisible = requestedSource.insetBy(dx: -128 / selectedScale, dy: -128 / selectedScale)
         loadedViewport = visible; loadedSource = sourceVisible; loadedScale = scale; loadedSelectedScale = selectedScale
         let moving = Set(cache.candidates(intersecting: sourceVisible)).intersection(selected)
-        let fading = Set(cache.candidates(intersecting: visible)).intersection(faded)
-        let needed = moving.union(fading)
-        let separate = selected.union(faded)
+        let needed = moving
+        let separate = selected
         let boundaries = separate.sorted()
         var keys = Set<NativeInkRasterCache.Key>()
         for cell in NativeInkRasterCache.cells(in: visible, scale: scale) {
-            var run = [Int]()
-            var boundary = 0
-            func appendRun() {
-                defer { run.removeAll(keepingCapacity: true) }
-                guard let tile = rasterCache.composite(run, cell: cell, scale: scale) else { return }
-                keys.insert(tile.key)
-                let layer = tileLayers[tile.key] ?? CALayer()
-                layer.anchorPoint = .zero; layer.frame = tile.rect
-                layer.contents = tile.image; layer.contentsScale = scale
-                layer.zPosition = CGFloat(tile.key.index)
-                if layer.superlayer == nil { inkLayer.addSublayer(layer) }
-                tileLayers[tile.key] = layer
-            }
-            for index in cache.candidates(intersecting: cell).sorted() {
-                // A moved stroke can enter this tile from outside. Split at its
-                // original stacking position even if its source misses the tile.
-                while boundary < boundaries.count && boundaries[boundary] < index {
-                    appendRun(); boundary += 1
+            let candidates = cache.candidates(intersecting: cell)
+            for marker in [true, false] {
+                let parent = marker ? markerLayer : inkLayer
+                func append(_ indices: [Int], opacity: Float = 1) {
+                    guard let tile = rasterCache.composite(indices, cell: cell, scale: scale) else { return }
+                    keys.insert(tile.key)
+                    let layer = tileLayers[tile.key] ?? CALayer()
+                    layer.anchorPoint = .zero; layer.frame = tile.rect
+                    layer.contents = tile.image; layer.contentsScale = scale; layer.opacity = opacity
+                    layer.zPosition = opacity == 1 ? CGFloat(tile.key.index) : CGFloat(strokes.count)
+                    if layer.superlayer !== parent { parent.addSublayer(layer) }
+                    tileLayers[tile.key] = layer
                 }
-                if separate.contains(index) { appendRun() }
-                else { run.append(index) }
+                let matching = candidates.filter { (strokes[$0].ink.inkType == .marker) == marker }
+                var run: [Int] = [], boundary = 0
+                for index in matching {
+                    while boundary < boundaries.count && boundaries[boundary] < index { append(run); run.removeAll(keepingCapacity: true); boundary += 1 }
+                    if separate.contains(index) { append(run); run.removeAll(keepingCapacity: true) }
+                    else if !faded.contains(index) { run.append(index) }
+                }
+                append(run)
+                if !committed { append(matching.filter { faded.contains($0) }, opacity: 0.35) }
             }
-            appendRun()
         }
         for index in needed.sorted() {
             let container: CALayer
@@ -1486,7 +1680,8 @@ private final class InkInteractionScene {
                 container = CALayer(); container.anchorPoint = .zero; container.zPosition = CGFloat(index)
                 container.allowsGroupOpacity = true
                 container.opacity = faded.contains(index) ? (committed ? 0 : 0.35) : 1
-                strokeLayers[index] = container; inkLayer.addSublayer(container)
+                strokeLayers[index] = container
+                (strokes[index].ink.inkType == .marker ? markerLayer : inkLayer).addSublayer(container)
             }
             let rasterScale = selected.contains(index) ? selectedScale : scale
             for tile in rasterCache.tiles(for: index, visible: selected.contains(index) ? sourceVisible : visible, scale: rasterScale) {
@@ -1518,7 +1713,7 @@ private final class InkInteractionScene {
         let membershipChanged = faded != indices
         faded = indices; self.committed = committed
         CATransaction.begin(); CATransaction.setDisableActions(true)
-        if membershipChanged {
+        if membershipChanged || !changed.isEmpty {
             loadedViewport = .null
             prepareVisibleInk()
         }

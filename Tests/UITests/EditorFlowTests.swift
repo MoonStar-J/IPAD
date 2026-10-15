@@ -184,7 +184,8 @@ final class EditorFlowTests: XCTestCase {
         app.launch()
         XCTAssertTrue(app.buttons["library-import-pdf"].waitForExistence(timeout: 15)); app.buttons["library-import-pdf"].tap()
         XCTAssertTrue(app.buttons["pdf-import-google-drive"].waitForExistence(timeout: 5)); app.buttons["pdf-import-google-drive"].tap()
-        XCTAssertTrue(app.buttons["Google에 로그인"].waitForExistence(timeout: 5))
+        let accountAction = app.buttons.matching(NSPredicate(format: "label IN %@", ["Google에 로그인", "다시 연결"])).firstMatch
+        XCTAssertTrue(accountAction.waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["다른 Google 계정 연결"].exists)
         XCTAssertFalse(app.staticTexts["앱 설정 필요"].exists)
         app.buttons["완료"].tap()
@@ -201,11 +202,12 @@ final class EditorFlowTests: XCTestCase {
         XCTAssertTrue(prompt.waitForExistence(timeout: 5), app.debugDescription)
         prompt.tap(); prompt.typeText("이번 요청 지침")
         if app.buttons["키보드 가리기"].exists { app.buttons["키보드 가리기"].tap() }
-        app.buttons["닫기"].tap(); app.buttons["editor-summary"].tap()
+        app.buttons["닫기"].coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        app.buttons["editor-summary"].tap()
         XCTAssertEqual(app.textFields["summary-prompt"].value as? String, "이번 요청 지침")
         app.buttons["기본 요약 프롬프트 설정"].tap()
         XCTAssertTrue(app.textViews["default-summary-prompt"].waitForExistence(timeout: 5))
-        app.navigationBars.buttons.element(boundBy: 0).tap()
+        app.navigationBars["기본 요약 프롬프트"].buttons["노트 요약"].tap()
         app.buttons["닫기"].tap()
         app.buttons["공유"].tap(); app.buttons["선택한 페이지를 PDF로 내보내기"].tap()
         let export = app.buttons["내보내기"]
@@ -312,24 +314,62 @@ final class EditorFlowTests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "선택한 사각형 영역")).firstMatch.waitForExistence(timeout: 5))
         app.buttons["닫기"].tap()
     }
-    @MainActor func testSummaryReaderMathThemesCopyAndReopen() {
+    @MainActor func testSummaryCanvasMathThemesInkAndReopen() {
         continueAfterFailure = false
         let app = XCUIApplication()
         app.launchEnvironment["NOTEMARGIN_UI_FIXTURE"] = UUID().uuidString
         for theme in ["light", "dark"] {
-            app.launchArguments = ["--summary-reader-fixture", "-app.appearance", theme]
+            app.launchArguments = ["--summary-reader-fixture", "--editing-diagnostics", "-app.appearance", theme, "-app.language", "ko", "-fingerDrawing", "YES"]
             app.launch()
             let card = app.buttons["Summary rendering fixture, 요약"]
             XCTAssertTrue(card.waitForExistence(timeout: 10)); card.tap()
-            XCTAssertTrue(app.webViews.firstMatch.waitForExistence(timeout: 10))
-            XCTAssertTrue(app.staticTexts["학습 요약"].firstMatch.waitForExistence(timeout: 10))
-            app.buttons["원문 복사"].tap()
+            let canvas = app.scrollViews["notebook-canvas"].firstMatch
+            XCTAssertTrue(canvas.waitForExistence(timeout: 15), app.debugDescription)
+            app.buttons["ink-tool-pen"].tap()
+            let from = canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.25,dy: 0.5))
+            from.press(forDuration: 0.05, thenDragTo: from.withOffset(CGVector(dx: 100,dy: 60)))
+            XCTAssertTrue(app.buttons["실행 취소"].firstMatch.isEnabled)
             let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
-            attachment.name = "Summary-" + theme; attachment.lifetime = .keepAlways; add(attachment)
+            attachment.name = "Summary-Canvas-" + theme; attachment.lifetime = .keepAlways; add(attachment)
+            app.buttons["실행 취소"].firstMatch.tap(); app.buttons["다시 실행"].firstMatch.tap()
+            app.buttons["더 보기"].firstMatch.tap(); app.buttons["요약 상태와 출처"].tap()
+            XCTAssertTrue(app.buttons["원문 복사"].waitForExistence(timeout: 5)); app.buttons["원문 복사"].tap()
+            app.buttons["완료"].firstMatch.tap()
             app.buttons["editor-library-back"].tap()
             XCTAssertTrue(card.waitForExistence(timeout: 5))
             app.terminate()
         }
+    }
+
+    @MainActor func testMarkerReadabilityAndNativePartialEraser() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchEnvironment["NOTEMARGIN_UI_FIXTURE"] = UUID().uuidString
+        app.launchArguments = ["--marker-editing-fixture", "--editing-diagnostics", "-fingerDrawing", "YES", "-app.language", "ko"]
+        app.launch()
+        app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Editing fixture,'")).firstMatch.tap()
+        let canvas = app.scrollViews["notebook-canvas"].firstMatch
+        XCTAssertTrue(canvas.waitForExistence(timeout: 10))
+        func capture(_ name: String) {
+            let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot()); attachment.name = name; attachment.lifetime = .keepAlways; add(attachment)
+        }
+        capture("Markers-Overlapping-All-Colors")
+        let before = canvas.value as? String
+        app.buttons["ink-tool-eraser"].tap(); app.buttons["ink-tool-eraser"].tap()
+        app.buttons["ink-eraser-mode-partial"].tap()
+        app.buttons["ink-eraser-settings-done"].tap()
+        let values = (canvas.value as? String ?? "").split(separator: ",").compactMap { Double($0) }
+        XCTAssertEqual(values.count, 7)
+        let from = canvas.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: values[0] + values[2]*0.5, dy: values[1] - 10))
+        from.press(forDuration: 0.05, thenDragTo: from.withOffset(CGVector(dx: 0,dy: values[3]+20)), withVelocity: .slow, thenHoldForDuration: 0.1)
+        XCTAssertTrue(app.buttons["실행 취소"].firstMatch.isEnabled, app.debugDescription)
+        capture("Markers-Native-Partial-Erased")
+        app.buttons["실행 취소"].firstMatch.tap()
+        XCTAssertEqual(canvas.value as? String, before)
+        app.buttons["다시 실행"].firstMatch.tap()
+        app.buttons["editor-library-back"].tap()
+        app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Editing fixture,'")).firstMatch.tap()
+        XCTAssertTrue(canvas.waitForExistence(timeout: 10)); capture("Markers-Partial-Erased-Reopened")
     }
     // Explicit opt-in only: this uses the device's connected account and consumes usage.
     @MainActor func testConnectedAccountSummaryEndToEnd() throws {
@@ -354,18 +394,18 @@ final class EditorFlowTests: XCTestCase {
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: finished, object: nil)], timeout: 180), .completed)
         XCTAssertTrue(app.staticTexts["완료"].exists, app.debugDescription)
         app.buttons["summary-open"].tap()
-        XCTAssertTrue(app.webViews.firstMatch.waitForExistence(timeout: 10))
-        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "미분")).firstMatch.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.scrollViews["notebook-canvas"].firstMatch.waitForExistence(timeout: 15))
         let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         attachment.name = "Live-summary-saved"; attachment.lifetime = .keepAlways; add(attachment)
         app.terminate(); app.launch()
         app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "모든 노트")).firstMatch.tap()
         let card = app.buttons["Editing fixture, 요약"]
         XCTAssertTrue(card.waitForExistence(timeout: 10)); card.tap()
-        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "미분")).firstMatch.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.scrollViews["notebook-canvas"].firstMatch.waitForExistence(timeout: 15))
         XCTAssertFalse(app.buttons["이 요약에서 다시 시도"].exists)
     }
-    @MainActor func makeNote(_ app: XCUIApplication, infinite: Bool = false, finger: Bool = true, appearance: String = "light") -> String {
+    @MainActor func makeNote(_ app: XCUIApplication, finger: Bool = true, appearance: String = "light") -> String {
+        if app.launchEnvironment["NOTEMARGIN_UI_FIXTURE"] == nil { app.launchEnvironment["NOTEMARGIN_UI_FIXTURE"] = UUID().uuidString }
         app.launchArguments = ["-fingerDrawing", finger ? "YES" : "NO", "--pencil-test-touch", "--shape-diagnostics", "-app.appearance", appearance]
         app.launch()
         XCTAssertTrue(app.buttons["library-create-note"].waitForExistence(timeout:20),app.debugDescription)
@@ -373,7 +413,6 @@ final class EditorFlowTests: XCTestCase {
         let title="Regression-"+UUID().uuidString.prefix(8)
         let field=app.textFields["create-note-title"]
         XCTAssertTrue(field.waitForExistence(timeout:5));field.tap();field.typeText(String(title))
-        if infinite { app.buttons["무한 캔버스"].tap() }
         app.buttons["create-note-confirm"].tap()
         XCTAssertTrue(app.buttons["editor-library-back"].waitForExistence(timeout:8),app.debugDescription)
         return String(title)
@@ -419,31 +458,41 @@ final class EditorFlowTests: XCTestCase {
         }
     }
     @MainActor func testFirstFileSelectionStaysInImportFlow() {
-        continueAfterFailure=false
-        let app=XCUIApplication();app.launchArguments=["--pdf-import-fixture"];app.launch()
-        for (index, mode) in ["paged", "continuous"].enumerated() {
-            XCTAssertTrue(app.buttons["library-import-pdf"].waitForExistence(timeout:15))
-            app.buttons["library-import-pdf"].tap()
-            let files = app.buttons["pdf-import-files"]
-            XCTAssertTrue(files.waitForExistence(timeout:5)); files.tap()
-            if index == 1 {
-                let cancel = app.buttons["취소"].firstMatch
-                XCTAssertTrue(cancel.waitForExistence(timeout:5)); cancel.tap()
-                XCTAssertTrue(files.waitForExistence(timeout:5)); files.tap()
-            }
-            // A local PDF fixture, opened through the real system picker.
-            let file=app.cells.matching(NSPredicate(format:"identifier == %@","Import Regression, pdf")).firstMatch
-            XCTAssertTrue(file.waitForExistence(timeout:15),app.debugDescription)
-            file.coordinate(withNormalizedOffset:CGVector(dx:0.5,dy:0.25)).tap()
-            let layout=app.buttons["pdf-layout-" + mode]
-            XCTAssertTrue(layout.waitForExistence(timeout:15),app.debugDescription);layout.tap()
-            XCTAssertTrue(app.buttons["editor-library-back"].waitForExistence(timeout:15),app.debugDescription)
-            app.buttons["editor-library-back"].tap()
-        }
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchEnvironment["NOTEMARGIN_UI_FIXTURE"] = UUID().uuidString
+        app.launchArguments = ["--pdf-import-fixture", "-app.language", "ko"]
+        app.launch()
+        XCTAssertTrue(app.buttons["library-import-pdf"].waitForExistence(timeout: 15)); app.buttons["library-import-pdf"].tap()
+        app.buttons["pdf-import-files"].tap()
+        let file = app.cells.matching(NSPredicate(format: "identifier == %@", "Import Regression, pdf")).firstMatch
+        XCTAssertTrue(file.waitForExistence(timeout: 15), app.debugDescription)
+        file.coordinate(withNormalizedOffset: CGVector(dx: 0.5,dy: 0.25)).tap()
+        XCTAssertFalse(app.otherElements["pdf-import-options"].exists)
+        let second = app.cells.matching(NSPredicate(format: "identifier == %@", "Second Regression, pdf")).firstMatch
+        XCTAssertTrue(second.exists, "the first file must not dismiss the multi-selection picker")
+        second.coordinate(withNormalizedOffset: CGVector(dx: 0.5,dy: 0.25)).tap()
+        if app.buttons["열기"].firstMatch.exists { app.buttons["열기"].firstMatch.tap() }
+        let confirm = app.buttons["pdf-import-confirm-selection"]
+        XCTAssertTrue(confirm.waitForExistence(timeout: 15), app.debugDescription); confirm.tap()
+        XCTAssertTrue(app.buttons["pdf-import-create"].waitForExistence(timeout: 5))
+        app.buttons["pdf-import-create"].tap()
+        XCTAssertTrue(app.buttons["editor-library-back"].waitForExistence(timeout: 15), app.debugDescription)
+        app.buttons["다음 페이지"].tap()
+        XCTAssertTrue(app.buttons["이전 페이지"].isEnabled)
+        app.buttons["이전 페이지"].tap()
+        let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot()); attachment.name = "Imported-PDF-Slide"; attachment.lifetime = .keepAlways; add(attachment)
+        app.buttons["editor-library-back"].tap(); app.buttons["library-import-pdf"].tap()
+        XCTAssertTrue(app.buttons["pdf-import-files"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["pdf-import-create"].exists)
     }
+
     @MainActor func testInfiniteCanvasAcrossScreensAndReopen() {
         continueAfterFailure=false
-        let app=XCUIApplication();let title=makeNote(app,infinite:true,finger:false)
+        let app=XCUIApplication(), title="Editing fixture"
+        app.launchEnvironment["NOTEMARGIN_UI_FIXTURE"] = UUID().uuidString
+        app.launchArguments=["--infinite-editing-fixture", "-fingerDrawing", "NO"]
+        app.launch(); app.staticTexts[title].firstMatch.tap()
         XCTAssertTrue(app.staticTexts["무한 캔버스"].firstMatch.exists)
         let surface=app.scrollViews["notebook-canvas"].firstMatch
         XCTAssertTrue(surface.exists)
@@ -454,6 +503,7 @@ final class EditorFlowTests: XCTestCase {
         XCTAssertTrue(note.waitForExistence(timeout:10));note.tap()
         XCTAssertTrue(app.buttons["editor-library-back"].waitForExistence(timeout:10))
         let start=app.coordinate(withNormalizedOffset:CGVector(dx:0.3,dy:0.4))
+        start.tap() // Leave the fixture's saved shape selection before writing.
         start.press(forDuration:0.01,thenDragTo:app.coordinate(withNormalizedOffset:CGVector(dx:0.6,dy:0.46)),withVelocity:.slow,thenHoldForDuration:0.8)
         let screenshot=XCTAttachment(screenshot:app.screenshot());screenshot.name="Infinite-negative-viewport-dark-ui";screenshot.lifetime = .keepAlways;add(screenshot)
         XCTAssertGreaterThan(darkPixels(app),100)

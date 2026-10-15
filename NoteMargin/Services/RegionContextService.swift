@@ -41,7 +41,7 @@ struct CapturedRegion {
                 output.cgContext.clip(to: rect)
                 PageRenderer.drawBackground(page: page, note: note, store: store, context: output.cgContext)
                 // Only the crop is rasterized, including on a 100-page continuous canvas.
-                drawing.image(from: rect, scale: scale).draw(in: rect)
+                PageRenderer.drawInk(drawing, in: rect, scale: scale)
             }
         }
         guard let data = image?.pngData() else { throw CocoaError(.fileWriteUnknown) }
@@ -50,6 +50,7 @@ struct CapturedRegion {
         for region in page.pdfRegions where CGRect(x: 0, y: region.y, width: page.width, height: region.height).intersects(rect) {
             var source = page
             source.pdfPageIndex = region.pageIndex
+            source.pdfAssetName = region.assetName ?? page.pdfAssetName
             guard let pdfPage = PageRenderer.pdfPage(note: note, page: source, store: store), let pdf = pdfPage.pageRef else { continue }
             if !pageNumbers.contains(region.pageIndex + 1) { pageNumbers.append(region.pageIndex + 1) }
             // Mirror PageRenderer's PDF transform exactly, including older imports.
@@ -74,8 +75,13 @@ struct CapturedRegion {
             }
         }
         for element in page.elements where element.kind == .text {
-            if rect.contains(CGRect(x: element.x, y: element.y, width: element.width, height: element.height)) {
+            let bounds = CGRect(x: element.x, y: element.y, width: element.width, height: element.height)
+            if rect.contains(bounds) {
                 texts.append("[삽입한 텍스트]\n\(element.text)")
+            } else if rect.intersects(bounds), element.isRenderedText, let name = element.assetName,
+                      let url = store.assetURL(noteID: note.id, name: name), let document = PageRenderer.document(url) {
+                let text = PageRenderer.documentText(document, in: bounds, clip: rect)
+                if !text.isEmpty { texts.append("[삽입한 텍스트]\n\(text)") }
             }
         }
         let index = note.pages.firstIndex(where: { $0.id == page.id }).map { $0 + 1 } ?? 1

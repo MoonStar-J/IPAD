@@ -5,6 +5,7 @@ struct ObjectManagerView: View {
     let noteID: UUID
     let pageID: UUID
     let selectedID: UUID?
+    var undoManager: UndoManager? = nil
     @EnvironmentObject private var store: NoteStore
     @Environment(\.dismiss) private var dismiss
     private var page: NotePage? { store.note(noteID)?.pages.first { $0.id == pageID } }
@@ -17,10 +18,7 @@ struct ObjectManagerView: View {
                         ForEach(page.elements) { element in
                             NavigationLink {
                                 ElementForm(element: element, page: page, embedded: true) { updated in
-                                    store.updatePage(noteID: noteID, pageID: pageID) { page in
-                                        guard let index = page.elements.firstIndex(where: { $0.id == updated.id }) else { return }
-                                        page.elements[index] = updated
-                                    }
+                                    store.updateElement(noteID: noteID, pageID: pageID, element: updated, undoManager: undoManager)
                                 }
                             } label: {
                                 HStack {
@@ -31,7 +29,9 @@ struct ObjectManagerView: View {
                             }
                         }
                         .onDelete { offsets in
-                            store.updatePage(noteID: noteID, pageID: pageID) { $0.elements.remove(atOffsets: offsets) }
+                            undoManager?.beginUndoGrouping()
+                            for offset in offsets { store.setAIElement(noteID: noteID, pageID: pageID, element: page.elements[offset], present: false, undoManager: undoManager) }
+                            undoManager?.endUndoGrouping()
                         }
                     }
                 } else {
@@ -66,10 +66,11 @@ struct ElementForm: View {
         Form {
             if element.kind == .text {
                 Section(localized("텍스트", language: appLanguage)) {
-                    TextEditor(text: $element.text).frame(minHeight: 180)
+                    if element.isRenderedText { Text(element.text).textSelection(.enabled) }
+                    else { TextEditor(text: $element.text).frame(minHeight: 180)
                         .font(.system(size: element.fontSize))
                         .accessibilityLabel(localized("삽입할 텍스트", language: appLanguage))
-                    Stepper(localized("글자 크기 %@", "\(Int(element.fontSize))", language: appLanguage), value: $element.fontSize, in: 12...72, step: 2)
+                    Stepper(localized("글자 크기 %@", "\(Int(element.fontSize))", language: appLanguage), value: $element.fontSize, in: 12...72, step: 2) }
                 }
             }
             Section {

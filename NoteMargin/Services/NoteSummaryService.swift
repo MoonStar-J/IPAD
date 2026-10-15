@@ -37,11 +37,24 @@ import Combine
 
     static func pageChoices(_ note: Notebook) -> [SummarySource] {
         note.pages.enumerated().flatMap { index, page in
+            if page.isContinuousNote {
+                return stride(from: 0.0, to: page.height, by: 1024).enumerated().map { offset, y in
+                    SummarySource(id: "\(page.id)-\(offset)", pageID: page.id, label: "\(offset + 1)페이지",
+                                  rect: CGRect(x: 0, y: y, width: page.width, height: min(1024, page.height-y)))
+                }
+            }
             if page.isContinuousPDF {
-                return page.pdfRegions.enumerated().map { offset, region in
+                let regions = page.pdfRegions
+                let pdfChoices = regions.enumerated().map { offset, region in
                     SummarySource(id: "\(page.id)-\(offset)", pageID: page.id, label: "PDF \(region.pageIndex + 1)페이지",
                                   rect: CGRect(x: 0, y: region.y, width: page.width, height: region.height))
                 }
+                let bottom = regions.map { $0.y + $0.height }.max() ?? 0
+                let added = stride(from: bottom, to: page.height, by: 1024).enumerated().map { offset, y in
+                    SummarySource(id: "\(page.id)-added-\(offset)", pageID: page.id, label: "\(regions.count + offset + 1)페이지",
+                                  rect: CGRect(x: 0, y: y, width: page.width, height: min(1024, page.height-y)))
+                }
+                return pdfChoices + added
             }
             return [SummarySource(id: page.id.uuidString, pageID: page.id, label: "\(index + 1)페이지",
                                   rect: CGRect(x: 0, y: 0, width: page.width, height: page.height))]

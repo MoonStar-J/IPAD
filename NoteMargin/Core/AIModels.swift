@@ -16,6 +16,7 @@ struct MarginMessage: Codable, Identifiable, Equatable {
     var revision: Int?
     var attachmentIDs: [UUID]?
     var replyTo: MessageReference?
+    var noteSummary: String?
     func displayText(in language: AppLanguage = .current) -> String {
         if role == .user, attachmentIDs?.isEmpty == false, text == "내 풀이 / 추가 자료 스크린샷" {
             return localized("내 풀이 / 추가 자료 스크린샷", language: language)

@@ -93,7 +93,8 @@ import Security
         let original = try XCTUnwrap(PDFDocument(data: data)); original.page(at: 2)?.rotation = 90
         let store = try store()
         let prepared = try XCTUnwrap(store.preparePDF(data: original.dataRepresentation()!, title: "Continuous", folderID: nil))
-        let id = try XCTUnwrap(store.importPDF(prepared, layout: .continuous))
+        let imported = await store.importPDF(prepared, layout: .continuous)
+        let id = try XCTUnwrap(imported)
         let page = store.note(id)!.pages[0]
         let choices = try ExportService.pageChoices(note: store.note(id)!, store: store)
         let rect = choices[2].rect
@@ -323,6 +324,228 @@ import Security
         attachment.name = "editing-boundary-performance"; attachment.lifetime = .keepAlways; add(attachment)
         print("EDITING_PERFORMANCE " + String(data: try JSONSerialization.data(withJSONObject: reports, options: [.sortedKeys]), encoding: .utf8)!)
     }
+    func testSummaryCanvasPreservesMarkdownInkAndVectorExport() async throws {
+        let store = try store()
+        let sourceID = try XCTUnwrap(store.createNote(title: "Source", paper: .plain, cover: .blue, folderID: nil))
+        let source = store.note(sourceID)!
+        let id = try store.createSummary(source: source, sources: NoteSummaryService.pageChoices(source), title: "Summary", model: "fixture", account: "fixture")
+        var work = try store.summaryWork(id)
+        work.final = (1...80).map { "## Section \($0)\n\nThe condition is $x > 0$, and \\(x^2+1\\) follows.\n\n" }.joined()
+        try store.saveSummary(id, work: work, state: .completed)
+        try await store.prepareSummaryCanvas(id)
+        let note = store.note(id)!, page = try XCTUnwrap(note.pages.first), element = try XCTUnwrap(page.elements.first)
+        XCTAssertEqual(element.text, work.markdown)
+        XCTAssertTrue(page.isContinuousNote); XCTAssertGreaterThan(page.height, 2048)
+        let asset = try XCTUnwrap(store.assetURL(noteID: id, name: element.assetName!))
+        let rendered = try XCTUnwrap(PDFDocument(url: asset))
+        XCTAssertGreaterThan(rendered.pageCount, 2)
+        XCTAssertTrue(rendered.string?.contains("Section 80") == true)
+        let capture = try RegionContextService.capture(note: note, page: page, drawing: PKDrawing(), store: store,
+                                                       rect: CGRect(x: 0, y: 0, width: 768, height: 600))
+        XCTAssertTrue(capture.extractedText.contains("Section 1"))
+        XCTAssertFalse(capture.extractedText.contains("Section 80"), "a question crop must not include the rest of a long summary")
+        let session = DrawingSession(); session.load(noteID: id, pageID: page.id, store: store)
+        let ink = PKDrawing(strokes: [stroke([CGPoint(x: 70,y: 70),CGPoint(x: 180,y: 120)])])
+        XCTAssertTrue(session.commitDrawing(ink, action: "test"))
+        session.undo(); XCTAssertTrue(session.drawing.strokes.isEmpty)
+        session.redo(); XCTAssertEqual(session.drawing, ink)
+        XCTAssertTrue(store.flushDrawings())
+        let url = try await ExportService.exportPDF(note: note, store: store)
+        let exported = try XCTUnwrap(PDFDocument(url: url))
+        XCTAssertEqual(exported.pageCount, NoteSummaryService.pageChoices(note).count)
+        XCTAssertTrue(exported.string?.contains("Section 80") == true)
+        try await store.prepareSummaryCanvas(id)
+        XCTAssertEqual(store.note(id)?.pages[0].elements[0].id, element.id)
+        XCTAssertEqual(try store.drawing(noteID: id, pageID: page.id), ink)
+        session.stop()
+    }
+
+    func testContinuousExtensionPreservesDrawingAndViewport() async throws {
+        let store = try store()
+        let id = try XCTUnwrap(store.createNote(title: "Continuous", paper: .ruled, cover: .blue, folderID: nil))
+        let pageID = store.note(id)!.pages[0].id
+        let session = DrawingSession(); session.load(noteID: id, pageID: pageID, store: store)
+        let host = CanvasHostView(session: session); session.host = host
+        host.frame = CGRect(x: 0, y: 0, width: 800, height: 1000)
+        func configure() {
+            let note = store.note(id)!
+            host.configure(note: note, page: note.pages[0], store: store, fingerDrawing: false, editingObjects: false, toolsVisible: true,
+                           onSelect: { _ in }, onMove: { _,_,_ in }, onTurnPage: { _ in false })
+            host.layoutIfNeeded()
+        }
+        configure()
+        let canvas = session.canvas
+        let ink = PKDrawing(strokes: [stroke([CGPoint(x: 70, y: 900), CGPoint(x: 180,y: 920)])])
+        XCTAssertTrue(session.commitDrawing(ink, action: "test"))
+        canvas.setContentOffset(CGPoint(x: canvas.contentOffset.x, y: 650), animated: false)
+        host.canvasDidScroll()
+        for _ in 0..<20 where store.note(id)!.pages[0].height == 1024 { try await Task.sleep(for: .milliseconds(5)) }
+        let offset = canvas.contentOffset
+        configure(); host.saveViewport()
+        XCTAssertTrue(canvas === session.canvas)
+        XCTAssertEqual(canvas.contentOffset, offset)
+        XCTAssertGreaterThan(store.note(id)!.pages[0].height, 1024)
+        XCTAssertEqual(session.drawing, ink)
+        session.undo(); XCTAssertTrue(session.drawing.strokes.isEmpty)
+        session.redo(); XCTAssertEqual(session.drawing, ink)
+        XCTAssertTrue(store.flushDrawings())
+        XCTAssertNotNil(store.note(id)!.pages[0].viewport)
+        session.stop()
+    }
+
+    func testMarkerLayerCapsOverlapAndPreservesOriginalInk() throws {
+        let rect = CGRect(x: 0, y: 0, width: 100, height: 100)
+        for color in [UIColor.black, .systemBlue, .systemRed, .systemYellow, .systemGreen] {
+            for count in [1, 4, 20] {
+                let strokes = (0..<count).map { index in
+                    PKStroke(ink: PKInk(.marker, color: color), path: PKStrokePath(controlPoints: [20.0,80.0].map {
+                        PKStrokePoint(location: CGPoint(x: $0, y: 50), timeOffset: $0/100, size: CGSize(width: 40, height: 40), opacity: 1, force: 1, azimuth: 0, altitude: 1)
+                    }, creationDate: Date(timeIntervalSince1970: Double(index))))
+                }
+                let format = UIGraphicsImageRendererFormat(); format.scale = 1; format.opaque = false
+                let drawing = PKDrawing(strokes: strokes)
+                let image = UIGraphicsImageRenderer(bounds: rect, format: format).image { _ in PageRenderer.drawInk(drawing, in: rect, scale: 1) }.cgImage!
+                var pixel = [UInt8](repeating: 0, count: 4)
+                pixel.withUnsafeMutableBytes { bytes in
+                    let context = CGContext(data: bytes.baseAddress, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+                    context.translateBy(x: -50, y: -50); context.draw(image, in: rect)
+                }
+                XCTAssertLessThanOrEqual(pixel[3], 73, "overlap has one shared opacity cap")
+                let store = try store(), id = try XCTUnwrap(store.createNote(title: "Marker", paper: .plain, cover: .blue, folderID: nil))
+                let session = DrawingSession(); let pageID = store.note(id)!.pages[0].id
+                session.load(noteID: id, pageID: pageID, store: store)
+                XCTAssertTrue(session.commitDrawing(drawing, action: "test"))
+                XCTAssertEqual(session.drawing, drawing)
+                XCTAssertEqual(session.canvas.drawing.strokes[0].ink.color.cgColor.alpha, 0)
+                session.undo(); XCTAssertTrue(session.drawing.strokes.isEmpty)
+                session.redo(); XCTAssertEqual(session.drawing, drawing)
+                XCTAssertTrue(store.flushDrawings())
+                XCTAssertEqual(try store.drawing(noteID: id, pageID: pageID), drawing)
+                session.stop()
+            }
+        }
+    }
+
+    func testOverlappingMarkerErasingPerformance() throws {
+        let store = try store()
+        let id = try XCTUnwrap(store.createNote(title: "Marker measurement", paper: .plain, cover: .blue, folderID: nil))
+        let note = store.note(id)!, page = note.pages[0]
+        let session = DrawingSession(preferences: UserDefaults(suiteName: UUID().uuidString)!)
+        session.load(noteID: id, pageID: page.id, store: store)
+        let host = CanvasHostView(session: session); session.host = host
+        host.frame = CGRect(x: 0, y: 0, width: 800, height: 1000)
+        let window = UIWindow(frame: host.frame), controller = UIViewController()
+        window.rootViewController = controller; controller.view.addSubview(host); window.makeKeyAndVisible()
+        defer { session.stop(); window.isHidden = true }
+        host.configure(note: note, page: page, store: store, fingerDrawing: false, editingObjects: false, toolsVisible: true,
+                       onSelect: { _ in }, onMove: { _,_,_ in }, onTurnPage: { _ in false })
+        host.layoutIfNeeded(); session.canvas.zoomScale = 1
+        let colors: [UIColor] = [.black, .systemBlue, .systemRed, .systemYellow, .systemGreen]
+        let strokes = (0..<600).map { i in
+            PKStroke(ink: PKInk(.marker, color: colors[i % colors.count]), path: PKStrokePath(controlPoints: (0..<24).map { j in
+                PKStrokePoint(location: CGPoint(x: 40 + Double(j) * 26, y: 120 + Double(i % 80) * 8), timeOffset: Double(j) * 0.01,
+                              size: CGSize(width: 24, height: 16), opacity: 1, force: 0.7, azimuth: 0.4, altitude: 1)
+            }, creationDate: Date(timeIntervalSince1970: Double(i))), randomSeed: UInt32(i))
+        }
+        XCTAssertTrue(session.commitDrawing(PKDrawing(strokes: strokes), action: "fixture"))
+        session.selectTool(.eraser); DrawingEngineMetrics.reset()
+        for contact in 0..<4 {
+            session.selectTool(.eraser)
+            host.beginStrokeErasing()
+            for step in 0..<16 { host.extendStrokeErasing(along: [CGPoint(x: 70 + Double(step)*30, y: 120 + Double(contact)*48)]) }
+            host.endStrokeErasing()
+        }
+        XCTAssertLessThan(session.drawing.strokes.count, strokes.count)
+        var usage = rusage(); getrusage(RUSAGE_SELF, &usage)
+        let report: [String: Any] = ["phaseMs": DrawingEngineMetrics.phaseMilliseconds,
+            "moveTotalMs": DrawingEngineMetrics.eraseMilliseconds, "moveSamples": DrawingEngineMetrics.eraseBatches,
+            "inkRasters": DrawingEngineMetrics.inkTileRasters, "cacheBytes": host.cachedInkBytes, "peakBytes": usage.ru_maxrss]
+        print("MARKER_PERFORMANCE " + String(data: try JSONSerialization.data(withJSONObject: report, options: [.sortedKeys]), encoding: .utf8)!)
+    }
+
+    func testCopiedMarkerIDsKeepDistinctColorsAndAlphasAfterNativeErasing() throws {
+        let store = try store(), id = try XCTUnwrap(store.createNote(title: "copies", paper: .plain, cover: .blue, folderID: nil))
+        let pageID = store.note(id)!.pages[0].id
+        let session = DrawingSession(); session.load(noteID: id, pageID: pageID, store: store)
+        session.undoManager?.groupsByEvent = false
+        var first = stroke([CGPoint(x: 20, y: 80), CGPoint(x: 300, y: 80)])
+        first.ink = PKInk(.marker, color: UIColor.red.withAlphaComponent(0.4))
+        var second = first; second.ink = PKInk(.marker, color: UIColor.red.withAlphaComponent(0.9))
+        var third = first; third.ink = PKInk(.marker, color: .blue)
+        let original = PKDrawing(strokes: [first, second, third])
+        session.commitDrawing(original, action: "copies")
+        session.selectTool(.pixelEraser)
+        session.canvasViewDidBeginUsingTool(session.canvas)
+        let changed = session.canvas.drawing.strokes.map { stroke in
+            var stroke = stroke; stroke.mask = UIBezierPath(rect: CGRect(x: 50, y: 60, width: 100, height: 40)); return stroke
+        }
+        session.canvas.drawing = PKDrawing(strokes: changed)
+        session.canvasViewDrawingDidChange(session.canvas)
+        session.canvasViewDidEndUsingTool(session.canvas)
+        XCTAssertEqual(session.drawing.strokes.map { $0.ink.color }, original.strokes.map { $0.ink.color })
+        XCTAssertTrue(session.drawing.strokes.allSatisfy { $0.mask != nil })
+        session.undo(); XCTAssertEqual(session.drawing, original)
+        session.redo(); XCTAssertEqual(session.drawing.strokes.map { $0.ink.color }, original.strokes.map { $0.ink.color })
+        session.stop()
+        let archivedOriginal = try PKDrawing(data: original.dataRepresentation())
+        XCTAssertEqual(try store.drawing(noteID: id, pageID: pageID).strokes.map { $0.ink.color }, archivedOriginal.strokes.map { $0.ink.color })
+    }
+
+    func testPageSlideCancellationCommitAndRepeatedInput() async throws {
+        let store = try store(), id = try XCTUnwrap(store.createNote(title: "Legacy pages", paper: .plain, cover: .blue, folderID: nil))
+        store.updateNote(id) { $0.pages = [NotePage(), NotePage(), NotePage()] }
+        let note = store.note(id)!, session = DrawingSession()
+        var index = 0, changes = 0
+        session.load(noteID: id, pageID: note.pages[0].id, store: store)
+        let host = CanvasHostView(session: session); session.host = host; host.frame = CGRect(x: 0, y: 0, width: 800, height: 1000)
+        func configure() {
+            host.configure(note: note, page: note.pages[index], store: store, fingerDrawing: true, editingObjects: false,
+                           toolsVisible: true, onSelect: { _ in }, onMove: { _,_,_ in }, onTurnPage: { direction in
+                guard note.pages.indices.contains(index + direction) else { return false }
+                changes += 1; index += direction
+                session.load(noteID: id, pageID: note.pages[index].id, store: store)
+                configure(); return true
+            })
+            host.layoutIfNeeded()
+        }
+        configure()
+        XCTAssertFalse(host.beginPageTransition(direction: -1))
+        XCTAssertTrue(host.beginPageTransition(direction: 1))
+        host.updatePageTransition(translation: -150); host.endPageTransition(commit: false)
+        try await Task.sleep(for: .milliseconds(350))
+        XCTAssertEqual(index, 0); XCTAssertEqual(changes, 0); XCTAssertTrue(session.canvas.isUserInteractionEnabled)
+        XCTAssertTrue(host.beginPageTransition(direction: 1))
+        host.updatePageTransition(translation: -450); host.endPageTransition(commit: true)
+        host.endPageTransition(commit: true); host.turnPage(direction: 1)
+        host.pageFinishedRendering()
+        try await Task.sleep(for: .milliseconds(350))
+        XCTAssertEqual(index, 1); XCTAssertEqual(changes, 1); XCTAssertTrue(session.canvas.isUserInteractionEnabled)
+        host.turnPage(direction: -1); host.pageFinishedRendering()
+        try await Task.sleep(for: .milliseconds(350))
+        XCTAssertEqual(index, 0); XCTAssertEqual(changes, 2)
+        session.stop()
+    }
+
+    func testMultiImportFailureAndCancelDoNotCreateEmptyOrDuplicateNotes() async throws {
+        let store = try store(), flow = PDFImportFlow()
+        let files = try ["good", "missing"].map { name in
+            try PDFImportContents(title: name, data: UIGraphicsPDFRenderer(bounds: CGRect(x: 0, y: 0, width: 300, height: 400)).pdfData { $0.beginPage() })
+        }
+        flow.start(store: store, folderID: nil, projectID: nil) { PDFImportSelection(files: files) }
+        for _ in 0..<400 where flow.preparing { try await Task.sleep(for: .milliseconds(5)) }
+        try FileManager.default.removeItem(at: files[1].url)
+        flow.chooseOptions(); flow.create(layout: .paged, separate: true, title: "", store: store) { _ in XCTFail("partial failure must show its result") }
+        flow.create(layout: .paged, separate: true, title: "duplicate", store: store) { _ in XCTFail() }
+        for _ in 0..<400 where flow.preparing { try await Task.sleep(for: .milliseconds(5)) }
+        XCTAssertEqual(flow.created.count, 1); XCTAssertEqual(flow.failures.count, 1)
+        XCTAssertEqual(store.library.notebooks.map(\.title), ["good"])
+        flow.reset()
+        flow.start(store: store, folderID: nil, projectID: nil) { PDFImportSelection(files: [files[0]]) }
+        for _ in 0..<400 where flow.preparing { try await Task.sleep(for: .milliseconds(5)) }
+        flow.chooseOptions(); flow.create(layout: .continuous, separate: false, title: "cancelled", store: store) { _ in XCTFail() }
+        flow.cancel(); try await Task.sleep(for: .milliseconds(20))
+        XCTAssertEqual(store.library.notebooks.count, 1)
+    }
     func testCompositeTilesPreserveOverlapMasksAndFade() throws {
         let viewport = CGRect(x: 0, y: 0, width: 384, height: 384)
         var strokes = [PKStroke]()
@@ -356,11 +579,11 @@ import Security
             let selection = RectangularInkSelection(drawing: drawing, indices: [1,3])
             let preview = InkTransformPreview(frame: viewport); preview.overrideUserInterfaceStyle = style
             preview.prepare(selection: selection, paper: paper, viewport: viewport, transform: .identity)
-            let expected = image { _ in drawing.image(from: viewport, scale: 2).draw(in: viewport) }
+            let expected = image { _ in PageRenderer.drawInk(drawing, in: viewport, scale: 2) }
             XCTAssertLessThan(difference(expected, image { preview.layer.render(in: $0.cgContext) }), 0.5)
             let transform = CGAffineTransform(translationX: 12, y: 8)
             preview.moveSelection(transform, viewportTransform: .identity)
-            let moved = image { _ in selection.transformed(transform).image(from: viewport, scale: 2).draw(in: viewport) }
+            let moved = image { _ in PageRenderer.drawInk(selection.transformed(transform), in: viewport, scale: 2) }
             XCTAssertLessThan(difference(moved, image { preview.layer.render(in: $0.cgContext) }), 0.5)
             var distant = strokes
             for i in [1,3] { distant[i].transform = CGAffineTransform(translationX: 900, y: 0) }
@@ -368,17 +591,20 @@ import Security
             preview.prepare(selection: distantSelection, paper: paper, viewport: viewport, transform: .identity)
             let bringIntoView = CGAffineTransform(translationX: -888, y: 8)
             preview.moveSelection(bringIntoView, viewportTransform: .identity)
-            let brought = image { _ in distantSelection.transformed(bringIntoView).image(from: viewport, scale: 2).draw(in: viewport) }
+            let brought = image { _ in PageRenderer.drawInk(distantSelection.transformed(bringIntoView), in: viewport, scale: 2) }
             XCTAssertLessThan(difference(brought, image { preview.layer.render(in: $0.cgContext) }), 0.5, "moving from another tile retains stroke stacking and clears the previous preview")
             let erase = StrokeEraserPreviewView(frame: viewport); erase.overrideUserInterfaceStyle = style
             erase.begin(transaction: StrokeEraserTransaction(drawing: drawing, width: 12), paper: paper, viewport: viewport, transform: .identity)
             erase.setErased([1,3])
             let faded = image { _ in
-                for (i, stroke) in strokes.enumerated() { PKDrawing(strokes: [stroke]).image(from: viewport, scale: 2).draw(in: viewport, blendMode: .normal, alpha: [1,3].contains(i) ? 0.35 : 1) }
+                PageRenderer.drawInk(PKDrawing(strokes: [strokes[0], strokes[2], strokes[4]]), in: viewport, scale: 2)
+                UITraitCollection(userInterfaceStyle: .light).performAsCurrent {
+                    PKDrawing(strokes: [strokes[1], strokes[3]]).image(from: viewport, scale: 2).draw(in: viewport, blendMode: .normal, alpha: 0.35)
+                }
             }
             XCTAssertLessThan(difference(faded, image { erase.layer.render(in: $0.cgContext) }), 0.5)
             erase.setErased([1,3], committed: true)
-            let removed = image { _ in PKDrawing(strokes: [strokes[0],strokes[2],strokes[4]]).image(from: viewport, scale: 2).draw(in: viewport) }
+            let removed = image { _ in PageRenderer.drawInk(PKDrawing(strokes: [strokes[0],strokes[2],strokes[4]]), in: viewport, scale: 2) }
             XCTAssertLessThan(difference(removed, image { erase.layer.render(in: $0.cgContext) }), 0.5)
         }
         let cache = InkGeometryCache(drawing: drawing)
@@ -477,29 +703,55 @@ import Security
     }
     func testSingleImportCancellationAndConsumption() async throws {
         let store = try store(), flow = PDFImportFlow()
-        let renderer = UIGraphicsPDFRenderer(bounds:CGRect(x:0,y:0,width:300,height:400))
-        let data = renderer.pdfData { output in output.beginPage();output.beginPage() }
-        flow.start(store:store,folderID:nil,projectID:nil) { PDFImportContents(title:"one selection",data:data) }
-        for _ in 0..<100 where flow.preparing { await Task.yield() }
-        guard case .options(let prepared) = flow.stage else { return XCTFail("first selection did not reach options") }
-        XCTAssertEqual(prepared.pages.count,2)
-        let id = try XCTUnwrap(flow.create(layout:.continuous,store:store))
-        XCTAssertNil(flow.create(layout:.continuous,store:store))
-        XCTAssertEqual(store.library.notebooks.count,1)
-        XCTAssertNotNil(try store.drawing(noteID:id,pageID:store.note(id)!.pages[0].id))
-        flow.start(store:store,folderID:nil,projectID:nil) { try await Task.sleep(for:.milliseconds(20));return PDFImportContents(title:"cancelled",data:data) }
-        flow.cancel()
-        try await Task.sleep(for:.milliseconds(30))
-        if case .sources = flow.stage {} else { XCTFail("late result after cancellation") }
-        XCTAssertEqual(store.library.notebooks.count,1)
-        flow.start(store:store,folderID:nil,projectID:nil) { throw URLError(.notConnectedToInternet) }
-        for _ in 0..<100 where flow.preparing { await Task.yield() }
-        guard case .failed = flow.stage else { return XCTFail("cloud read error lost") }
-        XCTAssertEqual(store.library.notebooks.count,1)
-        flow.start(store:store,folderID:nil,projectID:nil) { PDFImportContents(title:"retry",data:data) }
-        for _ in 0..<100 where flow.preparing { await Task.yield() }
-        XCTAssertNotNil(flow.create(layout:.paged,store:store))
-        XCTAssertEqual(store.library.notebooks.count,2)
+        let renderer = UIGraphicsPDFRenderer(bounds: CGRect(x: 0,y: 0,width: 300,height: 400))
+        let data = renderer.pdfData { output in output.beginPage(); output.beginPage() }
+        flow.start(store: store, folderID: nil, projectID: nil) { PDFImportSelection(files: [try PDFImportContents(title: "one selection", data: data)]) }
+        for _ in 0..<400 where flow.preparing { try await Task.sleep(for: .milliseconds(5)) }
+        guard case .selection = flow.stage else { return XCTFail("selection must wait for explicit import") }
+        XCTAssertEqual(flow.files.first?.pages.count, 2)
+        XCTAssertTrue(store.library.notebooks.isEmpty)
+        flow.chooseOptions()
+        flow.create(layout: .continuous, separate: false, title: "combined", store: store) { _ in }
+        flow.create(layout: .continuous, separate: false, title: "duplicate", store: store) { _ in }
+        for _ in 0..<400 where flow.preparing { try await Task.sleep(for: .milliseconds(5)) }
+        XCTAssertEqual(store.library.notebooks.count, 1)
+        flow.reset()
+        flow.start(store: store, folderID: nil, projectID: nil) {
+            try await Task.sleep(for: .milliseconds(20))
+            return PDFImportSelection(files: [try PDFImportContents(title: "cancelled", data: data)])
+        }
+        flow.cancel(); try await Task.sleep(for: .milliseconds(30))
+        XCTAssertTrue(flow.files.isEmpty)
+        XCTAssertEqual(store.library.notebooks.count, 1)
+        flow.start(store: store, folderID: nil, projectID: nil) { throw URLError(.notConnectedToInternet) }
+        for _ in 0..<400 where flow.preparing { try await Task.sleep(for: .milliseconds(5)) }
+        XCTAssertEqual(flow.failures.count, 1)
+    }
+    func testMultiplePDFLayoutsPreserveFileAndPageOrder() async throws {
+        for layout in PDFImportLayout.allCases { for separate in [false, true] {
+            let store = try store(), flow = PDFImportFlow()
+            let files = try ["A", "B"].map { name in
+                try PDFImportContents(title: name, data: UIGraphicsPDFRenderer(bounds: CGRect(x: 0, y: 0, width: 300, height: 400)).pdfData { output in
+                    for page in 1...2 { output.beginPage(); ("\(name)\(page)" as NSString).draw(at: CGPoint(x: 10,y: 20), withAttributes: [.font: UIFont.systemFont(ofSize: 20)]) }
+                })
+            }
+            flow.start(store: store, folderID: nil, projectID: nil) { PDFImportSelection(files: files) }
+            for _ in 0..<400 where flow.preparing { try await Task.sleep(for: .milliseconds(5)) }
+            XCTAssertEqual(flow.files.count, 2, flow.failures.map(\.text).joined(separator: "; "))
+            flow.files.reverse(); flow.chooseOptions()
+            flow.create(layout: layout, separate: separate, title: "BA", store: store) { _ in }
+            for _ in 0..<400 where flow.preparing { try await Task.sleep(for: .milliseconds(5)) }
+            XCTAssertEqual(flow.created.count, separate ? 2 : 1)
+            var text: [String] = []
+            for id in flow.created {
+                let note = store.note(id)!
+                XCTAssertEqual(note.pages.count, layout == .continuous ? 1 : (separate ? 2 : 4))
+                let url = try await ExportService.exportPDF(note: note, store: store)
+                let document = try XCTUnwrap(PDFDocument(url: url))
+                text += (0..<document.pageCount).map { document.page(at: $0)?.string?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "" }
+            }
+            XCTAssertEqual(text, ["B1", "B2", "A1", "A2"])
+        } }
     }
     func testDriveRequestAndCallbackValidation() throws {
         let oauth = try GoogleDriveOAuth(clientID:"123.apps.googleusercontent.com",scheme:"com.googleusercontent.apps.123")
@@ -509,8 +761,12 @@ import Security
         XCTAssertEqual(values["trigger_onepick"],"true")
         XCTAssertEqual(values["code_challenge_method"],"S256")
         XCTAssertEqual(values["mimetypes"],"application/pdf")
+        XCTAssertEqual(values["allow_multiple"], "true")
         let valid = URL(string:oauth.redirect.absoluteString+"?state=\(oauth.state)&code=single-use&picked_file_ids=pdf_123")!
-        XCTAssertEqual(try oauth.callback(valid).fileID,"pdf_123")
+        XCTAssertEqual(try oauth.callback(valid).fileIDs,["pdf_123"])
+        let multiple = valid.absoluteString.replacingOccurrences(of: "picked_file_ids=pdf_123", with: "picked_file_ids=pdf_123,pdf_456,pdf_123")
+        XCTAssertEqual(try oauth.callback(URL(string: multiple)!).fileIDs, ["pdf_123", "pdf_456"])
+        XCTAssertThrowsError(try oauth.callback(URL(string: multiple.replacingOccurrences(of: "pdf_456", with: ""))!))
         XCTAssertThrowsError(try oauth.callback(URL(string:valid.absoluteString+"&state=duplicate")!))
         XCTAssertThrowsError(try oauth.callback(URL(string:valid.absoluteString.replacingOccurrences(of:oauth.state,with:"wrong"))!))
     }

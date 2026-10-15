@@ -21,6 +21,7 @@ struct NoteSummary: Codable, Equatable {
     let createdAt: Date
     let model: String
     let account: String
+    var canvasElementID: UUID?
     var state: State = .preparing
     var bodyAsset = "summary.md"
     var workAsset = "summary-work.json"

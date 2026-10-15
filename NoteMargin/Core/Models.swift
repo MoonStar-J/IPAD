@@ -38,6 +38,9 @@ struct PageElement: Codable, Identifiable, Equatable {
     var width: Double = 400
     var height: Double = 160
     var fontSize: Double = 24
+    var sourceMessageID: UUID?
+    var isAnswerSummary: Bool?
+    var isRenderedText: Bool { kind == .text && assetName?.hasSuffix(".pdf") == true }
 }
 
 enum PDFImportLayout: String, CaseIterable, Identifiable {
@@ -50,6 +53,7 @@ struct PDFSegment: Codable, Equatable {
     let pageIndex: Int
     let y: Double
     let height: Double
+    var assetName: String? = nil
 }
 
 /// Public PencilKit identifiers that remain unchanged by transforms and masks.
@@ -79,7 +83,10 @@ struct NotePage: Codable, Identifiable, Equatable {
     var height: Double = 1024
     var canvasMode: String?
     var viewport: CanvasViewport?
+    var isContinuousNote: Bool { canvasMode == "continuous" }
+    var isVertical: Bool { isContinuousNote || isContinuousPDF }
     var isInfinite: Bool { canvasMode == "infinite" && pdfPageIndex == nil && pdfSegments == nil }
+    var pdfAssetName: String?
     var pdfPageIndex: Int?
     var elements: [PageElement] = []
     // Older pages decode without a migration. Erased members can remain here so
@@ -89,9 +96,10 @@ struct NotePage: Codable, Identifiable, Equatable {
     // Optional for compatibility with notebooks saved before continuous import.
     var pdfSegments: [PDFSegment]?
     var pdfFitToPage: Bool?
+    var pdfBackgroundHeight: Double?
     var isContinuousPDF: Bool { pdfSegments != nil }
     var pdfRegions: [PDFSegment] {
-        pdfSegments ?? pdfPageIndex.map { [PDFSegment(pageIndex: $0, y: 0, height: height)] } ?? []
+        pdfSegments ?? pdfPageIndex.map { [PDFSegment(pageIndex: $0, y: 0, height: pdfBackgroundHeight ?? height, assetName: pdfAssetName)] } ?? []
     }
 
     static func importedPDFPages(_ pages: [NotePage], layout: PDFImportLayout) throws -> [NotePage] {
@@ -102,7 +110,7 @@ struct NotePage: Codable, Identifiable, Equatable {
         var y = 0.0
         let segments = pages.map { page -> PDFSegment in
             defer { y += page.height }
-            return PDFSegment(pageIndex: page.pdfPageIndex!, y: y, height: page.height)
+            return PDFSegment(pageIndex: page.pdfPageIndex!, y: y, height: page.height, assetName: page.pdfAssetName)
         }
         guard y.isFinite else { throw CocoaError(.fileReadCorruptFile) }
         return [NotePage(width: 768, height: y, pdfSegments: segments, pdfFitToPage: true)]

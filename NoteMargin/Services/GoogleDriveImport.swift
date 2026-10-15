@@ -97,7 +97,7 @@ final class GoogleDriveImport: NSObject, ObservableObject, ASWebAuthenticationPr
         guard types.contains(where: { ($0["CFBundleURLSchemes"] as? [String])?.contains(scheme) == true }) else { return nil }
         return (client, scheme)
     }
-    private func authorize(selectAccount: Bool, picking: Bool) async throws -> String {
+    private func authorize(selectAccount: Bool, picking: Bool) async throws -> [String] {
         guard let config = configured else { throw DriveImportError.configuration }
         let attempt = try GoogleDriveOAuth(clientID: config.client, scheme: config.scheme)
         let id = UUID(); attemptID = id
@@ -132,23 +132,33 @@ final class GoogleDriveImport: NSObject, ObservableObject, ASWebAuthenticationPr
         // Never reuse a previous account's refresh token after choosing an account.
         try Task.checkCancellation()
         try saveCredential(Credential(clientID: config.client, tokens: tokens, expires: Date().addingTimeInterval(tokens.expires_in)))
-        return selected.fileID
+        return selected.fileIDs
     }
-    func pickPDF(selectAccount: Bool) async throws -> PDFImportContents {
+    func pickPDFs(selectAccount: Bool) async throws -> PDFImportSelection {
         guard !busy else { throw DriveImportError.authorization }
         busy = true; defer { busy = false }
-        let fileID = try await authorize(selectAccount: selectAccount, picking: true)
+        let fileIDs = try await authorize(selectAccount: selectAccount, picking: true)
         try await loadAccount()
-        var components = URLComponents(string: "https://www.googleapis.com/drive/v3/files/" + fileID)!
-        components.queryItems = [URLQueryItem(name: "fields", value: "name,mimeType,capabilities(canDownload)"), URLQueryItem(name: "supportsAllDrives", value: "true")]
-        struct Metadata: Decodable { let name: String; let mimeType: String; let capabilities: Capabilities
-            struct Capabilities: Decodable { let canDownload: Bool? } }
-        let metadata = try JSONDecoder().decode(Metadata.self, from: await authorized(components.url!))
-        guard metadata.mimeType == "application/pdf", metadata.capabilities.canDownload == true else { throw DriveImportError.notPDF }
-        components.queryItems = [URLQueryItem(name: "alt", value: "media"), URLQueryItem(name: "supportsAllDrives", value: "true")]
-        let bytes = try await authorized(components.url!)
-        try Task.checkCancellation()
-        return PDFImportContents(title: (metadata.name as NSString).deletingPathExtension, data: bytes)
+        var result = PDFImportSelection()
+        for fileID in fileIDs {
+            try Task.checkCancellation()
+            var name = fileID
+            do {
+                var components = URLComponents(string: "https://www.googleapis.com/drive/v3/files/" + fileID)!
+                components.queryItems = [URLQueryItem(name: "fields", value: "name,mimeType,capabilities(canDownload)"), URLQueryItem(name: "supportsAllDrives", value: "true")]
+                struct Metadata: Decodable { let name: String; let mimeType: String; let capabilities: Capabilities
+                    struct Capabilities: Decodable { let canDownload: Bool? } }
+                let metadata = try JSONDecoder().decode(Metadata.self, from: await authorized(components.url!))
+                name = metadata.name
+                guard metadata.mimeType == "application/pdf", metadata.capabilities.canDownload == true else { throw DriveImportError.notPDF }
+                components.queryItems = [URLQueryItem(name: "alt", value: "media"), URLQueryItem(name: "supportsAllDrives", value: "true")]
+                let bytes = try await authorized(components.url!)
+                try Task.checkCancellation()
+                result.files.append(try PDFImportContents(title: (name as NSString).deletingPathExtension, data: bytes))
+            } catch is CancellationError { throw CancellationError() }
+            catch { result.failures.append(AppMessage("%@ · %@", name, AppMessage(error).text)) }
+        }
+        return result
     }
     private func exchange(_ fields: [String: String]) async throws -> Tokens {
         var form = URLComponents(); form.queryItems = fields.map { URLQueryItem(name: $0.key, value: $0.value) }
@@ -211,7 +221,7 @@ final class GoogleDriveImport: NSObject, ObservableObject, ASWebAuthenticationPr
 
 struct GoogleDriveImportButton: View {
     @AppStorage(AppLanguage.key) private var appLanguage: AppLanguage = .korean
-    let start: (@escaping () async throws -> PDFImportContents) -> Void
+    let start: (@escaping () async throws -> PDFImportSelection) -> Void
     @ObservedObject private var drive = GoogleDriveImport.shared
     @State private var showingConnection = false
     var body: some View {
@@ -221,7 +231,7 @@ struct GoogleDriveImportButton: View {
             .sheet(isPresented: $showingConnection) { GoogleDriveConnectionView(drive: drive) }
         if drive.isConnected {
             Text(drive.account).font(.footnote).foregroundStyle(.secondary)
-            Button(localized("Drive 파일 선택", language: appLanguage)) { start { try await drive.pickPDF(selectAccount: false) } }
+            Button(localized("Drive 파일 선택", language: appLanguage)) { start { try await drive.pickPDFs(selectAccount: false) } }
                 .disabled(drive.busy)
         }
         Text(localized("선택한 PDF만 접근합니다.", language: appLanguage)).font(.footnote).foregroundStyle(.secondary)

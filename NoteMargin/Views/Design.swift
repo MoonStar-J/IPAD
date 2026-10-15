@@ -49,7 +49,6 @@ struct NotebookForm: View {
     var onCreated: (UUID) -> Void = { _ in }
     @State private var title = ""
     @State private var paper: PaperStyle = .ruled
-    @State private var infinite = false
     @State private var cover: CoverColor = .blue
 
     var body: some View {
@@ -77,12 +76,6 @@ struct NotebookForm: View {
                     }.frame(maxWidth: .infinity)
                 }
                 if existing == nil {
-                    Section(localized("노트 형식", language: appLanguage)) {
-                        Picker(localized("캔버스", language: appLanguage), selection: $infinite) {
-                            Text(localized("고정 페이지", language: appLanguage)).tag(false)
-                            Text(localized("무한 캔버스", language: appLanguage)).tag(true)
-                        }.pickerStyle(.segmented).accessibilityIdentifier("note-canvas-mode")
-                    }
                     Section(localized("첫 페이지 용지", language: appLanguage)) {
                         Picker(localized("용지", language: appLanguage), selection: $paper) {
                             ForEach(PaperStyle.allCases) { Text(localized($0.title, language: appLanguage)).tag($0) }
@@ -98,7 +91,7 @@ struct NotebookForm: View {
                     Button(existing == nil ? localized("만들기", language: appLanguage) : localized("완료", language: appLanguage)) {
                         if let existing {
                             if store.updateNote(existing.id, { $0.title = title.trimmedOrUntitled; $0.cover = cover }) { dismiss() }
-                        } else if let id = store.createNote(title: title, paper: paper, cover: cover, folderID: folderID, projectID: projectID, infinite: infinite) {
+                        } else if let id = store.createNote(title: title, paper: paper, cover: cover, folderID: folderID, projectID: projectID) {
                             dismiss()
                             onCreated(id)
                         }

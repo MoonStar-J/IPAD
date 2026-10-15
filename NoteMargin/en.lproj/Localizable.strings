@@ -582,3 +582,49 @@
 "# 미완료 요약\n\n전체 범위의 최종 요약이 아닙니다." = "# Incomplete Summary\n\nThis is not a final summary of the entire selection.";
 "## 중단된 응답\n" = "## Interrupted Response\n";
 "내 풀이 / 추가 자료 스크린샷" = "My solution / additional material screenshot";
+
+"페이지 구성" = "Page layout";
+
+"페이지별" = "Separate pages";
+
+"이어붙이기" = "Continuous";
+
+"노트 구성" = "Notebook layout";
+
+"모든 파일을 하나의 노트로" = "One notebook for all files";
+
+"파일별로 별도 노트" = "One notebook per file";
+
+"파일 순서 변경" = "Change file order";
+
+"파일 순서" = "File order";
+
+"불러오기" = "Import";
+
+"생성된 노트" = "Created notebooks";
+
+"다시 가져오기" = "Import again";
+
+"연속 노트" = "Continuous notebook";
+
+"요약 상태와 출처" = "Summary status and sources";
+
+"답변 전체 옮기기" = "Insert full answer";
+
+"요약해서 노트에 넣기" = "Summarize and insert";
+
+"노트에 넣는 중…" = "Inserting into notebook…";
+
+"노트에 넣었습니다." = "Inserted into notebook.";
+
+"취소되었습니다." = "Cancelled.";
+
+"답변 요약을 완료하지 못했습니다." = "The answer summary could not be completed.";
+
+"질문 위치를 찾을 수 없습니다. 원래 페이지와 질문 영역을 확인해 주세요." = "The question location is no longer available. Check its original page and question area.";
+
+"받은 결과를 저장하지 못했습니다. 다시 누르면 저장만 재시도합니다." = "The result could not be saved. Try again to save it without another request.";
+
+"%@ · %@" = "%@ · %@";
+
+"PDF 파일을 선택해 주세요." = "Select PDF files.";

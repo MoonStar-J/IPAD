@@ -139,14 +139,13 @@ private struct SummaryProgress: View {
     }
 }
 
-struct SummaryReaderView: View {
+struct SummaryDetailsView: View {
     @AppStorage(AppLanguage.key) private var appLanguage: AppLanguage = .korean
     let noteID: UUID
     @ObservedObject var service: NoteSummaryService
     @EnvironmentObject private var store: NoteStore
     @Environment(\.dismiss) private var dismiss
     @State private var bodyText = ""
-    @State private var displayBody = ""
     @State private var sources: [SummarySource] = []
     @State private var error: AppMessage?
     private enum Sheet: String, Identifiable { case share, settings, connection; var id: String { rawValue } }
@@ -173,7 +172,6 @@ struct SummaryReaderView: View {
                         if let error = error ?? (service.retainedID == noteID || service.activeID == noteID ? service.failure : nil) {
                             Text(error.text).foregroundStyle(.red).textSelection(.enabled)
                         }
-                        MathAnswerView(text: displayBody).accessibilityIdentifier("summary-body")
                         DisclosureGroup(localized("생성 당시 출처 %@개", "\(sources.count)", language: appLanguage)) {
                             ForEach(sources) { source in Text("[\(source.id)] \(source.displayLabel(in: appLanguage))").font(.caption).frame(maxWidth: .infinity, alignment: .leading) }
                         }
@@ -181,7 +179,7 @@ struct SummaryReaderView: View {
                 }
                 .navigationTitle(localized("요약", language: appLanguage)).navigationBarTitleDisplayMode(.inline)
                 .toolbar {
-                    ToolbarItem(placement: .topBarLeading) { Button(localized("보관함", language: appLanguage)) { dismiss() }.accessibilityIdentifier("editor-library-back") }
+                    ToolbarItem(placement: .topBarLeading) { Button(localized("완료", language: appLanguage)) { dismiss() } }
                     ToolbarItemGroup(placement: .topBarTrailing) {
                         Button(localized("원문 복사", language: appLanguage), systemImage: "doc.on.doc") { UIPasteboard.general.string = bodyText }
                         Button(localized("공유", language: appLanguage), systemImage: "square.and.arrow.up") {
@@ -216,7 +214,6 @@ struct SummaryReaderView: View {
                 guard let text = String(data: data, encoding: .utf8) else { throw CocoaError(.fileReadCorruptFile) }
                 bodyText = text
             }
-            displayBody = work.final == nil ? work.displayMarkdown : bodyText
         } catch { self.error = AppMessage("저장된 요약을 읽지 못했습니다. %@", error: error) }
     }
 }

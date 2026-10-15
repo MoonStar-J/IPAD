@@ -1,8 +1,19 @@
 import Foundation
 
-struct PDFImportContents: Sendable {
+final class PDFImportContents: Sendable {
     let title: String
-    let data: Data
+    let url: URL
+    init(title: String, data: Data) throws {
+        self.title = title
+        url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathExtension("pdf")
+        try data.write(to: url, options: .atomic)
+    }
+    deinit { try? FileManager.default.removeItem(at: url) }
+}
+
+struct PDFImportSelection {
+    var files: [PDFImportContents] = []
+    var failures: [AppMessage] = []
 }
 
 /// Own the selected bytes before a provider URL or security scope expires.
@@ -29,7 +40,7 @@ enum PDFImportReader {
             try Task.checkCancellation()
             if let coordinationError { throw coordinationError }
             guard let result else { throw CocoaError(.fileReadUnknown) }
-            return PDFImportContents(title: url.deletingPathExtension().lastPathComponent, data: try result.get())
+            return try PDFImportContents(title: url.deletingPathExtension().lastPathComponent, data: try result.get())
         }
         return try await withTaskCancellationHandler {
             let contents = try await work.value

@@ -225,7 +225,7 @@ struct LibraryView: View {
         }) { route in NavigationStack { EditorView(noteID: route.id) }.environmentObject(store) }
         .sheet(isPresented: $showingSettings) { AppearanceSettings() }
         .sheet(isPresented: $importingPDF, onDismiss: {
-            pdfImport.cancel()
+            pdfImport.reset()
             if let id = importedNoteID { importedNoteID = nil; route = NoteRoute(id: id) }
         }) {
             PDFImportSourceView(flow: pdfImport, folderID: currentFolderID, projectID: currentProjectID) { id in
@@ -383,7 +383,7 @@ struct LibraryView: View {
     private func prepareImport(_ url: URL, folderID: UUID?) {
         guard !pdfImport.preparing else { return }
         importingPDF = true
-        pdfImport.prepare(url, store: store, folderID: folderID, projectID: currentProjectID)
+        pdfImport.prepare([url], store: store, folderID: folderID, projectID: currentProjectID)
     }
 
     @ViewBuilder private func noteActions(_ note: Notebook) -> some View {

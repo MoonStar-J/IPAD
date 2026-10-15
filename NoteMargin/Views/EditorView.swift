@@ -3,7 +3,7 @@ import PencilKit
 import PhotosUI
 
 private enum EditorSheet: String, Identifiable {
-    case pages, settings, text, objects, share, summary, exportSelection
+    case pages, settings, text, objects, share, summary, exportSelection, summaryDetails
     var id: String { rawValue }
 }
 
@@ -43,19 +43,17 @@ struct EditorView: View {
 
     var body: some View {
         Group {
-            if note?.summary != nil {
-                SummaryReaderView(noteID: noteID, service: store.summaries)
-            } else if let note, let page {
+            if let note, let page {
                 AIEditorCanvas(note: note, page: page, session: session, store: store,
                                fingerDrawing: fingerDrawing, editingObjects: editingObjects,
                                toolsVisible: sheet == nil && !choosingPhoto,
                                onTurnPage: { goToPage(pageIndex + $0) },
                                onSelectElement: { selectedElementID = $0 },
                                onMoveElement: { id, x, y in
-                    store.updatePage(noteID: noteID, pageID: page.id) { page in
-                        guard let index = page.elements.firstIndex(where: { $0.id == id }) else { return }
-                        page.elements[index].x = x; page.elements[index].y = y
-                    }
+                    guard var element = page.elements.first(where: { $0.id == id }) else { return }
+                    element.x = x; element.y = y
+                    store.updateElement(noteID: noteID, pageID: page.id, element: element, undoManager: session.undoManager)
+                    session.refreshUndo()
                 }, editorControlsInset: 64, toolObstacles: toolObstacles,
                    onOverlayVisibilityChange: { aiOverlayActive = $0 },
                    summarySelection: $selectingSummary, onSummaryRegion: { rect in
@@ -68,7 +66,7 @@ struct EditorView: View {
                     }
                 }
                 .overlay(alignment: .top) {
-                    if !aiOverlayActive && showingSwipeHint && note.pages.count > 1 && !page.isContinuousPDF && !editingObjects {
+                    if !aiOverlayActive && showingSwipeHint && note.pages.count > 1 && !page.isVertical && !editingObjects {
                         Label(localized("세 손가락으로  ← 다음 · 이전 →", language: appLanguage), systemImage: "hand.draw")
                             .font(.caption).padding(.horizontal, 16).padding(.vertical, 10)
                             .background(.regularMaterial, in: Capsule()).padding(.vertical, 64)
@@ -79,6 +77,12 @@ struct EditorView: View {
                     if !aiOverlayActive {
                         VStack(spacing: 8) {
                             editorHeader(note: note, page: page)
+                            if let summary = note.summary, summary.state != .completed {
+                                Button { sheet = .summaryDetails } label: {
+                                    Label(summary.state.title, systemImage: summary.state.running ? "hourglass" : "info.circle")
+                                        .font(.subheadline).padding(10).background(.regularMaterial, in: Capsule())
+                                }.toolObstacle()
+                            }
                             if editingObjects {
                                 HStack(spacing: 12) {
                                     Text(localized("텍스트·사진을 선택해 이동", language: appLanguage)).font(.caption).foregroundStyle(.secondary)
@@ -116,11 +120,13 @@ struct EditorView: View {
                     selectedElementID = nil
                     session.load(noteID: noteID, pageID: id, store: store)
                 }
+                .onChange(of: sheet) { _, _ in session.refreshUndo() }
                 .allowsHitTesting(!exporting)
                 .sheet(item: $sheet, onDismiss: {
                     if let id = pendingSummaryID { pendingSummaryID = nil; openedSummary = NoteRoute(id: id) }
                 }) { value in
                     switch value {
+                    case .summaryDetails: NavigationStack { SummaryDetailsView(noteID: noteID, service: store.summaries) }
                     case .pages:
                         PageManagerView(noteID: noteID, selectedPageID: page.id) { selectedPageID = $0 }
                     case .settings: NotebookForm(existing: note)
@@ -129,7 +135,7 @@ struct EditorView: View {
                         ElementForm(element: PageElement(kind: .text, x: center.map { Double($0.x)-200 } ?? 40, y: center.map { Double($0.y)-100 } ?? 40, width: min(400, page.width - 80), height: min(200, page.height - 80)), page: page) { element in
                             store.updatePage(noteID: noteID, pageID: page.id) { $0.elements.append(element) }
                         }
-                    case .objects: ObjectManagerView(noteID: noteID, pageID: page.id, selectedID: selectedElementID)
+                    case .objects: ObjectManagerView(noteID: noteID, pageID: page.id, selectedID: selectedElementID, undoManager: session.undoManager)
                     case .share: ShareSheet(urls: sharingURLs)
                     case .exportSelection:
                         PDFExportSelection(note: note, choices: exportChoices, exporting: exporting, progress: exportProgress, error: $store.errorMessage, cancel: { exportTask?.cancel() }) { export(asPDF: true, selection: $0) }
@@ -146,15 +152,23 @@ struct EditorView: View {
                         store.deletePage(noteID: noteID, pageID: page.id)
                     }
                 } message: { Text(localized("페이지의 필기와 삽입한 항목을 복원할 수 없습니다.", language: appLanguage)) }
+            } else if note?.summary != nil {
+                SummaryDetailsView(noteID: noteID, service: store.summaries)
+                    .overlay(alignment: .topLeading) { backButton.modifier(EditorFloatingSurface()).padding(12) }
             } else {
                 ContentUnavailableView {
                     Label(localized("노트를 찾을 수 없습니다", language: appLanguage), systemImage: "book.closed")
                 } actions: { Button(localized("닫기", language: appLanguage)) { dismiss() } }
             }
         }
-        .toolbar(note?.summary == nil ? .hidden : .visible, for: .navigationBar)
+        .toolbar(.hidden, for: .navigationBar)
         .fullScreenCover(item: $openedSummary) { route in
-            NavigationStack { SummaryReaderView(noteID: route.id, service: store.summaries) }.environmentObject(store)
+            NavigationStack { EditorView(noteID: route.id) }.environmentObject(store)
+        }
+        .task(id: note?.summary?.state) {
+            do { try await store.prepareSummaryCanvas(noteID) }
+            catch is CancellationError { }
+            catch { store.errorMessage = AppMessage(error) }
         }
         .background(Color(uiColor: .secondarySystemBackground))
         .interactiveDismissDisabled(store.hasUnsavedChanges)
@@ -224,15 +238,15 @@ struct EditorView: View {
 
     private func pageControls(note: Notebook, page: NotePage) -> some View {
         HStack(spacing: 0) {
-            if !page.isInfinite { Button { goToPage(pageIndex - 1) } label: { Image(systemName: "chevron.left") }
+            if !page.isInfinite && !page.isContinuousNote { Button { session.host?.turnPage(direction: -1) } label: { Image(systemName: "chevron.left") }
                 .disabled(pageIndex == 0).accessibilityLabel(localized("이전 페이지", language: appLanguage))
             Button { sheet = .pages } label: {
                 Text("\(pageIndex + 1) / \(note.pages.count)").monospacedDigit().fixedSize()
             }.accessibilityLabel(localized("%@페이지 중 %@페이지, 페이지 관리", "\(note.pages.count)", "\(pageIndex + 1)", language: appLanguage))
-            Button { goToPage(pageIndex + 1) } label: { Image(systemName: "chevron.right") }
+            Button { session.host?.turnPage(direction: 1) } label: { Image(systemName: "chevron.right") }
                 .disabled(pageIndex == note.pages.count - 1).accessibilityLabel(localized("다음 페이지", language: appLanguage))
             Divider().frame(height: 18).padding(.horizontal, 6) }
-            else { Text(localized("무한 캔버스", language: appLanguage)).padding(.horizontal, 8) }
+            else { Text(localized(page.isContinuousNote ? "연속 노트" : "무한 캔버스", language: appLanguage)).padding(.horizontal, 8) }
             Button("\(session.zoomPercent)%") { session.fitPage() }
                 .monospacedDigit().accessibilityLabel(localized("용지에 맞게 확대 비율 초기화", language: appLanguage))
                 .accessibilityValue("\(session.zoomPercent)%").accessibilityIdentifier("editor-zoom")
@@ -248,7 +262,7 @@ struct EditorView: View {
             .disabled(!session.canUndo || editingObjects).keyboardShortcut("z", modifiers: .command)
         Button { session.redo() } label: { Label(localized("다시 실행", language: appLanguage), systemImage: "arrow.uturn.forward") }
             .disabled(!session.canRedo || editingObjects).keyboardShortcut("z", modifiers: [.command, .shift])
-        if !page.isInfinite { Button { sheet = .pages } label: { Label(localized("페이지", language: appLanguage), systemImage: "rectangle.stack") } }
+        if !page.isInfinite && !page.isContinuousNote { Button { sheet = .pages } label: { Label(localized("페이지", language: appLanguage), systemImage: "rectangle.stack") } }
         Menu {
             Button(localized("텍스트 추가", language: appLanguage), systemImage: "textformat") { sheet = .text }
             Button(localized("사진 추가", language: appLanguage), systemImage: "photo") { choosingPhoto = true }
@@ -256,7 +270,7 @@ struct EditorView: View {
             Button(localized("텍스트·사진 이동", language: appLanguage), systemImage: "cursorarrow.and.square.on.square.dashed") { editingObjects.toggle() }
             Button(localized("텍스트·사진 편집", language: appLanguage), systemImage: "slider.horizontal.3") { sheet = .objects }
             Divider()
-            if !page.isInfinite { Menu(localized("페이지 추가", language: appLanguage), systemImage: "doc.badge.plus") {
+            if !page.pdfRegions.isEmpty { Menu(localized("페이지 추가", language: appLanguage), systemImage: "doc.badge.plus") {
                 ForEach(PaperStyle.allCases) { paper in
                     Button(localized(paper.title, language: appLanguage)) {
                         if let id = store.addPage(noteID: noteID, after: page.id, paper: paper) { selectedPageID = id }
@@ -276,10 +290,13 @@ struct EditorView: View {
         Button { if store.flushDrawings() { sheet = .summary } } label: { Label(localized("요약", language: appLanguage), systemImage: "text.alignleft") }
             .accessibilityIdentifier("editor-summary")
         Menu {
+            if note.summary != nil {
+                Button(localized("요약 상태와 출처", language: appLanguage), systemImage: "info.circle") { sheet = .summaryDetails }
+            }
             AppearancePicker()
             LanguagePicker()
             Toggle(localized("손가락으로도 필기", language: appLanguage), isOn: $fingerDrawing)
-            if note.pages.count > 1 && !page.isContinuousPDF {
+            if note.pages.count > 1 && !page.isVertical {
                 Button(localized("세 손가락 페이지 넘김 안내", language: appLanguage), systemImage: "hand.draw") { showingSwipeHint.toggle() }
             }
             Button(localized("지금 저장", language: appLanguage), systemImage: "square.and.arrow.down") { store.flushDrawings() }
@@ -293,10 +310,10 @@ struct EditorView: View {
             Divider()
             Button(localized("노트 이름 및 표지", language: appLanguage), systemImage: "book.closed") { sheet = .settings }
             Button(note.isFavorite ? localized("즐겨찾기 해제", language: appLanguage) : localized("즐겨찾기", language: appLanguage), systemImage: "star") { store.updateNote(noteID) { $0.isFavorite.toggle() } }
-            Button(localized("페이지 복제", language: appLanguage), systemImage: "plus.square.on.square") {
+            if !page.isContinuousNote { Button(localized("페이지 복제", language: appLanguage), systemImage: "plus.square.on.square") {
                 if let id = store.duplicatePage(noteID: noteID, pageID: page.id) { selectedPageID = id }
             }
-            Button(localized("페이지 삭제", language: appLanguage), systemImage: "trash", role: .destructive) { showingDeletePage = true }.disabled(note.pages.count <= 1)
+            Button(localized("페이지 삭제", language: appLanguage), systemImage: "trash", role: .destructive) { showingDeletePage = true }.disabled(note.pages.count <= 1) }
         } label: { Label(localized("더 보기", language: appLanguage), systemImage: "ellipsis.circle") }
     }
 

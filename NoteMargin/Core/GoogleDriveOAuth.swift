@@ -31,11 +31,11 @@ struct GoogleDriveOAuth {
                       "code_challenge": Self.base64(Data(SHA256.hash(data: Data(verifier.utf8)))),
                       "access_type": "offline", "prompt": selectAccount ? "consent select_account" : "consent",
                       "include_granted_scopes": "false"]
-        if picking { fields.merge(["trigger_onepick": "true", "mimetypes": "application/pdf", "allow_multiple": "false"]) { _, new in new } }
+        if picking { fields.merge(["trigger_onepick": "true", "mimetypes": "application/pdf", "allow_multiple": "true"]) { _, new in new } }
         url.queryItems = fields.sorted { $0.key < $1.key }.map { URLQueryItem(name: $0.key, value: $0.value) }
         return url.url!
     }
-    func callback(_ url: URL, picking: Bool = true) throws -> (code: String, fileID: String) {
+    func callback(_ url: URL, picking: Bool = true) throws -> (code: String, fileIDs: [String]) {
         guard url.scheme == redirect.scheme, url.host == redirect.host, url.path == redirect.path,
               url.user == nil, url.password == nil, url.port == nil, url.fragment == nil,
               let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems else { throw DriveImportError.authorization }
@@ -48,10 +48,12 @@ struct GoogleDriveOAuth {
         if values["error"] == "access_denied" { throw DriveImportError.denied }
         guard values["error"] == nil, let code = values["code"], !code.isEmpty else { throw DriveImportError.authorization }
         if let scope = values["scope"], Set(scope.split(separator: " ").map(String.init)) != [Self.scope] { throw DriveImportError.authorization }
-        guard picking else { return (code, "") }
+        guard picking else { return (code, []) }
         guard let id = values["picked_file_ids"], !id.isEmpty else { throw CancellationError() }
-        guard id.utf8.allSatisfy({ (65...90).contains($0) || (97...122).contains($0) || (48...57).contains($0) || $0 == 45 || $0 == 95 }) else { throw DriveImportError.selection }
-        return (code, id)
+        let ids = id.components(separatedBy: ",")
+        guard ids.allSatisfy({ !$0.isEmpty && $0.utf8.allSatisfy({ (65...90).contains($0) || (97...122).contains($0) || (48...57).contains($0) || $0 == 45 || $0 == 95 }) }) else { throw DriveImportError.selection }
+        var seen = Set<String>()
+        return (code, ids.filter { seen.insert($0).inserted })
     }
 }
 
@@ -62,7 +64,7 @@ enum DriveImportError: LocalizedError {
         case .configuration: return localized("Google Drive 설정 필요: 이 앱의 iOS OAuth Client ID와 반환 URL 스킴을 Xcode 빌드 설정에 등록해 주세요.")
         case .authorization: return localized("Google 연결을 확인하지 못했습니다. 다시 로그인해 주세요.")
         case .denied: return localized("파일 접근 권한이 허용되지 않았습니다. 가져오려면 선택한 PDF의 접근을 허용해 주세요.")
-        case .selection: return localized("PDF 파일 하나를 선택해 주세요.")
+        case .selection: return localized("PDF 파일을 선택해 주세요.")
         case .notPDF: return localized("선택한 파일이 PDF가 아니거나 다운로드가 허용되지 않았습니다.")
         case .download(let status): return localized("Drive에서 파일을 가져오지 못했습니다 (HTTP %@). 연결과 파일 권한을 확인하고 다시 선택해 주세요.", "\(status)")
         case .keychain: return localized("Drive 연결 정보를 안전하게 저장하지 못했습니다. 기기 잠금을 해제하고 다시 시도해 주세요.")

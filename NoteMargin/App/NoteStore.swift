@@ -4,8 +4,8 @@ import PDFKit
 
 struct PreparedPDFImport: Identifiable {
     let id = UUID()
-    let title: String
-    let data: Data
+    var title: String
+    let contents: PDFImportContents
     let pages: [NotePage]
     let folderID: UUID?
     var projectID: UUID? = nil
@@ -73,7 +73,22 @@ final class NoteStore: ObservableObject {
                     if ProcessInfo.processInfo.arguments.contains("--trashed-editing-fixture") {
                         fixtureLibrary.notebooks[0].deletedAt = Date()
                     }
-                    try repository.writeDrawing(PKDrawing(strokes: [stroke]).dataRepresentation(), noteID: note.id, pageID: note.pages[0].id)
+                    var fixtureDrawing = PKDrawing(strokes: [stroke])
+                    if ProcessInfo.processInfo.arguments.contains("--marker-editing-fixture") {
+                        let colors: [UIColor] = [.black, .systemBlue, .systemRed, .systemYellow, .systemGreen]
+                        let highlights = (0..<25).map { i in
+                            PKStroke(ink: PKInk(.marker, color: colors[i % 5]), path: PKStrokePath(controlPoints: [80.0, 680.0].map {
+                                PKStrokePoint(location: CGPoint(x: $0, y: 300 + Double(i % 5)*60), timeOffset: $0/1000,
+                                              size: CGSize(width: 36, height: 36), opacity: 1, force: 0.8, azimuth: 0, altitude: 1)
+                            }, creationDate: Date(timeIntervalSince1970: Double(i))), randomSeed: UInt32(i))
+                        }
+                        fixtureDrawing = PKDrawing(strokes: highlights)
+                        fixtureLibrary.notebooks[0].pages[0].inkShapes = nil
+                        fixtureLibrary.notebooks[0].pages[0].elements = (0..<5).map {
+                            PageElement(kind: .text, text: "Readable text · 겹친 형광펜 \($0+1)", x: 100, y: 282 + Double($0)*60, width: 540, height: 44, fontSize: 24)
+                        }
+                    }
+                    try repository.writeDrawing(fixtureDrawing.dataRepresentation(), noteID: note.id, pageID: note.pages[0].id)
                     if ProcessInfo.processInfo.arguments.contains("--summary-reader-fixture") {
                         var summary = Notebook(title: "Summary rendering fixture", cover: .sage)
                         summary.pages = []
@@ -161,15 +176,34 @@ final class NoteStore: ObservableObject {
     }
 
     /// Registers a non-destructive answer card with the same undo manager as ink.
-    func setAIElement(noteID: UUID, pageID: UUID, element: PageElement, present: Bool, undoManager: UndoManager?) {
+    @discardableResult func setAIElement(noteID: UUID, pageID: UUID, element: PageElement, present: Bool, undoManager: UndoManager?) -> Bool {
         guard updatePage(noteID: noteID, pageID: pageID, { page in
             page.elements.removeAll { $0.id == element.id }
-            if present { page.elements.append(element) }
-        }) else { return }
+            if present {
+                page.elements.append(element)
+                if !page.isInfinite && element.y + element.height + 24 > page.height {
+                    if page.pdfPageIndex != nil && page.pdfBackgroundHeight == nil { page.pdfBackgroundHeight = page.height }
+                    page.height = max(page.height, element.y + element.height + 24)
+                }
+            }
+        }) else { return false }
         undoManager?.registerUndo(withTarget: self) { [weak undoManager] target in
             target.setAIElement(noteID: noteID, pageID: pageID, element: element, present: !present, undoManager: undoManager)
         }
         undoManager?.setActionName(localized("AI 답변 카드"))
+        return true
+    }
+
+    @discardableResult func updateElement(noteID: UUID, pageID: UUID, element: PageElement, undoManager: UndoManager?) -> Bool {
+        guard let old = note(noteID)?.pages.first(where: { $0.id == pageID })?.elements.first(where: { $0.id == element.id }), old != element else { return true }
+        guard updatePage(noteID: noteID, pageID: pageID, { page in
+            if let index = page.elements.firstIndex(where: { $0.id == element.id }) { page.elements[index] = element }
+        }) else { return false }
+        undoManager?.registerUndo(withTarget: self) { [weak undoManager] target in
+            target.updateElement(noteID: noteID, pageID: pageID, element: old, undoManager: undoManager)
+        }
+        undoManager?.setActionName(localized("항목 편집"))
+        return true
     }
 
     @discardableResult
@@ -241,7 +275,7 @@ final class NoteStore: ObservableObject {
 
     func createNote(title: String, paper: PaperStyle, cover: CoverColor, folderID: UUID?, projectID: UUID? = nil, infinite: Bool = false) -> UUID? {
         var note = Notebook(title: title.trimmedOrUntitled, cover: cover, folderID: folderID, projectID: projectID.flatMap { project($0)?.id })
-        note.pages = [NotePage(paper: paper, canvasMode: infinite ? "infinite" : nil)]
+        note.pages = [NotePage(paper: paper, canvasMode: infinite ? "infinite" : "continuous")]
         return commit { $0.notebooks.append(note) } ? note.id : nil
     }
 
@@ -265,7 +299,7 @@ final class NoteStore: ObservableObject {
             destination = NoteProject(title: localized("요약"), parentID: source.projectID.flatMap { project($0)?.id }, isSummaryDestination: true)
         }
         var result = Notebook(title: title.trimmedOrUntitled, cover: source.cover, projectID: destination!.id)
-        result.pages = []
+        result.pages = [NotePage(canvasMode: "continuous")]
         result.summary = NoteSummary(sourceID: source.id, sourceTitle: source.title, createdAt: Date(), model: model, account: account)
         var snapshot = source
         snapshot.id = result.id
@@ -308,6 +342,92 @@ final class NoteStore: ObservableObject {
         guard updateNote(id, { $0.summary?.state = state }) else {
             throw SummaryError.message(errorMessage ?? AppMessage("요약을 저장하지 못했습니다."))
         }
+    }
+
+    func prepareSummaryCanvas(_ id: UUID) async throws {
+        guard let original = note(id), let summary = original.summary else { return }
+        if original.pages.isEmpty, !updateNote(id, { $0.pages = [NotePage(canvasMode: "continuous")] }) {
+            throw SummaryError.message(errorMessage ?? AppMessage("요약 노트를 저장하지 못했습니다."))
+        }
+        guard !summary.state.running else { return }
+        guard let text = String(data: try summaryAsset(id, name: summary.bodyAsset), encoding: .utf8) else { throw CocoaError(.fileReadCorruptFile) }
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        let old = original.pages.flatMap(\.elements).first { $0.id == summary.canvasElementID }
+        if summary.canvasElementID != nil && old == nil { return } // A user-deleted object stays deleted.
+        if old?.text == text { return }
+        let rendered = try await MathAnswerView.document(text: text, width: 688)
+        defer { try? FileManager.default.removeItem(at: rendered.url) }
+        try Task.checkCancellation()
+        guard let current = note(id), current.deletedAt == nil, current.summary?.state == summary.state,
+              try summaryAsset(id, name: summary.bodyAsset) == Data(text.utf8), let repository else { throw CancellationError() }
+        // Another editor/export may have prepared the same body while rendering.
+        if current.summary?.canvasElementID != summary.canvasElementID { return }
+        if let old, current.pages.flatMap(\.elements).first(where: { $0.id == old.id }) != old { throw CancellationError() }
+        let name = UUID().uuidString + ".pdf"
+        let target = try repository.assetURL(noteID: id, name: name)
+        try FileManager.default.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.copyItem(at: rendered.url, to: target)
+        var element = old ?? PageElement(kind: .text, x: 40, y: 40, width: 688, height: rendered.height, fontSize: 18)
+        element.text = text; element.assetName = name; element.height = rendered.height * element.width / 688
+        guard updateNote(id, { note in
+            if note.pages.isEmpty { note.pages = [NotePage(canvasMode: "continuous")] }
+            let index = note.pages.firstIndex { $0.elements.contains { $0.id == element.id } } ?? 0
+            note.pages[index].elements.removeAll { $0.id == element.id }
+            note.pages[index].elements.insert(element, at: 0)
+            note.pages[index].height = max(note.pages[index].height, ceil((element.y + element.height + 80) / 1024) * 1024)
+            note.summary?.canvasElementID = element.id
+        }) else {
+            try? FileManager.default.removeItem(at: target)
+            throw SummaryError.message(errorMessage ?? AppMessage("요약 노트를 저장하지 못했습니다."))
+        }
+    }
+
+    func insertAnswer(_ message: MarginMessage, conversationID: UUID, summarized: Bool, ai: MarginAIStore, undoManager: UndoManager?) async throws {
+        func source() throws -> (MarginConversation, NotePage) {
+            guard let chat = ai.conversation(conversationID), let current = note(chat.noteID), current.deletedAt == nil,
+                  chat.belongs(to: current), chat.messages.contains(where: { $0.id == message.id && $0.text == message.text && $0.role == .assistant }),
+                  let target = current.pages.first(where: { $0.id == chat.pageID }), !chat.rect.isEmpty, !chat.rect.isNull, !chat.rect.isInfinite,
+                  target.isInfinite || CGRect(x: 0, y: 0, width: target.width, height: target.height).contains(chat.rect) else {
+                throw SummaryError.message(AppMessage("질문 위치를 찾을 수 없습니다. 원래 페이지와 질문 영역을 확인해 주세요."))
+            }
+            return (chat, target)
+        }
+        let (chat, target) = try source()
+        if target.elements.contains(where: { $0.sourceMessageID == message.id && $0.isAnswerSummary == summarized }) { return }
+        let text = summarized ? try await ai.summarizeAnswer(conversationID: conversationID, messageID: message.id) : message.text
+        try Task.checkCancellation()
+        var element = try await renderedElement(text: text, width: min(600, target.width - 48), noteID: chat.noteID)
+        var inserted = false
+        defer {
+            if !inserted, let name = element.assetName, let url = assetURL(noteID: chat.noteID, name: name) { try? FileManager.default.removeItem(at: url) }
+        }
+        try Task.checkCancellation()
+        let (_, current) = try source()
+        if current.elements.contains(where: { $0.sourceMessageID == message.id && $0.isAnswerSummary == summarized }) { return }
+        element.sourceMessageID = message.id; element.isAnswerSummary = summarized
+        element.x = current.isInfinite ? chat.rect.minX : 24
+        element.y = chat.rect.maxY + 24
+        let drawing = try drawing(noteID: chat.noteID, pageID: current.id)
+        let occupied = drawing.strokes.map(\.renderBounds) + current.elements.map { CGRect(x: $0.x, y: $0.y, width: $0.width, height: $0.height) } + current.pdfRegions.map { CGRect(x: 0, y: $0.y, width: current.width, height: $0.height) }
+        for rect in occupied.sorted(by: { $0.minY < $1.minY }) {
+            if rect.intersects(CGRect(x: element.x, y: element.y, width: element.width, height: element.height)) { element.y = rect.maxY + 24 }
+        }
+        guard setAIElement(noteID: chat.noteID, pageID: current.id, element: element, present: true, undoManager: undoManager) else {
+            throw SummaryError.message(errorMessage ?? AppMessage("받은 결과를 저장하지 못했습니다. 다시 누르면 저장만 재시도합니다."))
+        }
+        inserted = true
+    }
+
+    func renderedElement(text: String, width: Double, noteID: UUID) async throws -> PageElement {
+        let rendered = try await MathAnswerView.document(text: text, width: width)
+        defer { try? FileManager.default.removeItem(at: rendered.url) }
+        try Task.checkCancellation()
+        guard note(noteID)?.deletedAt == nil, let repository else { throw CocoaError(.fileNoSuchFile) }
+        let name = UUID().uuidString + ".pdf"
+        let target = try repository.assetURL(noteID: noteID, name: name)
+        try FileManager.default.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.copyItem(at: rendered.url, to: target)
+        return PageElement(kind: .text, text: text, assetName: name, width: width, height: rendered.height, fontSize: 18)
     }
 
     func createFolder(_ title: String) {
@@ -582,10 +702,14 @@ final class NoteStore: ObservableObject {
     }
 
     func preparePDF(data: Data, title: String, folderID: UUID?) -> PreparedPDFImport? {
+        do { return preparePDF(try PDFImportContents(title: title, data: data), folderID: folderID) }
+        catch { errorMessage = AppMessage(error); return nil }
+    }
+
+    func preparePDF(_ contents: PDFImportContents, folderID: UUID?) -> PreparedPDFImport? {
         do {
-            guard let document = PDFDocument(data: data), !document.isLocked, document.pageCount > 0 else {
-                errorMessage = AppMessage("이 PDF를 열 수 없습니다. 암호가 해제된 PDF를 선택해 주세요.")
-                return nil
+            guard let document = PDFDocument(url: contents.url), !document.isLocked, document.pageCount > 0 else {
+                throw CocoaError(.fileReadCorruptFile)
             }
             let pages = try (0..<document.pageCount).map { index in
                 guard let pdfPage = document.page(at: index) else { throw CocoaError(.fileReadCorruptFile) }
@@ -596,24 +720,46 @@ final class NoteStore: ObservableObject {
                 guard width.isFinite, height.isFinite, width > 0, height > 0 else { throw CocoaError(.fileReadCorruptFile) }
                 return NotePage(width: 768, height: 768 * height / width, pdfPageIndex: index, pdfFitToPage: true)
             }
-            // Own the bytes before releasing file-provider access while the user chooses a layout.
-            return PreparedPDFImport(title: title, data: data, pages: pages, folderID: folderID)
+            return PreparedPDFImport(title: contents.title, contents: contents, pages: pages, folderID: folderID)
         } catch { errorMessage = AppMessage("PDF를 가져오지 못했습니다. %@", error: error); return nil }
     }
 
-    func importPDF(_ prepared: PreparedPDFImport, layout: PDFImportLayout) -> UUID? {
-        guard let repository else { return nil }
-        var note = Notebook(title: prepared.title, cover: .sand, folderID: prepared.folderID, projectID: prepared.projectID.flatMap { project($0)?.id })
+    func importPDF(_ prepared: PreparedPDFImport, layout: PDFImportLayout) async -> UUID? {
+        await importPDFs([prepared], title: prepared.title, layout: layout)
+    }
+
+    func importPDFs(_ files: [PreparedPDFImport], title: String, layout: PDFImportLayout) async -> UUID? {
+        guard let repository, let first = files.first else { return nil }
+        var note = Notebook(title: title.trimmedOrUntitled, cover: .sand, folderID: first.folderID,
+                            projectID: first.projectID.flatMap { project($0)?.id })
         note.pdfAssetName = "original.pdf"
         do {
-            note.pages = try NotePage.importedPDFPages(prepared.pages, layout: layout)
-            try repository.writeAsset(prepared.data, noteID: note.id, name: "original.pdf")
+            var pages: [NotePage] = []
+            for (index, file) in files.enumerated() {
+                await Task.yield()
+                try Task.checkCancellation()
+                let name = index == 0 ? "original.pdf" : "original-\(index).pdf"
+                let destination = try repository.assetURL(noteID: note.id, name: name)
+                try FileManager.default.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try FileManager.default.copyItem(at: file.contents.url, to: destination)
+                pages += file.pages.map { page in var page = page; page.pdfAssetName = name; return page }
+            }
+            await Task.yield()
+            try Task.checkCancellation()
+            note.pages = try NotePage.importedPDFPages(pages, layout: layout)
             guard commit({ $0.notebooks.append(note) }) else {
                 try? repository.deleteAssets(noteID: note.id)
                 return nil
             }
             return note.id
-        } catch { errorMessage = AppMessage("PDF를 가져오지 못했습니다. %@", error: error); return nil }
+        } catch is CancellationError {
+            try? repository.deleteAssets(noteID: note.id)
+            return nil
+        } catch {
+            try? repository.deleteAssets(noteID: note.id)
+            errorMessage = AppMessage("PDF를 가져오지 못했습니다. %@", error: error)
+            return nil
+        }
     }
 
     func addImage(_ data: Data, noteID: UUID, pageID: UUID, center: CGPoint? = nil) {

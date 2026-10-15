@@ -5,13 +5,16 @@ struct ChatGPTMarginView: View {
     let conversationID: UUID?
     let project: NoteProject?
     var onClose: (() -> Void)? = nil
-    var onSave: ((String) -> Void)? = nil
+    var onSave: ((MarginMessage, Bool) async throws -> Void)? = nil
     var onAttach: (() -> Void)? = nil
     var onSource: (() -> Void)? = nil
     @ObservedObject var ai = MarginAIStore.shared
     @ObservedObject var connection = ChatGPTPlanConnection.shared
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dismiss) private var dismiss
+    @State private var insertion: Task<Void, Never>?
+    @State private var insertionID: UUID?
+    @State private var insertionNotice: AppMessage?
     @State private var settings = false
     @State private var preview = true
     @State private var deleting = false
@@ -26,6 +29,19 @@ struct ChatGPTMarginView: View {
     private var chat: MarginConversation? { conversationID.flatMap { ai.conversation($0) } }
     private var readOnly: Bool { chat.map { $0.projectID != project?.id } ?? false }
     private var sending: Bool { conversationID.map { ai.sending.contains($0) } ?? false }
+    private func insert(_ message: MarginMessage, summarized: Bool) {
+        guard insertion == nil, let onSave else { return }
+        let operation = UUID(); insertionID = operation; insertionNotice = nil
+        insertion = Task { @MainActor in
+            defer { if insertionID == operation { insertion = nil; insertionID = nil } }
+            do {
+                try await onSave(message, summarized)
+                insertionNotice = AppMessage("노트에 넣었습니다.")
+            } catch is CancellationError { insertionNotice = AppMessage("취소되었습니다.") }
+            catch { insertionNotice = AppMessage(error) }
+        }
+    }
+
     var body: some View {
         Group {
             if let chat {
@@ -73,7 +89,12 @@ struct ChatGPTMarginView: View {
                                                     .disabled(!AnswerPart.parse(message.text).contains(where: \.math))
                                             }
                                             Button(localized("이 부분 질문", language: appLanguage)) { quoting = message }.disabled(sending || readOnly || message.text.isEmpty || message.status == .streaming)
-                                            if let onSave { Button(localized("노트에 저장", language: appLanguage)) { onSave(message.text) }.disabled(message.text.isEmpty || message.status == .streaming) }
+                                            if onSave != nil {
+                                                Menu(localized("노트에 저장", language: appLanguage)) {
+                                                    Button(localized("답변 전체 옮기기", language: appLanguage)) { insert(message, summarized: false) }
+                                                    Button(localized("요약해서 노트에 넣기", language: appLanguage)) { insert(message, summarized: true) }
+                                                }.disabled(message.text.isEmpty || message.status == .streaming || insertion != nil || readOnly)
+                                            }
                                         }.font(.caption)
                                     } else { Text(message.displayText(in: appLanguage)).textSelection(.enabled) }
                                     if let reply = message.replyTo { Text(localized("인용: ", language: appLanguage) + reply.quote).font(.caption).foregroundStyle(.secondary).textSelection(.enabled) }
@@ -88,6 +109,11 @@ struct ChatGPTMarginView: View {
                                 }.frame(maxWidth: .infinity, alignment: .leading).padding(12)
                                     .background(message.role == .user ? Color.accentColor.opacity(0.08) : Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
                             }
+                            if insertion != nil {
+                                ProgressView(localized("노트에 넣는 중…", language: appLanguage))
+                                Button(localized("취소", language: appLanguage)) { insertion?.cancel() }
+                            }
+                            if let insertionNotice { Text(insertionNotice.text).font(.caption).textSelection(.enabled) }
                             if let error = ai.failures[chat.id] {
                                 Text(error.text).font(.caption).foregroundStyle(.secondary)
                                 if ai.needsSaving(chat.id) { Button(localized("저장 다시 시도", language: appLanguage)) { ai.retrySave(chat.id) } }
@@ -164,7 +190,7 @@ struct ChatGPTMarginView: View {
         .onChange(of: presetData) { _, _ in if let conversationID { ai.refreshPreset(conversationID) } }
         .onChange(of: sending) { _, value in if !value, let conversationID { ai.refreshPreset(conversationID) } }
         .onAppear { if let conversationID { ai.refreshPreset(conversationID) } }
-        .onDisappear { if let conversationID { ai.flushDraft(conversationID) } }
+        .onDisappear { insertion?.cancel(); if let conversationID { ai.flushDraft(conversationID) } }
         .onChange(of: scenePhase) { _, phase in
             if phase == .background { connection.cancelSignIn(); ai.cancelPlanRequests() }
         }

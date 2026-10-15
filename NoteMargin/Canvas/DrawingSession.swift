@@ -57,21 +57,64 @@ final class DrawingSession: NSObject, ObservableObject, PKCanvasViewDelegate {
     private var nativeToolActive = false
     private var nativeDrawingDirty = false
     private(set) var drawingRevision: UInt64 = 0
+    // Display-only transparent marker inks keep native hit testing/masks alive.
+    // Original inks stay in the document snapshot, including across Undo.
+    // Transparent display colors identify original inks, including different
+    // alphas on copied strokes with the same legacy stroke ID.
+    private var markerInks: [UIColor: PKInk] = [:]
+    private var activeMarkerInk: PKInk?
     private var committedDrawing = PKDrawing()
     private var committedDocumentDrawing = PKDrawing()
     private(set) var canvasOrigin = CGPoint.zero
-    private let infiniteUndo = UndoManager()
-    private var pendingInfiniteUndo: PKDrawing?
-    var undoManager: UndoManager? { canvas.usesDocumentUndo ? infiniteUndo : canvas.undoManager }
+    private let documentUndo = UndoManager()
+    private var pendingDocumentUndo: PKDrawing?
+    var undoManager: UndoManager? { canvas.usesDocumentUndo ? documentUndo : canvas.undoManager }
     var drawing: PKDrawing {
         let native = canvas.drawing
         return native == committedDrawing ? committedDocumentDrawing : documentDrawing(native)
     }
     private func documentDrawing(_ native: PKDrawing) -> PKDrawing {
-        canvasOrigin == .zero ? native : native.transformed(using: CGAffineTransform(translationX: -canvasOrigin.x, y: -canvasOrigin.y))
+        let document = canvasOrigin == .zero ? native : native.transformed(using: CGAffineTransform(translationX: -canvasOrigin.x, y: -canvasOrigin.y))
+        guard document.strokes.contains(where: { $0.ink.inkType == .marker }) else { return document }
+        return PKDrawing(strokes: document.strokes.map { stroke in
+            guard stroke.ink.inkType == .marker else { return stroke }
+            var restored = stroke
+            if let ink = markerInks[stroke.ink.color] { restored.ink = ink }
+            else if let ink = activeMarkerInk { restored.ink = ink }
+            else if let original = committedDocumentDrawing.strokes.last(where: { InkStrokeID($0) == InkStrokeID(stroke) }) {
+                restored.ink = original.ink
+            }
+            return restored
+        })
     }
     private func nativeDrawing(_ document: PKDrawing) -> PKDrawing {
-        canvasOrigin == .zero ? document : document.transformed(using: CGAffineTransform(translationX: canvasOrigin.x, y: canvasOrigin.y))
+        let native: PKDrawing
+        if document.strokes.contains(where: { $0.ink.inkType == .marker }) {
+            var palette = Dictionary(markerInks.map { ($0.value.color, $0.key) }, uniquingKeysWith: { first, _ in first })
+            var unchanged: [ObjectIdentifier: PKStroke] = [:]
+            if canvasOrigin == .zero {
+                for (original, display) in zip(committedDocumentDrawing.strokes, committedDrawing.strokes)
+                    where original.ink.inkType == .marker && markerInks[display.ink.color] != nil {
+                    unchanged[ObjectIdentifier(original as PKStrokeReference)] = display
+                }
+            }
+            native = PKDrawing(strokes: document.strokes.map { stroke in
+                guard stroke.ink.inkType == .marker else { return stroke }
+                if let display = unchanged[ObjectIdentifier(stroke as PKStrokeReference)] { return display }
+                let color: UIColor
+                if let existing = palette[stroke.ink.color] { color = existing }
+                else {
+                    let index = markerInks.count + 1
+                    color = UIColor(red: CGFloat(index & 255) / 255, green: CGFloat((index >> 8) & 255) / 255,
+                                    blue: CGFloat((index >> 16) & 255) / 255, alpha: 0)
+                    markerInks[color] = stroke.ink; palette[stroke.ink.color] = color
+                }
+                var display = stroke
+                display.ink = PKInk(.marker, color: color)
+                return display
+            })
+        } else { native = document }
+        return canvasOrigin == .zero ? native : native.transformed(using: CGAffineTransform(translationX: canvasOrigin.x, y: canvasOrigin.y))
     }
     private func documentShape(_ result: ShapeRecognitionResult) -> ShapeRecognitionResult {
         ShapeRecognitionResult(kind: result.kind, confidence: result.confidence, normalizedError: result.normalizedError,
@@ -205,7 +248,7 @@ final class DrawingSession: NSObject, ObservableObject, PKCanvasViewDelegate {
             let type: PKInkingTool.InkType = inkWidth < PKInkingTool.InkType.pen.validWidthRange.lowerBound ? .monoline : .pen
             canvas.tool = PKInkingTool(type, color: UIColor(inkColor), width: inkWidth)
         case .pencil: canvas.tool = PKInkingTool(.pencil, color: UIColor(inkColor), width: inkWidth)
-        case .marker: canvas.tool = PKInkingTool(.marker, color: UIColor(inkColor), width: inkWidth * 4)
+        case .marker: canvas.tool = PKInkingTool(.marker, color: UIColor(inkColor).withAlphaComponent(PageRenderer.markerOpacity), width: inkWidth * 4)
         case .eraser: canvas.tool = PKEraserTool(.vector)
         case .pixelEraser: canvas.tool = PKEraserTool(.fixedWidthBitmap, width: eraserWidth)
         // Both selection shapes use the same host-owned editable selection.
@@ -227,7 +270,8 @@ final class DrawingSession: NSObject, ObservableObject, PKCanvasViewDelegate {
     }
     func canvasViewDidBeginUsingTool(_ canvasView: PKCanvasView) {
         guard canvasView === canvas, let noteID, let pageID else { return }
-        if canvas.usesDocumentUndo { pendingInfiniteUndo = drawing }
+        if canvas.usesDocumentUndo { pendingDocumentUndo = drawing }
+        activeMarkerInk = selectedTool == .marker ? PKInk(.marker, color: UIColor(inkColor)) : nil
         nativeToolActive = true
         nativeDrawingDirty = false
         shapeCompletion.nativeBegan(previousStrokeCount: committedStrokeCount)
@@ -244,7 +288,9 @@ final class DrawingSession: NSObject, ObservableObject, PKCanvasViewDelegate {
         if nativeDrawingDirty { captureCommittedDrawing(canvasView) }
         nativeToolActive = false
         nativeDrawingDirty = false
-        registerInfiniteStrokeUndo()
+        refreshMarkerDisplay()
+        activeMarkerInk = nil
+        registerDocumentStrokeUndo()
         host?.setDrawingActive(false)
         if let noteID, let pageID { store?.endDrawingInteraction(noteID: noteID, pageID: pageID) }
         shapeCompletion.nativeEnded(drawing: committedDrawing, revision: drawingRevision)
@@ -337,9 +383,10 @@ final class DrawingSession: NSObject, ObservableObject, PKCanvasViewDelegate {
         loadError = nil
         let previous = canvas
         let selectedTool = previous.tool
-        canvasOrigin = .zero; infiniteUndo.removeAllActions(); pendingInfiniteUndo = nil
+        markerInks = [:]; activeMarkerInk = nil
+        canvasOrigin = .zero; documentUndo.removeAllActions(); pendingDocumentUndo = nil
         let replacement = PagingCanvasView()
-        replacement.usesDocumentUndo = store.note(noteID)?.pages.first(where: { $0.id == pageID })?.isInfinite == true
+        replacement.usesDocumentUndo = true
         configureCanvas(replacement)
         // An empty drawing can leave old PencilKit render tiles alive on a reused
         // view. Give each page its own render surface, without changing ink coordinates.
@@ -358,7 +405,7 @@ final class DrawingSession: NSObject, ObservableObject, PKCanvasViewDelegate {
             if let note = store.note(noteID), let page = note.pages.first(where: { $0.id == pageID }), !PageRenderer.hasValidPDFBackground(page: page, note: note, store: store) {
                 throw CocoaError(.fileReadCorruptFile)
             }
-            canvas.drawing = try store.drawing(noteID: noteID, pageID: pageID)
+            canvas.drawing = nativeDrawing(try store.drawing(noteID: noteID, pageID: pageID))
         }
         catch {
             loadError = AppMessage("이 페이지의 필기를 불러올 수 없습니다. 원본을 보호하기 위해 편집을 중지했습니다. %@", error: error)
@@ -382,13 +429,15 @@ final class DrawingSession: NSObject, ObservableObject, PKCanvasViewDelegate {
         drawingRevision &+= 1
         if nativeToolActive {
             nativeDrawingDirty = true
+            if selectedTool == .pixelEraser { host?.updateMarkers(documentDrawing(canvasView.drawing)) }
             store?.markActiveDrawingChanged(noteID: noteID, pageID: pageID)
             return
         }
         // Includes PencilKit's late estimated-pressure updates after lift.
         let drawing = captureCommittedDrawing(canvasView)
+        refreshMarkerDisplay()
         shapeCompletion.nativeChanged(drawing: committedDrawing, revision: drawingRevision, isNativeNotification: isNativeNotification)
-        registerInfiniteStrokeUndo()
+        registerDocumentStrokeUndo()
         host?.cancelEraserIfDrawingChanged(drawing)
         host?.validateInkSelection(drawing)
         // Undo groups close at the end of the current event.
@@ -412,16 +461,25 @@ final class DrawingSession: NSObject, ObservableObject, PKCanvasViewDelegate {
         if let noteID, let pageID { store?.queueDrawing(committedDocumentDrawing, noteID: noteID, pageID: pageID) }
         return committedDocumentDrawing
     }
-    private func registerInfiniteStrokeUndo() {
-        guard !nativeToolActive, let original = pendingInfiniteUndo, original != committedDocumentDrawing else { return }
-        pendingInfiniteUndo = nil
-        let ownsGroup = infiniteUndo.groupingLevel == 0 && !infiniteUndo.isUndoing && !infiniteUndo.isRedoing
-        if ownsGroup { infiniteUndo.beginUndoGrouping() }
-        defer { if ownsGroup { infiniteUndo.endUndoGrouping() } }
-        infiniteUndo.registerUndo(withTarget: self) { session in
+    private func refreshMarkerDisplay() {
+        host?.updateMarkers(committedDocumentDrawing)
+        guard !nativeToolActive, canvas.drawing.strokes.contains(where: { $0.ink.inkType == .marker && $0.ink.color.cgColor.alpha > 0 }) else { return }
+        loading = true
+        canvas.drawing = nativeDrawing(committedDocumentDrawing)
+        committedDrawing = canvas.drawing
+        loading = false
+    }
+
+    private func registerDocumentStrokeUndo() {
+        guard !nativeToolActive, let original = pendingDocumentUndo, original != committedDocumentDrawing else { return }
+        pendingDocumentUndo = nil
+        let ownsGroup = documentUndo.groupingLevel == 0 && !documentUndo.isUndoing && !documentUndo.isRedoing
+        if ownsGroup { documentUndo.beginUndoGrouping() }
+        defer { if ownsGroup { documentUndo.endUndoGrouping() } }
+        documentUndo.registerUndo(withTarget: self) { session in
             session.commitDrawing(original, action: localized("필기"))
         }
-        infiniteUndo.setActionName(localized("필기"))
+        documentUndo.setActionName(localized("필기"))
     }
 
     @discardableResult
@@ -632,10 +690,11 @@ final class DrawingSession: NSObject, ObservableObject, PKCanvasViewDelegate {
             format.scale = 1; format.opaque = true
             var png: Data?
             UITraitCollection(userInterfaceStyle: .light).performAsCurrent {
-                let ink = drawing.image(from: bounds, scale: scale)
                 png = UIGraphicsImageRenderer(size: size, format: format).image { context in
                     UIColor.white.setFill(); context.fill(CGRect(origin: .zero, size: size))
-                    ink.draw(in: CGRect(origin: .zero, size: size))
+                    context.cgContext.scaleBy(x: scale, y: scale)
+                    context.cgContext.translateBy(x: -bounds.minX, y: -bounds.minY)
+                    PageRenderer.drawInk(drawing, in: bounds, scale: scale)
                 }.pngData()
             }
             guard let png else { throw CocoaError(.fileWriteUnknown) }
@@ -649,6 +708,7 @@ final class DrawingSession: NSObject, ObservableObject, PKCanvasViewDelegate {
 
     func canvasViewDidFinishRendering(_ canvasView: PKCanvasView) {
         guard canvasView === canvas else { return }
+        host?.pageFinishedRendering()
         shapeCompletion.nativeFinishedRendering()
         host?.finishEraserRendering()
         host?.finishInkRendering()
@@ -721,8 +781,8 @@ final class PagingCanvasView: PKCanvasView {
         set { super.accessibilityValue = newValue }
     }
     #endif
-    // Native Undo snapshots use display coordinates. Infinite documents register
-    // logical snapshots in DrawingSession so range rebasing cannot corrupt Undo.
+    // DrawingSession registers document snapshots so viewport rebasing and
+    // display-only marker inks never enter persisted drawings or Undo history.
     var usesDocumentUndo = false
     override var undoManager: UndoManager? { usesDocumentUndo ? nil : super.undoManager }
     var pageTurningEnabled = false
@@ -740,7 +800,8 @@ struct InkStrokeGeometry {
     let opacity: Float
     let bounds: CGRect
 
-    init(stroke: PKStroke) {
+    init(stroke: PKStroke, query: CGRect? = nil) {
+        let localQuery = query.map { $0.applying(stroke.transform.inverted()).insetBy(dx: -1, dy: -1) }
         let outline = CGMutablePath()
         let source = stroke.path
         var length: CGFloat = 0
@@ -765,6 +826,15 @@ struct InkStrokeGeometry {
                 return
             }
             let rx = point.size.width / 2, ry = point.size.height / 2
+            if let localQuery {
+                let radius = max(rx, ry)
+                var nearby = CGRect(x: point.location.x-radius, y: point.location.y-radius, width: radius*2, height: radius*2)
+                if let previous {
+                    let previousRadius = max(previous.size.width, previous.size.height)/2
+                    nearby = nearby.union(CGRect(x: previous.location.x-previousRadius, y: previous.location.y-previousRadius, width: previousRadius*2, height: previousRadius*2))
+                }
+                if !nearby.intersects(localQuery) { previous = point; return }
+            }
             // The ellipse and bridge use the same winding. Opposite windings
             // would punch alternating holes where densely sampled nibs overlap.
             let c = cos(point.azimuth), s = sin(point.azimuth)

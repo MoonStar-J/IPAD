@@ -24,9 +24,10 @@ enum ExportService {
 
     static func exportPDF(note: Notebook, store: NoteStore, selection: Set<String>? = nil,
                           progress: (Int, Int) -> Void = { _, _ in }) async throws -> URL {
-        if note.summary != nil { return try exportMarkdown(note: note, store: store) }
         guard store.flushDrawings() else { throw CocoaError(.fileWriteUnknown) }
         try Task.checkCancellation()
+        if note.summary != nil { try await store.prepareSummaryCanvas(note.id) }
+        let note = store.note(note.id) ?? note
         let choices = try pageChoices(note: note, store: store).filter { selection == nil || selection!.contains($0.id) }
         guard !choices.isEmpty else { throw SummaryError.message(AppMessage("내보낼 페이지를 선택해 주세요.")) }
         let url = try exportURL(title: note.title, extension: "pdf")
@@ -42,8 +43,8 @@ enum ExportService {
         for page in note.pages where choices.contains(where: { $0.pageID == page.id }) {
             let drawingName = "\(page.id).drawing"
             if let source = store.assetURL(noteID: note.id, name: drawingName), FileManager.default.fileExists(atPath: source.path) { names.insert(drawingName) }
-            if !page.pdfRegions.isEmpty, let name = note.pdfAssetName { names.insert(name) }
-            for element in page.elements where element.kind == .image && choices.contains(where: { $0.pageID == page.id && $0.rect.intersects(CGRect(x: element.x, y: element.y, width: element.width, height: element.height)) }) {
+            for region in page.pdfRegions { if let name = region.assetName ?? page.pdfAssetName ?? note.pdfAssetName { names.insert(name) } }
+            for element in page.elements where (element.kind == .image || element.isRenderedText) && choices.contains(where: { $0.pageID == page.id && $0.rect.intersects(CGRect(x: element.x, y: element.y, width: element.width, height: element.height)) }) {
                 guard let name = element.assetName else { throw CocoaError(.fileReadCorruptFile) }
                 names.insert(name)
             }
@@ -72,11 +73,14 @@ enum ExportService {
                 try autoreleasepool {
                     let region = choice.rect
                     for segment in page.pdfRegions where region.intersects(CGRect(x: 0, y: segment.y, width: page.width, height: segment.height)) {
-                        var source = page; source.pdfPageIndex = segment.pageIndex
+                        var source = page; source.pdfPageIndex = segment.pageIndex; source.pdfAssetName = segment.assetName ?? page.pdfAssetName
                         guard PageRenderer.pdfPage(note: note, page: source, store: store, assetDirectory: assets) != nil else { throw CocoaError(.fileReadCorruptFile) }
                     }
-                    for element in page.elements where element.kind == .image && region.intersects(CGRect(x: element.x, y: element.y, width: element.width, height: element.height)) {
-                        guard let name = element.assetName, PageRenderer.image(noteID: note.id, name: name, store: store, assetDirectory: assets) != nil else { throw CocoaError(.fileReadCorruptFile) }
+                    for element in page.elements where (element.kind == .image || element.isRenderedText) && region.intersects(CGRect(x: element.x, y: element.y, width: element.width, height: element.height)) {
+                        guard let name = element.assetName else { throw CocoaError(.fileReadCorruptFile) }
+                        if element.isRenderedText {
+                            guard PageRenderer.document(assets.appendingPathComponent(name)) != nil else { throw CocoaError(.fileReadCorruptFile) }
+                        } else if PageRenderer.image(noteID: note.id, name: name, store: store, assetDirectory: assets) == nil { throw CocoaError(.fileReadCorruptFile) }
                     }
                     var bounds = CGRect(origin: .zero, size: region.size)
                     output.beginPDFPage([kCGPDFContextMediaBox: NSData(bytes: &bounds, length: MemoryLayout<CGRect>.size)] as CFDictionary)
@@ -89,7 +93,7 @@ enum ExportService {
                     UITraitCollection(userInterfaceStyle: .light).performAsCurrent {
                         PageRenderer.drawBackground(page: page, note: note, store: store, context: output, assetDirectory: assets)
                         let scale = min(2, 4096 / max(region.width, region.height))
-                        if drawing.bounds.intersects(region) { drawing.image(from: region, scale: scale).draw(in: region) }
+                        if drawing.bounds.intersects(region) { PageRenderer.drawInk(drawing, in: region, scale: scale) }
                     }
                     UIGraphicsPopContext()
                     output.restoreGState()

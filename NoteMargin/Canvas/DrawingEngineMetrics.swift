@@ -5,7 +5,7 @@ import os
 /// DEBUG-only counters/signposts describe our work around PencilKit. They do
 /// not measure physical Pencil-to-photon latency and never contain ink data.
 @MainActor enum DrawingEngineMetrics {
-    enum Phase: String, CaseIterable { case shapeRaster, eraserBegin, eraserCommit, toolSwitch, save }
+    enum Phase: String, CaseIterable { case shapeRaster, eraserBegin, eraserHitTest, eraserPreview, eraserCommit, toolSwitch, save }
     #if DEBUG
     private(set) static var phaseMilliseconds: [String: [Double]] = [:]
     private static let log = OSLog(subsystem: "com.notemargin.drawing", category: .pointsOfInterest)

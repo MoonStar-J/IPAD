@@ -43,6 +43,53 @@ import PDFKit
         }
         XCTFail("request not sent")
     }
+    func testAnswerInsertionUsesOriginalPageAndRetainsSummaryOnSaveFailure() async throws {
+        let id = try note(["source", "other page"]), source = store.note(id)!, page = source.pages[0]
+        let repository = MarginChatRepository(root: root.appendingPathComponent("Chats"))
+        var chat = MarginConversation(noteID: id, pageID: page.id, projectID: nil, projectTitle: "", rect: CGRect(x: 30, y: 30, width: 220, height: 100), imageData: Data(), extractedText: "PRIVATE SOURCE", sourceDescription: "source")
+        let answer = MarginMessage(role: .assistant, text: "Only this answer: \\(a^2+b^2=c^2\\), assuming a > 0.", status: .completed)
+        chat.messages = [MarginMessage(role: .user, text: "PRIVATE CONVERSATION"), answer]
+        try repository.save(chat)
+        let ai = MarginAIStore(repository: repository, connection: connection, http: http)
+        ai.load(noteID: id)
+        let undo = UndoManager(); undo.groupsByEvent = false
+        undo.beginUndoGrouping()
+        try await store.insertAnswer(answer, conversationID: chat.id, summarized: false, ai: ai, undoManager: undo)
+        undo.endUndoGrouping()
+        var element = try XCTUnwrap(store.note(id)?.pages[0].elements.last)
+        XCTAssertTrue(element.isRenderedText); XCTAssertEqual(element.text, answer.text)
+        XCTAssertGreaterThanOrEqual(element.y, chat.rect.maxY)
+        XCTAssertEqual(store.note(id)?.pages[1], source.pages[1])
+        XCTAssertTrue(SummaryProtocol.bodies.isEmpty)
+        undo.undo(); XCTAssertEqual(store.note(id)?.pages[0].elements.count, 1)
+        undo.redo(); XCTAssertEqual(store.note(id)?.pages[0].elements.count, 2)
+        try await store.insertAnswer(answer, conversationID: chat.id, summarized: false, ai: ai, undoManager: undo)
+        XCTAssertEqual(store.note(id)?.pages[0].elements.count, 2)
+        let libraryURL = root.appendingPathComponent("library.json")
+        let savedLibrary = try Data(contentsOf: libraryURL)
+        SummaryProtocol.onResponse = {
+            try? FileManager.default.removeItem(at: libraryURL)
+            try? FileManager.default.createDirectory(at: libraryURL, withIntermediateDirectories: false)
+        }
+        do { try await store.insertAnswer(answer, conversationID: chat.id, summarized: true, ai: ai, undoManager: undo); XCTFail("save must fail") }
+        catch { }
+        XCTAssertEqual(SummaryProtocol.bodies.count, 1)
+        let request = try JSONSerialization.jsonObject(with: SummaryProtocol.bodies[0]) as! [String: Any]
+        let input = request["input"] as! [[String: Any]]
+        let content = input[0]["content"] as! [[String: Any]]
+        XCTAssertEqual(input.count, 1); XCTAssertEqual(content.count, 1); XCTAssertEqual(content[0]["text"] as? String, answer.text)
+        try FileManager.default.removeItem(at: libraryURL); try savedLibrary.write(to: libraryURL)
+        SummaryProtocol.onResponse = nil
+        try await store.insertAnswer(answer, conversationID: chat.id, summarized: true, ai: ai, undoManager: nil)
+        XCTAssertEqual(SummaryProtocol.bodies.count, 1)
+        element = try XCTUnwrap(store.note(id)?.pages[0].elements.last)
+        XCTAssertTrue(element.isRenderedText); XCTAssertEqual(element.isAnswerSummary, true)
+        store.updateNote(id) { $0.pages.removeFirst() }
+        do { try await store.insertAnswer(answer, conversationID: chat.id, summarized: true, ai: ai, undoManager: nil); XCTFail("deleted source must fail") }
+        catch { }
+        XCTAssertEqual(SummaryProtocol.bodies.count, 1)
+    }
+
     func testLanguageCatalogAndUserContentBoundaries() throws {
         let previous = UserDefaults.standard.object(forKey: AppLanguage.key)
         defer { UserDefaults.standard.set(previous, forKey: AppLanguage.key) }
@@ -257,8 +304,10 @@ import PDFKit
         let reopened = try NoteStore(repository: LibraryRepository(root: root))
         XCTAssertEqual(String(data: try reopened.summaryAsset(copy, name: "summary.md"), encoding: .utf8), work.final)
         let url = try await ExportService.exportPDF(note: reopened.note(copy)!, store: reopened)
-        XCTAssertEqual(url.pathExtension, "md")
-        XCTAssertEqual(try String(contentsOf: url, encoding: .utf8), work.final)
+        XCTAssertEqual(url.pathExtension, "pdf")
+        XCTAssertTrue(PDFDocument(url: url)?.string?.contains("정의") == true)
+        let markdown = try ExportService.exportMarkdown(note: reopened.note(copy)!, store: reopened)
+        XCTAssertEqual(try String(contentsOf: markdown, encoding: .utf8), work.final)
         let loose = try note()
         let home = try store.createSummary(source: store.note(loose)!, sources: sources, title: "home", model: connection.model, account: connection.selected!)
         let homeProject = try XCTUnwrap(store.note(home)?.projectID)
@@ -275,7 +324,8 @@ import PDFKit
             ("PDF definition" as NSString).draw(at: CGPoint(x: 120, y: 40), withAttributes: [.font: UIFont.systemFont(ofSize: 18)])
         }
         let prepared = try XCTUnwrap(store.preparePDF(data: pdf, title: "합성", folderID: nil))
-        let id = try XCTUnwrap(store.importPDF(prepared, layout: .paged))
+        let imported = await store.importPDF(prepared, layout: .paged)
+        let id = try XCTUnwrap(imported)
         let pageID = store.note(id)!.pages[0].id
         let image = UIGraphicsImageRenderer(size: CGSize(width: 40, height: 40)).image { output in
             UIColor.red.setFill(); output.fill(CGRect(x: 0, y: 0, width: 40, height: 40))
@@ -315,11 +365,12 @@ import PDFKit
         XCTAssertGreaterThan(green, 50); XCTAssertGreaterThan(dark, 30)
         }
     }
-    func testContinuousPDFAndSparseInfiniteRanges() throws {
+    func testContinuousPDFAndSparseInfiniteRanges() async throws {
         let renderer = UIGraphicsPDFRenderer(bounds: CGRect(x: 0, y: 0, width: 300, height: 400))
         let data = renderer.pdfData { output in for _ in 0..<3 { output.beginPage() } }
         let prepared = try XCTUnwrap(store.preparePDF(data: data, title: "PDF", folderID: nil))
-        let id = try XCTUnwrap(store.importPDF(prepared, layout: .continuous))
+        let imported = await store.importPDF(prepared, layout: .continuous)
+        let id = try XCTUnwrap(imported)
         let source = store.note(id)!, options = NoteSummaryService.pageChoices(source)
         XCTAssertEqual(options.map(\.label), ["PDF 1페이지", "PDF 2페이지", "PDF 3페이지"])
         let units = try NoteSummaryService.sources(note: source, choices: [options[1].id], region: nil, store: store)
@@ -433,7 +484,8 @@ import PDFKit
         XCTAssertTrue(SummaryProtocol.bodies.isEmpty)
         let blankPDF = UIGraphicsPDFRenderer(bounds: CGRect(x: 0, y: 0, width: 300, height: 400)).pdfData { $0.beginPage() }
         let prepared = try XCTUnwrap(store.preparePDF(data: blankPDF, title: "blank", folderID: nil))
-        let blankID = try XCTUnwrap(store.importPDF(prepared, layout: .paged))
+        let imported = await store.importPDF(prepared, layout: .paged)
+        let blankID = try XCTUnwrap(imported)
         let blankResult = try XCTUnwrap(service.start(sourceID: blankID, title: "blank summary", choices: nil, region: nil))
         try await finish()
         if store.note(blankResult)?.summary?.state != .failed {

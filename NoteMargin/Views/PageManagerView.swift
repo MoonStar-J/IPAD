@@ -48,13 +48,13 @@ struct PageManagerView: View {
                 ToolbarItem(placement: .cancellationAction) { Button(localized("완료", language: appLanguage)) { dismiss() } }
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     EditButton()
-                    Menu {
+                    if note?.pdfAssetName != nil { Menu {
                         ForEach(PaperStyle.allCases) { paper in
                             Button(localized(paper.title, language: appLanguage)) {
                                 if let id = store.addPage(noteID: noteID, after: nil, paper: paper) { onSelect(id); dismiss() }
                             }
                         }
-                    } label: { Label(localized("페이지 추가", language: appLanguage), systemImage: "plus") }
+                    } label: { Label(localized("페이지 추가", language: appLanguage), systemImage: "plus") } }
                 }
             }
             .alert(localized("이 페이지를 삭제할까요?", language: appLanguage), isPresented: Binding(get: { deleteTarget != nil }, set: { if !$0 { deleteTarget = nil } })) {

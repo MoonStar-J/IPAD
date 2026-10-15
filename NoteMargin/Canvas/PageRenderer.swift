@@ -8,22 +8,24 @@ enum PageRenderer {
     private static let images = NSCache<NSURL, UIImage>()
 
     static func pdfPage(note: Notebook, page: NotePage, store: NoteStore, assetDirectory: URL? = nil) -> PDFPage? {
-        guard let name = note.pdfAssetName, let index = page.pdfPageIndex,
+        guard let name = page.pdfAssetName ?? note.pdfAssetName, let index = page.pdfPageIndex,
               let url = assetDirectory?.appendingPathComponent(name) ?? store.assetURL(noteID: note.id, name: name) else { return nil }
+        return document(url)?.page(at: index)
+    }
+
+    static func document(_ url: URL) -> PDFDocument? {
         let key = url as NSURL
-        let document: PDFDocument?
-        if let cached = documents.object(forKey: key) { document = cached }
-        else {
-            document = PDFDocument(url: url)
-            if let document { documents.setObject(document, forKey: key); documents.countLimit = 4 }
-        }
-        return document?.page(at: index)
+        if let cached = documents.object(forKey: key) { return cached }
+        guard let value = PDFDocument(url: url) else { return nil }
+        documents.setObject(value, forKey: key); documents.countLimit = 4
+        return value
     }
 
     static func hasValidPDFBackground(page: NotePage, note: Notebook, store: NoteStore) -> Bool {
         page.pdfRegions.allSatisfy { region in
             var source = page
             source.pdfPageIndex = region.pageIndex
+            source.pdfAssetName = region.assetName ?? page.pdfAssetName
             return pdfPage(note: note, page: source, store: store) != nil
         }
     }
@@ -39,7 +41,7 @@ enum PageRenderer {
     }
 
     static func drawBackground(page: NotePage, note: Notebook, store: NoteStore, context: CGContext, assetDirectory: URL? = nil) {
-        let bounds = page.isInfinite ? context.boundingBoxOfClipPath : CGRect(x: 0, y: 0, width: page.width, height: page.height)
+        let bounds = page.isInfinite ? context.boundingBoxOfClipPath : page.isContinuousNote ? CGRect(x: 0, y: 0, width: page.width, height: max(page.height, context.boundingBoxOfClipPath.maxY)) : CGRect(x: 0, y: 0, width: page.width, height: page.height)
         context.setFillColor(UIColor.white.cgColor)
         context.fill(bounds)
         if !page.pdfRegions.isEmpty {
@@ -48,6 +50,7 @@ enum PageRenderer {
                 guard context.boundingBoxOfClipPath.intersects(rect) else { continue }
                 var source = page
                 source.pdfPageIndex = region.pageIndex
+                source.pdfAssetName = region.assetName ?? page.pdfAssetName
                 guard let pdf = pdfPage(note: note, page: source, store: store, assetDirectory: assetDirectory)?.pageRef else { continue }
                 context.saveGState()
                 context.clip(to: rect)
@@ -81,7 +84,7 @@ enum PageRenderer {
             case .plain: break
             case .ruled:
                 let minY = page.isInfinite ? visible.minY : max(80,visible.minY)
-                let maxY = page.isInfinite ? visible.maxY : min(page.height-36,visible.maxY)
+                let maxY = page.isInfinite || page.isContinuousNote ? visible.maxY : min(bounds.maxY-36,visible.maxY)
                 for y in lines(from: minY, to: maxY, phase: 80, step: 32) {
                     context.move(to: CGPoint(x: page.isInfinite ? visible.minX : 40, y: y))
                     context.addLine(to: CGPoint(x: page.isInfinite ? visible.maxX : page.width-40, y: y))
@@ -93,7 +96,7 @@ enum PageRenderer {
                 let minX = page.isInfinite ? visible.minX-overlap : max(32,visible.minX-overlap)
                 let minY = page.isInfinite ? visible.minY-overlap : max(32,visible.minY-overlap)
                 let maxX = page.isInfinite ? visible.maxX : min(page.width-margin,visible.maxX)
-                let maxY = page.isInfinite ? visible.maxY : min(page.height-margin,visible.maxY)
+                let maxY = page.isInfinite || page.isContinuousNote ? visible.maxY : min(bounds.maxY-margin,visible.maxY)
                 if page.paper == .grid {
                     for x in lines(from: minX, to: maxX, phase: 32, step: 24) {
                         context.move(to: CGPoint(x: x, y: visible.minY)); context.addLine(to: CGPoint(x: x, y: visible.maxY))
@@ -117,6 +120,12 @@ enum PageRenderer {
             guard context.boundingBoxOfClipPath.intersects(rect) else { continue }
             switch element.kind {
             case .text:
+                if element.isRenderedText, let name = element.assetName,
+                   let url = assetDirectory?.appendingPathComponent(name) ?? store.assetURL(noteID: note.id, name: name),
+                   let document = document(url) {
+                    drawDocument(document, in: rect, context: context)
+                    continue
+                }
                 let paragraph = NSMutableParagraphStyle()
                 paragraph.lineBreakMode = .byWordWrapping
                 (element.text as NSString).draw(in: rect, withAttributes: [
@@ -134,6 +143,58 @@ enum PageRenderer {
         }
     }
 
+    static func drawDocument(_ document: PDFDocument, in rect: CGRect, context: CGContext) {
+        for (page, target) in documentPages(document, in: rect, clip: context.boundingBoxOfClipPath) {
+            guard let pdf = page.pageRef else { continue }
+            let scale = target.width / page.bounds(for: .mediaBox).width
+            context.saveGState(); context.clip(to: target)
+            context.translateBy(x: target.minX, y: target.maxY); context.scaleBy(x: scale, y: -scale)
+            context.drawPDFPage(pdf); context.restoreGState()
+        }
+    }
+
+    static func documentText(_ document: PDFDocument, in rect: CGRect, clip: CGRect) -> String {
+        documentPages(document, in: rect, clip: clip).compactMap { page, target in
+            let scale = target.width / page.bounds(for: .mediaBox).width
+            let selected = target.intersection(clip)
+            let pdfRect = CGRect(x: (selected.minX-target.minX)/scale, y: (target.maxY-selected.maxY)/scale,
+                                 width: selected.width/scale, height: selected.height/scale)
+            return page.selection(for: pdfRect)?.string
+        }.joined(separator: "\n")
+    }
+
+    private static func documentPages(_ document: PDFDocument, in rect: CGRect, clip: CGRect) -> [(PDFPage, CGRect)] {
+        guard let first = document.page(at: 0)?.bounds(for: .mediaBox),
+              let last = document.page(at: document.pageCount-1)?.bounds(for: .mediaBox), first.width > 0, first.height > 0 else { return [] }
+        let height = Double(document.pageCount-1) * first.height + last.height
+        let scale = min(rect.width / first.width, rect.height / height)
+        guard scale > 0 else { return [] }
+        let clip = clip.intersection(rect)
+        guard !clip.isNull, !clip.isEmpty else { return [] }
+        let start = max(0, Int(floor((clip.minY-rect.minY) / (first.height*scale))))
+        let end = min(document.pageCount-1, Int(floor((clip.maxY-rect.minY) / (first.height*scale))))
+        guard start <= end else { return [] }
+        return (start...end).compactMap { index in
+            guard let page = document.page(at: index) else { return nil }
+            let size = page.bounds(for: .mediaBox).size
+            let target = CGRect(x: rect.minX, y: rect.minY + Double(index)*first.height*scale, width: size.width*scale, height: size.height*scale)
+            return (page, target)
+        }
+    }
+
+    /// Marker opacity applies to the combined marker layer, so overlap never
+    /// hides source text. Other inks retain their native colors and opacity.
+    static let markerOpacity: CGFloat = 0.28
+    static func drawInk(_ drawing: PKDrawing, in rect: CGRect, scale: CGFloat) {
+        let visible = drawing.strokes.filter { $0.renderBounds.intersects(rect) }
+        let markers = visible.filter { $0.ink.inkType == .marker }
+        let other = visible.filter { $0.ink.inkType != .marker }
+        UITraitCollection(userInterfaceStyle: .light).performAsCurrent {
+            if !markers.isEmpty { PKDrawing(strokes: markers).image(from: rect, scale: scale).draw(in: rect, blendMode: .normal, alpha: markerOpacity) }
+            if !other.isEmpty { PKDrawing(strokes: other).image(from: rect, scale: scale).draw(in: rect) }
+        }
+    }
+
     static func snapshot(page: NotePage, note: Notebook, drawing: PKDrawing, store: NoteStore, width: CGFloat, rect requested: CGRect? = nil) -> UIImage {
         let rect = requested ?? (page.isInfinite ? CanvasExtent.usedBounds(ink: drawing.bounds, elements: page.elements) : CGRect(x: 0, y: 0, width: page.width, height: page.height))
         let scale = page.isInfinite ? min(width / rect.width, 4096 / max(rect.width, rect.height)) : width / rect.width
@@ -146,7 +207,7 @@ enum PageRenderer {
             output.cgContext.translateBy(x: -rect.minX, y: -rect.minY)
             drawBackground(page: page, note: note, store: store, context: output.cgContext)
             UITraitCollection(userInterfaceStyle: .light).performAsCurrent {
-                drawing.image(from: rect, scale: max(scale, 0.000001)).draw(in: rect)
+                drawInk(drawing, in: rect, scale: max(scale, 0.000001))
             }
         }
     }
@@ -160,6 +221,7 @@ struct PaperContent: Equatable {
     let height: Double
     let infinite: Bool
     let pdfPage: Int?
+    let pdfAsset: String?
     let pdfSegments: [PDFSegment]?
     let pdfFit: Bool?
     let elements: [PageElement]
@@ -167,8 +229,8 @@ struct PaperContent: Equatable {
 
 extension NotePage {
     var backgroundContent: PaperContent {
-        PaperContent(paper: paper, width: width, height: height, infinite: isInfinite,
-                     pdfPage: pdfPageIndex, pdfSegments: pdfSegments, pdfFit: pdfFitToPage, elements: elements)
+        PaperContent(paper: paper, width: width, height: isContinuousNote ? 0 : height, infinite: isInfinite,
+                     pdfPage: pdfPageIndex, pdfAsset: pdfAssetName, pdfSegments: pdfSegments, pdfFit: pdfFitToPage, elements: elements)
     }
 }
 
@@ -178,6 +240,7 @@ final class PaperView: UIView {
     var render: ((CGContext) -> Void)? { didSet { invalidateTiles() } }
     var documentBounds = CGRect.zero
     var nativeOrigin = CGPoint.zero
+    var opaqueTiles = true
     private let documentLayer = CALayer()
     private var tiles: [String: CALayer] = [:]
     private var rasterScale: CGFloat = 0
@@ -200,6 +263,11 @@ final class PaperView: UIView {
         tiles.values.forEach { $0.removeFromSuperlayer() }
         tiles.removeAll()
         rasterScale = 0
+    }
+
+    func invalidate(_ rect: CGRect) {
+        for key in Array(tiles.keys) where tiles[key]!.frame.intersects(rect) { tiles.removeValue(forKey: key)?.removeFromSuperlayer() }
+        fillVisibleTiles()
     }
 
     func updateViewport(_ transform: CGAffineTransform, viewport: CGRect, interacting: Bool) {
@@ -269,7 +337,7 @@ final class PaperView: UIView {
                 if let existing = tiles[key], existing.frame == rect { continue }
                 // Expanding an infinite boundary only replaces its partial tile.
                 tiles.removeValue(forKey: key)?.removeFromSuperlayer()
-                let format = UIGraphicsImageRendererFormat(); format.scale = rasterScale; format.opaque = true
+                let format = UIGraphicsImageRendererFormat(); format.scale = rasterScale; format.opaque = opaqueTiles
                 let image = UIGraphicsImageRenderer(size: rect.size, format: format).image { output in
                     output.cgContext.translateBy(x: -rect.minX, y: -rect.minY)
                     output.cgContext.clip(to: rect)

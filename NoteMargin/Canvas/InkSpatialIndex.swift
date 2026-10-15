@@ -487,8 +487,11 @@ final class StrokeEraserTransaction {
         if previousPoint == nil && count == 1 { center.addLine(to: CGPoint(x: first.x + 0.0001, y: first.y)) }
         previousPoint = last
         let sweep = center.copy(strokingWithWidth: width, lineCap: .round, lineJoin: .round, miterLimit: 2)
+        let strokes = original.strokes
         for index in geometryCache.candidates(intersecting: sweep.boundingBoxOfPath) where !erasedIndices.contains(index) {
-            let shape = geometryCache.geometry(at: index)
+            // A sweep only needs nearby nib geometry. Constructing the complete
+            // boolean outline of a long marker costs far more than the hit test.
+            let shape = InkStrokeGeometry(stroke: strokes[index], query: sweep.boundingBoxOfPath)
             if shape.opacity > 0 && !shape.path.isEmpty && shape.path.intersects(sweep) { erasedIndices.insert(index) }
         }
     }
