@@ -25,12 +25,16 @@ struct AnswerPart: Identifiable {
 }
 struct MathAnswerView: View {
     let text: String
+    var selecting = false
+    var captureRequest: UUID?
+    var onCapture: ((UUID, Result<UIImage, Error>) -> Void)?
     @State private var height: CGFloat = 32
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.sizeCategory) private var sizeCategory
     var body: some View {
         AnswerWebView(text: text, fontSize: UIFont.preferredFont(forTextStyle: .callout).pointSize,
-                      theme: colorScheme == .dark ? "dark" : "light", height: $height)
+                      theme: colorScheme == .dark ? "dark" : "light", height: $height,
+                      selecting: selecting, captureRequest: captureRequest, onCapture: onCapture)
             .frame(height: height)
             .id(sizeCategory)
     }
@@ -40,11 +44,14 @@ private struct AnswerWebView: UIViewRepresentable {
     let fontSize: CGFloat
     let theme: String
     @Binding var height: CGFloat
+    var selecting: Bool
+    var captureRequest: UUID?
+    var onCapture: ((UUID, Result<UIImage, Error>) -> Void)?
     func makeCoordinator() -> Coordinator { Coordinator(height: $height) }
-    func makeUIView(context: Context) -> WKWebView {
+    func makeUIView(context: Context) -> AnswerCaptureWebView {
         let config = WKWebViewConfiguration(); config.websiteDataStore = .nonPersistent()
         config.userContentController.add(context.coordinator, name: "size")
-        let view = WKWebView(frame: .zero, configuration: config)
+        let view = AnswerCaptureWebView(frame: .zero, configuration: config)
         view.isOpaque = false; view.backgroundColor = .clear
         view.scrollView.backgroundColor = .clear; view.scrollView.bounces = false
         view.navigationDelegate = context.coordinator
@@ -53,7 +60,7 @@ private struct AnswerWebView: UIViewRepresentable {
         }
         return view
     }
-    func updateUIView(_ view: WKWebView, context: Context) {
+    func updateUIView(_ view: AnswerCaptureWebView, context: Context) {
         let coordinator = context.coordinator
         coordinator.height = $height
         if coordinator.text != text || coordinator.fontSize != fontSize || coordinator.theme != theme {
@@ -61,8 +68,21 @@ private struct AnswerWebView: UIViewRepresentable {
             coordinator.revision += 1
         }
         coordinator.render(view)
+        view.selecting = selecting
+        if let captureRequest, coordinator.captureRequest != captureRequest {
+            coordinator.captureRequest = captureRequest
+            Task { @MainActor in
+                do {
+                    guard coordinator.loaded, !coordinator.rendering, coordinator.revision == coordinator.renderedRevision else {
+                        throw SummaryError.message(AppMessage("답변이 표시된 뒤 캡처할 영역을 다시 선택해 주세요."))
+                    }
+                    let image = try await view.captureSelection()
+                    onCapture?(captureRequest, .success(image))
+                } catch { onCapture?(captureRequest, .failure(error)) }
+            }
+        }
     }
-    static func dismantleUIView(_ view: WKWebView, coordinator: Coordinator) {
+    static func dismantleUIView(_ view: AnswerCaptureWebView, coordinator: Coordinator) {
         coordinator.loaded = false
         view.stopLoading(); view.configuration.userContentController.removeScriptMessageHandler(forName: "size")
     }
@@ -70,6 +90,7 @@ private struct AnswerWebView: UIViewRepresentable {
         var text = "", theme = "light", fontSize: CGFloat = 17
         var revision = 0, renderedRevision = -1
         var loaded = false, rendering = false
+        var captureRequest: UUID?
         var height: Binding<CGFloat>
         init(height: Binding<CGFloat>) { self.height = height }
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { loaded = true; render(webView) }
@@ -95,6 +116,58 @@ private struct AnswerWebView: UIViewRepresentable {
                   data["revision"] as? Int == revision, let value = data["height"] as? Double, value.isFinite else { return }
             let next = max(24, value)
             if abs(height.wrappedValue - next) > 0.5 { height.wrappedValue = next }
+        }
+    }
+}
+
+// Select over the live chat DOM; the snapshot excludes the surrounding chat UI.
+final class AnswerCaptureWebView: WKWebView {
+    private let selection = RegionSelectionView()
+    var selecting = false {
+        didSet {
+            guard selecting != oldValue else { return }
+            if selecting {
+                selection.isHidden = false; addSubview(selection); updateSelectionBounds()
+            } else { selection.clear(); selection.removeFromSuperview() }
+        }
+    }
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        if selecting { updateSelectionBounds() }
+    }
+    private func updateSelectionBounds() {
+        var visible = bounds
+        var ancestor = superview
+        while let view = ancestor {
+            if view.clipsToBounds { visible = visible.intersection(convert(view.bounds, from: view)) }
+            ancestor = view.superview
+        }
+        selection.frame = bounds
+        selection.configure(available: visible, initialSelection: visible)
+        selection.accessibilityIdentifier = "answer-capture-region"
+        selection.accessibilityLabel = localized("답변 캡처 영역. 사각형을 이동하거나 모서리를 끌어 조절하세요.")
+    }
+    func captureSelection() async throws -> UIImage {
+        updateSelectionBounds()
+        let rect = selection.selection.intersection(bounds)
+        guard selecting, !rect.isNull, rect.width >= 8, rect.height >= 8 else {
+            throw SummaryError.message(AppMessage("답변이 표시된 뒤 캡처할 영역을 다시 선택해 주세요."))
+        }
+        let config = WKSnapshotConfiguration(); config.rect = rect
+        let scale = min(3, 4096 / max(rect.width, rect.height))
+        config.snapshotWidth = NSNumber(value: rect.width * scale / max(1, traitCollection.displayScale))
+        selection.isHidden = true
+        defer { selection.isHidden = false }
+        let image: UIImage = try await withCheckedThrowingContinuation { continuation in
+            takeSnapshot(with: config) { image, error in
+                if let image { continuation.resume(returning: image) }
+                else { continuation.resume(throwing: error ?? CocoaError(.fileReadCorruptFile)) }
+            }
+        }
+        let format = UIGraphicsImageRendererFormat(); format.scale = image.scale; format.opaque = true
+        return UIGraphicsImageRenderer(size: image.size, format: format).image { output in
+            UIColor.secondarySystemGroupedBackground.resolvedColor(with: traitCollection).setFill()
+            output.fill(CGRect(origin: .zero, size: image.size)); image.draw(at: .zero)
         }
     }
 }

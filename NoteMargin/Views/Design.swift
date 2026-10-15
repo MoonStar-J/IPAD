@@ -266,7 +266,7 @@ struct DrawingToolsView: View {
             let layout = vertical ? AnyLayout(VStackLayout(spacing: 2)) : AnyLayout(HStackLayout(spacing: 2))
             layout {
                 ForEach(InkTool.allCases.filter { $0.isInk }) { tool in
-                    Button { session.selectTool(tool) } label: {
+                    Button { session.selectTool(tool); widthSettings = true } label: {
                         InkToolGlyph(tool: tool).stroke(style: StrokeStyle(lineWidth: 1.7, lineCap: .round, lineJoin: .round))
                             .frame(width: 24, height: 24).frame(width: 44, height: 44)
                             .foregroundStyle(session.selectedTool == tool ? Color.accentColor : Color.primary)
@@ -288,6 +288,7 @@ struct DrawingToolsView: View {
                         Text(session.inkWidth.formatted(.number.precision(.fractionLength(1)).locale(appLanguage.locale)))
                             .font(.callout.monospacedDigit()).frame(width: 44, height: 44).contentShape(Rectangle())
                     }.accessibilityLabel(localized("도구 굵기 및 자", language: appLanguage)).accessibilityIdentifier("ink-width-settings")
+                        .accessibilityValue(session.inkWidth.formatted(.number.precision(.fractionLength(1)).locale(appLanguage.locale)))
                         .popover(isPresented: $widthSettings) { widthControls.padding().frame(width: 280).presentationCompactAdaptation(.popover) }
                 }
                 undoButtons
@@ -326,6 +327,7 @@ struct DrawingToolsView: View {
     private var eraserControls: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text(localized("지우개", language: appLanguage)).font(.headline)
+            Text(localized("지우기 대상: %@", session.eraserTarget.title, language: appLanguage)).font(.caption)
             Picker(localized("지우는 방식", language: appLanguage), selection: Binding(get: { eraserTool }, set: { session.selectTool($0) })) {
                 Text(localized("획", language: appLanguage)).tag(InkTool.eraser).accessibilityIdentifier("ink-eraser-mode-stroke")
                 Text(localized("부분", language: appLanguage)).tag(InkTool.pixelEraser).accessibilityIdentifier("ink-eraser-mode-partial")
@@ -443,6 +445,8 @@ struct DrawingToolsView: View {
             Text(session.inkWidth.formatted(.number.precision(.fractionLength(1)).locale(appLanguage.locale))).monospacedDigit()
             Toggle(localized("자", language: appLanguage), isOn: $session.rulerActive).disabled(!session.selectedTool.isInk)
                 .onChange(of: session.rulerActive) { _, _ in session.applyTool() }
+            Button(localized("완료", language: appLanguage)) { widthSettings = false }
+                .accessibilityIdentifier("ink-width-settings-done")
         }
     }
     private var undoButtons: some View {

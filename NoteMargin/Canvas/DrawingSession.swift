@@ -190,6 +190,7 @@ final class DrawingSession: NSObject, ObservableObject, PKCanvasViewDelegate {
     static var copiedInk: PKDrawing?
     private static var lastCopiedStrokeDate = Date.distantPast
     private var lastInk: (tool: InkTool, color: Color, width: Double, ruler: Bool) = (.pen, .black, 3, false)
+    var eraserTarget: InkTool { lastInk.tool }
 
     private func rememberInkSettings() {
         guard !restoringToolSettings, selectedTool.isInk else { return }
@@ -248,7 +249,16 @@ final class DrawingSession: NSObject, ObservableObject, PKCanvasViewDelegate {
             let type: PKInkingTool.InkType = inkWidth < PKInkingTool.InkType.pen.validWidthRange.lowerBound ? .monoline : .pen
             canvas.tool = PKInkingTool(type, color: UIColor(inkColor), width: inkWidth)
         case .pencil: canvas.tool = PKInkingTool(.pencil, color: UIColor(inkColor), width: inkWidth)
-        case .marker: canvas.tool = PKInkingTool(.marker, color: UIColor(inkColor).withAlphaComponent(PageRenderer.markerOpacity), width: inkWidth * 4)
+        case .marker:
+            let ink = PKInk(.marker, color: UIColor(inkColor))
+            let color = markerInks.first(where: { $0.value.color.isEqual(ink.color) })?.key ?? {
+                let index = markerInks.count + 1
+                let token = UIColor(red: CGFloat(index & 255)/255, green: CGFloat((index >> 8) & 255)/255,
+                                    blue: CGFloat((index >> 16) & 255)/255, alpha: 0)
+                markerInks[token] = ink
+                return token
+            }()
+            canvas.tool = PKInkingTool(.marker, color: color, width: inkWidth * 4)
         case .eraser: canvas.tool = PKEraserTool(.vector)
         case .pixelEraser: canvas.tool = PKEraserTool(.fixedWidthBitmap, width: eraserWidth)
         // Both selection shapes use the same host-owned editable selection.
@@ -295,11 +305,6 @@ final class DrawingSession: NSObject, ObservableObject, PKCanvasViewDelegate {
         if let noteID, let pageID { store?.endDrawingInteraction(noteID: noteID, pageID: pageID) }
         shapeCompletion.nativeEnded(drawing: committedDrawing, revision: drawingRevision)
         refreshUndo()
-        guard selectedTool == .pixelEraser else { return }
-        DispatchQueue.main.async { [weak self, weak canvasView] in
-            guard let self, canvasView === self.canvas, self.selectedTool == .pixelEraser else { return }
-            self.finishErasing()
-        }
     }
     @Published var canUndo = false
     @Published var canRedo = false
@@ -429,7 +434,7 @@ final class DrawingSession: NSObject, ObservableObject, PKCanvasViewDelegate {
         drawingRevision &+= 1
         if nativeToolActive {
             nativeDrawingDirty = true
-            if selectedTool == .pixelEraser { host?.updateMarkers(documentDrawing(canvasView.drawing)) }
+            if selectedTool == .marker { host?.updateMarkers(documentDrawing(canvasView.drawing)) }
             store?.markActiveDrawingChanged(noteID: noteID, pageID: pageID)
             return
         }
@@ -770,6 +775,12 @@ final class DrawingSession: NSObject, ObservableObject, PKCanvasViewDelegate {
         host?.setDrawingActive(false)
         if let noteID, let pageID { store?.endDrawingInteraction(noteID: noteID, pageID: pageID) }
         store?.flushDrawings(); setToolsVisible(false)
+    }
+    func detach(from view: CanvasHostView) {
+        guard host === view else { return }
+        canvas.delegate = nil
+        shapeCompletion.invalidate(preservingSelection: true)
+        host = nil
     }
 }
 

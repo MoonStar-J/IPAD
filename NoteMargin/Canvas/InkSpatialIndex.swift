@@ -459,23 +459,37 @@ final class StrokeEraserTransaction {
     let original: PKDrawing
     let width: CGFloat
     let geometryCache: InkGeometryCache
+    let target: InkTool?
+    let partial: Bool
+    private let strokes: [PKStroke]
+    private(set) var masks: [Int: CGPath] = [:]
+    private(set) var changedMasks = Set<Int>()
+    private(set) var partialCutouts = CGPath(rect: .zero, transform: nil)
     private(set) var erasedIndices = Set<Int>()
     private var previousPoint: CGPoint?
 
-    init(drawing: PKDrawing, width: CGFloat, geometryCache: InkGeometryCache? = nil) {
+    init(drawing: PKDrawing, width: CGFloat, geometryCache: InkGeometryCache? = nil, target: InkTool? = nil, partial: Bool = false) {
         original = drawing
+        strokes = drawing.strokes; self.target = target; self.partial = partial
         self.width = width.isFinite && width > 0 ? width : 12
         if let geometryCache, geometryCache.drawing == drawing { self.geometryCache = geometryCache }
         else { self.geometryCache = InkGeometryCache(drawing: drawing) }
     }
     var remainingDrawing: PKDrawing {
-        PKDrawing(strokes: original.strokes.enumerated().compactMap { erasedIndices.contains($0.offset) ? nil : $0.element })
+        PKDrawing(strokes: strokes.enumerated().compactMap { index, original in
+            if !partial { return erasedIndices.contains(index) ? nil : original }
+            guard let mask = masks[index] else { return original }
+            if mask.isEmpty { return nil }
+            var stroke = original; stroke.mask = UIBezierPath(cgPath: mask)
+            return stroke
+        })
     }
     var erasedDrawing: PKDrawing {
         PKDrawing(strokes: original.strokes.enumerated().compactMap { erasedIndices.contains($0.offset) ? $0.element : nil })
     }
     func extend(to point: CGPoint) { extend(along: [point]) }
     func extend(along points: [CGPoint]) {
+        changedMasks.removeAll(keepingCapacity: true)
         let center = CGMutablePath()
         var first: CGPoint?, last: CGPoint?
         var count = 0
@@ -487,12 +501,40 @@ final class StrokeEraserTransaction {
         if previousPoint == nil && count == 1 { center.addLine(to: CGPoint(x: first.x + 0.0001, y: first.y)) }
         previousPoint = last
         let sweep = center.copy(strokingWithWidth: width, lineCap: .round, lineJoin: .round, miterLimit: 2)
-        let strokes = original.strokes
-        for index in geometryCache.candidates(intersecting: sweep.boundingBoxOfPath) where !erasedIndices.contains(index) {
+        for index in geometryCache.candidates(intersecting: sweep.boundingBoxOfPath) where partial || !erasedIndices.contains(index) {
+            let stroke = strokes[index]
+            if let target, !target.matches(stroke.ink.inkType) { continue }
             // A sweep only needs nearby nib geometry. Constructing the complete
             // boolean outline of a long marker costs far more than the hit test.
-            let shape = InkStrokeGeometry(stroke: strokes[index], query: sweep.boundingBoxOfPath)
-            if shape.opacity > 0 && !shape.path.isEmpty && shape.path.intersects(sweep) { erasedIndices.insert(index) }
+            let shape = InkStrokeGeometry(stroke: stroke, query: sweep.boundingBoxOfPath)
+            guard shape.opacity > 0, !shape.path.isEmpty, shape.path.intersects(sweep) else { continue }
+            if partial {
+                var inverse = stroke.transform.inverted()
+                guard let cut = sweep.copy(using: &inverse) else { continue }
+                let current = masks[index] ?? stroke.mask.map { $0.cgPath.normalized(using: $0.usesEvenOddFillRule ? .evenOdd : .winding) }
+                    ?? CGPath(rect: stroke.renderBounds.applying(inverse).insetBy(dx: -1, dy: -1), transform: nil)
+                let next = current.subtracting(cut)
+                guard next != current else { continue }
+                masks[index] = next; changedMasks.insert(index)
+            }
+            erasedIndices.insert(index)
+        }
+        if partial && !changedMasks.isEmpty { partialCutouts = partialCutouts.union(sweep) }
+    }
+
+    func displayMask(at index: Int) -> CGPath? {
+        var transform = strokes[index].transform
+        return masks[index]?.copy(using: &transform)
+    }
+}
+
+extension InkTool {
+    func matches(_ ink: PKInk.InkType) -> Bool {
+        switch self {
+        case .marker: return ink == .marker
+        case .pencil: return ink == .pencil
+        case .pen: return ink != .marker && ink != .pencil
+        default: return false
         }
     }
 }

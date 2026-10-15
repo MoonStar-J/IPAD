@@ -326,6 +326,7 @@ final class EditorFlowTests: XCTestCase {
             let canvas = app.scrollViews["notebook-canvas"].firstMatch
             XCTAssertTrue(canvas.waitForExistence(timeout: 15), app.debugDescription)
             app.buttons["ink-tool-pen"].tap()
+            app.buttons["ink-width-settings-done"].tap()
             let from = canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.25,dy: 0.5))
             from.press(forDuration: 0.05, thenDragTo: from.withOffset(CGVector(dx: 100,dy: 60)))
             XCTAssertTrue(app.buttons["실행 취소"].firstMatch.isEnabled)
@@ -341,7 +342,61 @@ final class EditorFlowTests: XCTestCase {
         }
     }
 
-    @MainActor func testMarkerReadabilityAndNativePartialEraser() {
+    @MainActor func testInkIconWidthPopoverSharesPersistentSettings() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchEnvironment["NOTEMARGIN_UI_FIXTURE"] = UUID().uuidString
+        app.launchArguments = ["-app.language", "ko"]
+        app.launch()
+        app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Editing fixture,'")).firstMatch.tap()
+        var original: [String: Double] = [:], changed: [String: String] = [:]
+        for (index, tool) in ["pen", "pencil", "marker"].enumerated() {
+            app.buttons["ink-tool-" + tool].tap()
+            let slider = app.sliders["ink-width-slider"]
+            XCTAssertTrue(slider.waitForExistence(timeout: 5))
+            original[tool] = Double(app.buttons["ink-width-settings"].value as? String ?? "3")
+            slider.adjust(toNormalizedSliderPosition: 0.25 + Double(index) * 0.2)
+            app.buttons["ink-width-settings-done"].tap()
+            changed[tool] = app.buttons["ink-width-settings"].value as? String
+            app.buttons["ink-width-settings"].tap()
+            XCTAssertEqual(app.buttons["ink-width-settings"].value as? String, changed[tool])
+            app.buttons["ink-width-settings-done"].tap()
+        }
+        app.terminate(); app.launch()
+        app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Editing fixture,'")).firstMatch.tap()
+        for tool in ["pen", "pencil", "marker"] {
+            app.buttons["ink-tool-" + tool].tap()
+            XCTAssertEqual(app.buttons["ink-width-settings"].value as? String, changed[tool])
+            if let width = original[tool] { app.sliders["ink-width-slider"].adjust(toNormalizedSliderPosition: (width-0.1)/11.9) }
+            app.buttons["ink-width-settings-done"].tap()
+        }
+    }
+
+    @MainActor func testRenderedAnswerSelectionInsertsImageAndReopens() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchEnvironment["NOTEMARGIN_UI_FIXTURE"] = UUID().uuidString
+        app.launchArguments = ["--answer-capture-fixture", "-app.language", "ko"]
+        app.launch()
+        let card = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Editing fixture,'")).firstMatch
+        card.tap()
+        let pin = app.buttons["ai-margin-pin-0"]
+        XCTAssertTrue(pin.waitForExistence(timeout: 8)); pin.tap()
+        let select = app.buttons["answer-capture-select"]
+        XCTAssertTrue(select.waitForExistence(timeout: 8)); select.tap()
+        app.buttons["취소"].firstMatch.tap(); select.tap()
+        let selected = XCTAttachment(screenshot: XCUIScreen.main.screenshot()); selected.name = "Live-chat-selection"; selected.lifetime = .keepAlways; add(selected)
+        app.buttons["answer-capture-insert"].tap()
+        XCTAssertTrue(app.staticTexts["노트에 넣었습니다."].waitForExistence(timeout: 10), app.debugDescription)
+        app.buttons["ai-chat-close"].tap()
+        let inserted = XCTAttachment(screenshot: XCUIScreen.main.screenshot()); inserted.name = "Answer-image-at-question"; inserted.lifetime = .keepAlways; add(inserted)
+        app.buttons["실행 취소"].firstMatch.tap(); app.buttons["다시 실행"].firstMatch.tap()
+        app.buttons["editor-library-back"].tap(); card.tap()
+        app.buttons["삽입"].tap(); app.buttons["텍스트·사진 편집"].tap()
+        XCTAssertTrue(app.buttons["사진"].waitForExistence(timeout: 5), app.debugDescription)
+    }
+
+    @MainActor func testMarkerReadabilityAndTargetedPartialEraser() {
         continueAfterFailure = false
         let app = XCUIApplication()
         app.launchEnvironment["NOTEMARGIN_UI_FIXTURE"] = UUID().uuidString
@@ -355,6 +410,7 @@ final class EditorFlowTests: XCTestCase {
         }
         capture("Markers-Overlapping-All-Colors")
         let before = canvas.value as? String
+        app.buttons["ink-tool-marker"].tap(); app.buttons["ink-width-settings-done"].tap()
         app.buttons["ink-tool-eraser"].tap(); app.buttons["ink-tool-eraser"].tap()
         app.buttons["ink-eraser-mode-partial"].tap()
         app.buttons["ink-eraser-settings-done"].tap()
@@ -363,13 +419,17 @@ final class EditorFlowTests: XCTestCase {
         let from = canvas.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: values[0] + values[2]*0.5, dy: values[1] - 10))
         from.press(forDuration: 0.05, thenDragTo: from.withOffset(CGVector(dx: 0,dy: values[3]+20)), withVelocity: .slow, thenHoldForDuration: 0.1)
         XCTAssertTrue(app.buttons["실행 취소"].firstMatch.isEnabled, app.debugDescription)
-        capture("Markers-Native-Partial-Erased")
+        capture("Markers-Targeted-Partial-Erased")
         app.buttons["실행 취소"].firstMatch.tap()
         XCTAssertEqual(canvas.value as? String, before)
         app.buttons["다시 실행"].firstMatch.tap()
         app.buttons["editor-library-back"].tap()
         app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Editing fixture,'")).firstMatch.tap()
         XCTAssertTrue(canvas.waitForExistence(timeout: 10)); capture("Markers-Partial-Erased-Reopened")
+        app.buttons["ink-tool-marker"].tap(); app.buttons["ink-width-settings-done"].tap()
+        let live = canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.7))
+        live.press(forDuration: 0.05, thenDragTo: live.withOffset(CGVector(dx: 160, dy: 0)))
+        capture("Marker-New-Stroke")
     }
     // Explicit opt-in only: this uses the device's connected account and consumes usage.
     @MainActor func testConnectedAccountSummaryEndToEnd() throws {

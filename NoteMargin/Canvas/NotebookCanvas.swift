@@ -32,7 +32,9 @@ struct NotebookCanvas: UIViewRepresentable {
     }
 
     static func dismantleUIView(_ view: CanvasHostView, coordinator: ()) {
-        view.session.stop()
+        // EditorView saves on disappearance, before SwiftUI invalidates its graph.
+        // Teardown must not publish document or session changes back into it.
+        view.detach()
     }
 }
 
@@ -106,6 +108,8 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
     private var objectTap: UITapGestureRecognizer!
     private weak var store: NoteStore?
     private var extendingPage = false
+    private(set) var preparedHeight: CGFloat = 1024
+    private var documentHeight: CGFloat { currentPage?.isContinuousNote == true ? preparedHeight : (currentPage?.height ?? 1024) }
     private var currentPage: NotePage?
     private var currentNote: Notebook?
     private var selectedID: UUID?
@@ -176,6 +180,7 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
     }
 
     private func installCanvas() {
+        canvas.delegate = session
         canvas.showsVerticalScrollIndicator = false
         canvas.showsHorizontalScrollIndicator = false
         canvas.contentInsetAdjustmentBehavior = .never
@@ -249,6 +254,8 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
         let contentChanged = currentPage?.backgroundContent != page.backgroundContent || currentNote?.id != note.id || currentNote?.pdfAssetName != note.pdfAssetName
         currentNote = note
         currentPage = page
+        if pageChanged { preparedHeight = page.height }
+        else { preparedHeight = max(preparedHeight, page.height) }
         self.onSelect = onSelect
         self.onMove = onMove
         self.onTurnPage = onTurnPage
@@ -256,7 +263,7 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
         regionSelection.onChange = { [weak self] rect in
             guard let self else { return }
             let raw = rect.applying(self.documentToViewport.inverted())
-            let document = page.isInfinite ? raw : raw.intersection(CGRect(x: 0, y: 0, width: page.width, height: page.height))
+            let document = page.isInfinite ? raw : raw.intersection(CGRect(x: 0, y: 0, width: page.width, height: self.documentHeight))
             guard document != self.lastReportedRegion else { return }
             self.lastReportedRegion = document
             DispatchQueue.main.async { onRegionChange?(document) }
@@ -271,16 +278,16 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
             canvas.maximumZoomScale = max(canvas.maximumZoomScale, 1)
             canvas.zoomScale = 1
             workingBounds = CGRect(x: -768, y: -1024, width: 2304, height: 3072)
-            canvas.contentSize = CGSize(width: page.width, height: page.height)
+            canvas.contentSize = CGSize(width: page.width, height: documentHeight)
             selectedID = nil
             needsFit = true
         }
         if heightChanged && !pageChanged && !page.isInfinite {
-            canvas.contentSize = CGSize(width: page.width * canvas.zoomScale, height: page.height * canvas.zoomScale)
+            canvas.contentSize = CGSize(width: page.width * canvas.zoomScale, height: documentHeight * canvas.zoomScale)
         }
-        paper.documentBounds = page.isInfinite ? workingBounds : CGRect(x: 0, y: 0, width: page.width, height: page.height)
+        paper.documentBounds = page.isInfinite ? workingBounds : CGRect(x: 0, y: 0, width: page.width, height: documentHeight)
         if contentChanged {
-            paper.documentBounds = page.isInfinite ? workingBounds : CGRect(x: 0, y: 0, width: page.width, height: page.height)
+            paper.documentBounds = page.isInfinite ? workingBounds : CGRect(x: 0, y: 0, width: page.width, height: documentHeight)
             paper.render = { [weak store] context in
                 guard let store else { return }
                 context.saveGState()
@@ -344,8 +351,9 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
                     let saved = currentPage?.isContinuousNote == true ? currentPage?.viewport : nil
                     fitPage(animated: false)
                     if let saved {
+                        preparedHeight = max(preparedHeight, ceil((saved.center.y + bounds.height / max(0.01, saved.zoom) / 2 + 256) / 512) * 512)
                         canvas.setZoomScale(min(canvas.maximumZoomScale, max(canvas.minimumZoomScale, saved.zoom)), animated: false)
-                        canvas.contentSize = CGSize(width: (currentPage?.width ?? 768) * canvas.zoomScale, height: (currentPage?.height ?? 1024) * canvas.zoomScale)
+                        canvas.contentSize = CGSize(width: (currentPage?.width ?? 768) * canvas.zoomScale, height: documentHeight * canvas.zoomScale)
                         canvas.setContentOffset(CGPoint(x: saved.center.x * canvas.zoomScale - bounds.width/2,
                                                        y: saved.center.y * canvas.zoomScale - bounds.height/2), animated: false)
                     }
@@ -384,14 +392,14 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
         guard !adjustingViewport else { return }
         if currentPage?.isInfinite == true { extendInfiniteViewport(); return }
         let horizontal = max(24, (canvas.bounds.width - ((currentPage?.width ?? 0) * canvas.zoomScale)) / 2)
-        let vertical = max(24, (canvas.bounds.height - ((currentPage?.height ?? 0) * canvas.zoomScale)) / 2)
+        let vertical = max(24, (canvas.bounds.height - (documentHeight * canvas.zoomScale)) / 2)
         let inset = UIEdgeInsets(top: vertical, left: horizontal, bottom: vertical, right: horizontal)
         // A save/SwiftUI refresh can lay out the host without a viewport change.
         // Preserve its live offset; only zoom or changed centering may settle it.
         guard settleOffset || canvas.contentInset != inset else { return }
         let offset = canvas.contentOffset
         let scaled = CGSize(width: (currentPage?.width ?? 0) * canvas.zoomScale,
-                            height: (currentPage?.height ?? 0) * canvas.zoomScale)
+                            height: documentHeight * canvas.zoomScale)
         var settled = offset
         // Once an axis fits, there is exactly one centered position. Updating
         // inset without this offset lets UIScrollView present an intermediate
@@ -461,25 +469,30 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
         CATransaction.commit()
     }
     private func extendContinuousPage() {
-        guard let page = currentPage, page.isContinuousNote, !extendingPage, canvas.zoomScale > 0,
-              let noteID = currentNote?.id else { return }
+        guard let page = currentPage, page.isContinuousNote, !extendingPage, canvas.zoomScale > 0 else { return }
         let bottom = bounds.applying(documentToViewport.inverted()).maxY
-        guard bottom > page.height - 384 else { return }
+        guard bottom > preparedHeight - 256 else { return }
+        let next = ceil((bottom + 256) / 512) * 512
+        guard next > preparedHeight else { return }
         extendingPage = true
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            self.extendingPage = false
-            guard self.currentPage?.id == page.id else { return }
-            self.store?.updatePage(noteID: noteID, pageID: page.id) {
-                $0.height = max($0.height, ceil((bottom + 1024) / 1024) * 1024)
-            }
-        }
+        defer { extendingPage = false }
+        preparedHeight = next
+        let offset = canvas.contentOffset
+        canvas.contentSize = CGSize(width: page.width * canvas.zoomScale, height: next * canvas.zoomScale)
+        paper.documentBounds = CGRect(x: 0, y: 0, width: page.width, height: next)
+        if canvas.contentOffset != offset { canvas.contentOffset = offset }
     }
 
     func saveViewport() {
         guard currentPage?.isInfinite == true || currentPage?.isContinuousNote == true else { return }
         let visible = bounds.applying(documentToViewport.inverted())
         session.saveViewport(CanvasViewport(center: CGPoint(x: visible.midX, y: visible.midY), zoom: canvas.zoomScale))
+    }
+    func detach() {
+        previewWarmup?.cancel(); previewWarmup = nil
+        onViewportChange = nil
+        canvas.removeGestureRecognizer(strokeEraser)
+        session.detach(from: self)
     }
     var visibleDocumentCenter: CGPoint {
         let visible = bounds.applying(documentToViewport.inverted())
@@ -631,6 +644,7 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
     }
 
     private func updateVisiblePaper() {
+        if let page = currentPage, page.isContinuousNote { paper.documentBounds = CGRect(x: 0, y: 0, width: page.width, height: preparedHeight) }
         markers.documentBounds = paper.documentBounds; markers.nativeOrigin = paper.nativeOrigin
         markers.updateViewport(documentToViewport, viewport: bounds, interacting: canvas.isTracking || canvas.isZooming || canvas.isDecelerating)
         paper.updateViewport(documentToViewport, viewport: bounds,
@@ -638,7 +652,7 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
         if !inkPreview.isHidden { inkPreview.updateViewport(documentToViewport, paper: paper) }
         if !eraserPreview.isHidden { eraserPreview.updateViewport(documentToViewport, paper: paper) }
         if !regionSelection.isHidden, let page = currentPage {
-            let visiblePage = page.isInfinite ? bounds.insetBy(dx: 12, dy: 12) : CGRect(x: 0, y: 0, width: page.width, height: page.height).applying(documentToViewport).intersection(bounds.insetBy(dx: 12, dy: 12))
+            let visiblePage = page.isInfinite ? bounds.insetBy(dx: 12, dy: 12) : CGRect(x: 0, y: 0, width: page.width, height: documentHeight).applying(documentToViewport).intersection(bounds.insetBy(dx: 12, dy: 12))
             regionSelection.configure(available: visiblePage)
         }
         if lastReportedTransform != documentToViewport || lastReportedBounds != bounds {
@@ -666,8 +680,7 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
             }
             return true
         }
-        guard gestureRecognizer === strokeEraser, canErase,
-              let tool = canvas.tool as? PKEraserTool, tool.eraserType == .vector else { return false }
+        guard gestureRecognizer === strokeEraser, canErase, session.selectedTool.isEraser else { return false }
         return touch.type == .pencil || (touch.type == .direct && canvas.drawingPolicy == .anyInput)
     }
 
@@ -698,11 +711,12 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
     func beginStrokeErasing() {
         DrawingEngineMetrics.measure(.eraserBegin) {
             previewWarmup?.cancel(); previewWarmup = nil
-            guard let tool = canvas.tool as? PKEraserTool, tool.eraserType == .vector else { return }
+            guard session.selectedTool.isEraser else { return }
             eraserCommitDrawing = nil
             // PencilKit vector erasers report width 0 and ignore a supplied
             // width. Our deferred stroke eraser must use its own saved radius.
-            eraserTransaction = StrokeEraserTransaction(drawing: session.drawing, width: session.eraserWidth, geometryCache: geometry(for: session.drawing))
+            eraserTransaction = StrokeEraserTransaction(drawing: session.drawing, width: session.eraserWidth,
+                geometryCache: geometry(for: session.drawing), target: session.eraserTarget, partial: session.selectedTool == .pixelEraser)
             paper.setDrawingActive(true)
             eraserPreview.begin(transaction: eraserTransaction!, paper: paper,
                                 viewport: bounds, transform: documentToViewport)
@@ -716,9 +730,9 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
             eraserTransaction = nil
             if transaction.erasedIndices.isEmpty { cancelStrokeErasing(); session.finishErasing(); return }
             eraserPreview.clearTrail()
-            eraserPreview.setErased(transaction.erasedIndices, committed: true)
+            if !transaction.partial { eraserPreview.setErased(transaction.erasedIndices, committed: true) }
             paper.setDrawingActive(false)
-            let remaining = transaction.geometryCache.removing(transaction.erasedIndices)
+            let remaining = transaction.partial ? transaction.geometryCache.updated(to: transaction.remainingDrawing) : transaction.geometryCache.removing(transaction.erasedIndices)
             eraserCommitDrawing = remaining.drawing
             // The preview already rendered these surviving marker runs. Let the
             // document tiles reuse them during the native commit as well.
@@ -738,11 +752,11 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
     }
 
     func schedulePreviewWarmup() {
+        updateNativeDrawingPermission()
         previewWarmup?.cancel(); previewWarmup = nil
         // An inking tool never needs a raster copy of finished strokes. Prepare
         // this secondary representation only when its interaction is selected.
-        // Native partial erasing keeps PencilKit's own renderer/index throughout.
-        guard session.selectedTool == .eraser || session.selectedTool.isSelection else { return }
+        guard session.selectedTool.isEraser || session.selectedTool.isSelection else { return }
         guard !drawingActive, eraserTransaction == nil, !inkDragging, !canvas.isTracking,
               !canvas.isZooming, !canvas.isDecelerating, canvas.window != nil, !bounds.isEmpty else { return }
         let target = canvas
@@ -777,7 +791,7 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
     }
     func extendStrokeErasing(along points: [CGPoint]) {
         guard let transaction = eraserTransaction else { return }
-        guard let tool = canvas.tool as? PKEraserTool, tool.eraserType == .vector else {
+        guard session.selectedTool.isEraser else {
             cancelStrokeErasing()
             return
         }
@@ -785,8 +799,11 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
         DrawingEngineMetrics.erasing {
             DrawingEngineMetrics.measure(.eraserHitTest) { transaction.extend(along: points) }
             DrawingEngineMetrics.measure(.eraserPreview) {
-                eraserPreview.extend(along: points)
-                if transaction.erasedIndices.count != previousCount { eraserPreview.setErased(transaction.erasedIndices) }
+                if transaction.partial { eraserPreview.updatePartialMasks(transaction) }
+                else {
+                    eraserPreview.extend(along: points)
+                    if transaction.erasedIndices.count != previousCount { eraserPreview.setErased(transaction.erasedIndices) }
+                }
             }
         }
     }
@@ -843,7 +860,7 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
         // A committed shape owns the next editing contact. Do not toggle
         // PencilKit while it still owns the held freehand stroke.
         guard !drawingActive else { return }
-        let enabled = canErase && !hasAutomaticShapeSelection
+        let enabled = canErase && !hasAutomaticShapeSelection && !session.selectedTool.isEraser
         if canvas.drawingGestureRecognizer.isEnabled != enabled {
             canvas.drawingGestureRecognizer.isEnabled = enabled
         }
@@ -1091,7 +1108,7 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
                                          width: abs(point.x - inkResizeAnchor.x), height: abs(point.y - inkResizeAnchor.y))
                 updateInkOutline(inkProposedRect); return
             }
-            let page = CGRect(x: 0, y: 0, width: currentPage?.width ?? rect.maxX, height: currentPage?.height ?? rect.maxY)
+            let page = CGRect(x: 0, y: 0, width: currentPage?.width ?? rect.maxX, height: documentHeight)
             let clamped = currentPage?.isInfinite == true ? point : CGPoint(x: min(page.maxX, max(0, point.x)), y: min(page.maxY, max(0, point.y)))
             // Opposite corner stays fixed; forbid crossing/reflection or zero size.
             let sx = max(0.05, (clamped.x - inkResizeAnchor.x) / (inkStart.x - inkResizeAnchor.x))
@@ -1111,7 +1128,7 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
             }
             let rect = inkSelectionRect ?? selected.bounds
             let dx = currentPage?.isInfinite == true ? point.x - inkStart.x : min(max(-rect.minX, point.x - inkStart.x), max(-rect.minX, (currentPage?.width ?? rect.maxX) - rect.maxX))
-            let dy = currentPage?.isInfinite == true ? point.y - inkStart.y : min(max(-rect.minY, point.y - inkStart.y), max(-rect.minY, (currentPage?.height ?? rect.maxY) - rect.maxY))
+            let dy = currentPage?.isInfinite == true ? point.y - inkStart.y : min(max(-rect.minY, point.y - inkStart.y), max(-rect.minY, documentHeight - rect.maxY))
             inkDragTransform = CGAffineTransform(translationX: dx, y: dy)
         }
         CATransaction.begin(); CATransaction.setDisableActions(true)
@@ -1156,7 +1173,7 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
     }
 
     func selectInk(in rect: CGRect) {
-        let rect = currentPage?.isInfinite == true ? rect.standardized : rect.standardized.intersection(CGRect(x: 0, y: 0, width: currentPage?.width ?? .greatestFiniteMagnitude, height: currentPage?.height ?? .greatestFiniteMagnitude))
+        let rect = currentPage?.isInfinite == true ? rect.standardized : rect.standardized.intersection(CGRect(x: 0, y: 0, width: currentPage?.width ?? .greatestFiniteMagnitude, height: documentHeight))
         guard !rect.isNull, rect.width > 1, rect.height > 1 else { clearInkSelection(); return }
         inkSelectionRect = rect
         let selected = RectangularInkSelection(drawing: session.drawing, rect: rect, geometryCache: geometry(for: session.drawing))
@@ -1220,7 +1237,7 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
         guard let selected = inkSelection, factor.isFinite, factor > 0 else { return }
         let rect = inkSelectionRect ?? selected.bounds
         let limit = min(((currentPage?.width ?? rect.maxX) - rect.minX) / max(1, rect.width),
-                        ((currentPage?.height ?? rect.maxY) - rect.minY) / max(1, rect.height))
+                        (documentHeight - rect.minY) / max(1, rect.height))
         let scale = currentPage?.isInfinite == true ? max(0.1, factor) : max(0.1, min(factor, limit))
         transformSelectedInk(CGAffineTransform(a: scale, b: 0, c: 0, d: scale,
                                               tx: rect.minX * (1 - scale), ty: rect.minY * (1 - scale)), action: localized("필기 크기 조절"))
@@ -1243,7 +1260,7 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
         let source = copied.bounds
         let target = duplicate ? CGPoint(x: source.minX + 24, y: source.minY + 24) : CGPoint(x: visible.midX - source.width / 2, y: visible.midY - source.height / 2)
         let x = currentPage?.isInfinite == true ? target.x : min(max(0, target.x), max(0, (currentPage?.width ?? source.width) - source.width))
-        let y = currentPage?.isInfinite == true ? target.y : min(max(0, target.y), max(0, (currentPage?.height ?? source.height) - source.height))
+        let y = currentPage?.isInfinite == true ? target.y : min(max(0, target.y), max(0, documentHeight - source.height))
         let inserted = DrawingSession.reidentifiedInk(copied).transformed(using: CGAffineTransform(translationX: x - source.minX, y: y - source.minY))
         let oldCount = session.drawing.strokes.count
         let result = PKDrawing(strokes: session.drawing.strokes + inserted.strokes)
@@ -1279,7 +1296,7 @@ final class CanvasHostView: UIView, UIGestureRecognizerDelegate {
         let translation = gesture.translation(in: self)
         let delta = CGPoint(x: translation.x / canvas.zoomScale, y: translation.y / canvas.zoomScale)
         let x = page.isInfinite ? dragOrigin.x + delta.x : min(max(0, dragOrigin.x + delta.x), max(0, page.width - page.elements[index].width))
-        let y = page.isInfinite ? dragOrigin.y + delta.y : min(max(0, dragOrigin.y + delta.y), max(0, page.height - page.elements[index].height))
+        let y = page.isInfinite ? dragOrigin.y + delta.y : min(max(0, dragOrigin.y + delta.y), max(0, documentHeight - page.elements[index].height))
         page.elements[index].x = x
         page.elements[index].y = y
         // Commit once at the end; show the destination outline while dragging.
@@ -1339,7 +1356,7 @@ final class StrokeEraserGestureRecognizer: UIGestureRecognizer {
 final class RegionSelectionView: UIView {
     var onChange: ((CGRect) -> Void)?
     private var available = CGRect.zero
-    private var selection = CGRect.zero
+    private(set) var selection = CGRect.zero
     private var start = CGRect.zero
     private var corner: Int?
     private var freshOrigin: CGPoint?
@@ -1353,11 +1370,11 @@ final class RegionSelectionView: UIView {
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
     func clear() { selection = .zero }
-    func configure(available: CGRect) {
+    func configure(available: CGRect, initialSelection: CGRect? = nil) {
         guard !available.isNull, available.width >= 40, available.height >= 40 else { return }
         self.available = available
         if selection.isEmpty {
-            selection = available.insetBy(dx: available.width * 0.16, dy: available.height * 0.3)
+            selection = initialSelection ?? available.insetBy(dx: available.width * 0.16, dy: available.height * 0.3)
         } else if !available.contains(selection) {
             selection = selection.intersection(available)
             if selection.isNull || selection.width < 24 || selection.height < 24 {
@@ -1723,6 +1740,39 @@ private final class InkInteractionScene {
         }
         CATransaction.commit()
     }
+    func updatePartialMasks(_ transaction: StrokeEraserTransaction) {
+        guard !transaction.changedMasks.isEmpty else { return }
+        CATransaction.begin(); CATransaction.setDisableActions(true)
+        defer { CATransaction.commit() }
+        if transaction.target == .marker {
+            // All markers share the same eraser. Clip their native composite:
+            // splitting overlapping markers changes PencilKit's color blending.
+            for tile in markerLayer.sublayers ?? [] {
+                let mask = (tile.mask as? CAShapeLayer) ?? CAShapeLayer()
+                var offset = CGAffineTransform(translationX: -tile.frame.minX, y: -tile.frame.minY)
+                if let cut = transaction.partialCutouts.copy(using: &offset) {
+                    mask.frame = tile.bounds
+                    mask.path = CGPath(rect: tile.bounds, transform: nil).subtracting(cut)
+                    mask.fillColor = UIColor.black.cgColor; tile.mask = mask
+                }
+            }
+            return
+        }
+        let indices = transaction.erasedIndices
+        if selected != indices {
+            selected = indices; loadedViewport = .null
+            prepareVisibleInk()
+        }
+        for index in indices {
+            guard let layer = strokeLayers[index], let path = transaction.displayMask(at: index) else { continue }
+            for tile in layer.sublayers ?? [] {
+                let mask = (tile.mask as? CAShapeLayer) ?? CAShapeLayer()
+                var offset = CGAffineTransform(translationX: -tile.frame.minX, y: -tile.frame.minY)
+                mask.frame = tile.bounds; mask.path = path.copy(using: &offset)
+                mask.fillColor = UIColor.black.cgColor; tile.mask = mask
+            }
+        }
+    }
     func clear() {
         tileLayers.values.forEach { $0.removeFromSuperlayer() }
         strokeLayers.values.forEach { $0.removeFromSuperlayer() }
@@ -1778,6 +1828,7 @@ final class StrokeEraserPreviewView: UIView {
         CATransaction.commit()
     }
     func setErased(_ indices: Set<Int>, committed: Bool = false) { scene.setErased(indices, committed: committed) }
+    func updatePartialMasks(_ transaction: StrokeEraserTransaction) { scene.updatePartialMasks(transaction) }
     func extend(along points: [CGPoint]) {
         CATransaction.begin(); CATransaction.setDisableActions(true)
         for point in points where point.x.isFinite && point.y.isFinite {

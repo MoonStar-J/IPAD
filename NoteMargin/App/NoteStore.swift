@@ -70,6 +70,12 @@ final class NoteStore: ObservableObject {
                         note.pages[0].elements = [PageElement(kind: .text, text: "미분 학습 노트\nf(x) = x²의 도함수는 f′(x) = 2x이다.\nx = 3에서 접선의 기울기는 6이다.\n아래 손으로 그린 도형은 원이다.", x: 40, y: 60, width: 640, height: 200)]
                     }
                     var fixtureLibrary = Library(); fixtureLibrary.notebooks = [note]
+                    if ProcessInfo.processInfo.arguments.contains("--answer-capture-fixture") {
+                        var chat = MarginConversation(noteID: note.id, pageID: note.pages[0].id, projectID: nil, projectTitle: "",
+                            rect: CGRect(x: 40, y: 180, width: 220, height: 100), imageData: Data(), extractedText: "Fixture", sourceDescription: "Fixture")
+                        chat.messages = [MarginMessage(role: .assistant, text: "## Capture fixture\n\nThe selected formula is **rendered**.\n\n$$a^2+b^2=c^2$$\n\n$$\\sum_{k=1}^{n} k=\\frac{n(n+1)}{2}$$\n\nOnly the selected rectangle is inserted.", status: .completed)]
+                        try MarginChatRepository(root: repository.root.appendingPathComponent("MarginChats")).save(chat)
+                    }
                     if ProcessInfo.processInfo.arguments.contains("--trashed-editing-fixture") {
                         fixtureLibrary.notebooks[0].deletedAt = Date()
                     }
@@ -270,6 +276,10 @@ final class NoteStore: ObservableObject {
         updateNote(noteID) { note in
             guard let index = note.pages.firstIndex(where: { $0.id == pageID }) else { return }
             change(&note.pages[index])
+            if note.pages[index].isContinuousNote {
+                let bottom = note.pages[index].elements.map { $0.y + $0.height }.max() ?? 0
+                note.pages[index].height = max(note.pages[index].height, ceil((bottom + 24) / 1024) * 1024)
+            }
         }
     }
 
@@ -382,52 +392,28 @@ final class NoteStore: ObservableObject {
         }
     }
 
-    func insertAnswer(_ message: MarginMessage, conversationID: UUID, summarized: Bool, ai: MarginAIStore, undoManager: UndoManager?) async throws {
-        func source() throws -> (MarginConversation, NotePage) {
-            guard let chat = ai.conversation(conversationID), let current = note(chat.noteID), current.deletedAt == nil,
-                  chat.belongs(to: current), chat.messages.contains(where: { $0.id == message.id && $0.text == message.text && $0.role == .assistant }),
-                  let target = current.pages.first(where: { $0.id == chat.pageID }), !chat.rect.isEmpty, !chat.rect.isNull, !chat.rect.isInfinite,
-                  target.isInfinite || CGRect(x: 0, y: 0, width: target.width, height: target.height).contains(chat.rect) else {
-                throw SummaryError.message(AppMessage("질문 위치를 찾을 수 없습니다. 원래 페이지와 질문 영역을 확인해 주세요."))
-            }
-            return (chat, target)
+    func insertAnswerImage(_ image: UIImage, operationID: UUID, message: MarginMessage, conversationID: UUID,
+                           ai: MarginAIStore, undoManager: UndoManager?) throws {
+        guard let chat = ai.conversation(conversationID), let current = note(chat.noteID), current.deletedAt == nil,
+              chat.belongs(to: current), chat.messages.contains(where: { $0.id == message.id && $0.text == message.text && $0.role == .assistant }),
+              let page = current.pages.first(where: { $0.id == chat.pageID }), !chat.rect.isEmpty, !chat.rect.isNull, !chat.rect.isInfinite,
+              page.isInfinite || CGRect(x: 0, y: 0, width: page.width, height: page.height).contains(chat.rect) else {
+            throw SummaryError.message(AppMessage("질문 위치를 찾을 수 없습니다. 원래 페이지와 질문 영역을 확인해 주세요."))
         }
-        let (chat, target) = try source()
-        if target.elements.contains(where: { $0.sourceMessageID == message.id && $0.isAnswerSummary == summarized }) { return }
-        let text = summarized ? try await ai.summarizeAnswer(conversationID: conversationID, messageID: message.id) : message.text
-        try Task.checkCancellation()
-        var element = try await renderedElement(text: text, width: min(600, target.width - 48), noteID: chat.noteID)
-        var inserted = false
-        defer {
-            if !inserted, let name = element.assetName, let url = assetURL(noteID: chat.noteID, name: name) { try? FileManager.default.removeItem(at: url) }
-        }
-        try Task.checkCancellation()
-        let (_, current) = try source()
-        if current.elements.contains(where: { $0.sourceMessageID == message.id && $0.isAnswerSummary == summarized }) { return }
-        element.sourceMessageID = message.id; element.isAnswerSummary = summarized
-        element.x = current.isInfinite ? chat.rect.minX : 24
-        element.y = chat.rect.maxY + 24
-        let drawing = try drawing(noteID: chat.noteID, pageID: current.id)
-        let occupied = drawing.strokes.map(\.renderBounds) + current.elements.map { CGRect(x: $0.x, y: $0.y, width: $0.width, height: $0.height) } + current.pdfRegions.map { CGRect(x: 0, y: $0.y, width: current.width, height: $0.height) }
-        for rect in occupied.sorted(by: { $0.minY < $1.minY }) {
-            if rect.intersects(CGRect(x: element.x, y: element.y, width: element.width, height: element.height)) { element.y = rect.maxY + 24 }
-        }
-        guard setAIElement(noteID: chat.noteID, pageID: current.id, element: element, present: true, undoManager: undoManager) else {
+        guard !page.elements.contains(where: { $0.id == operationID }) else { return }
+        guard let data = image.pngData(), image.size.width > 0, image.size.height > 0, let repository else { throw CocoaError(.fileWriteUnknown) }
+        let width = min(420, page.width - 48)
+        let height = width * image.size.height / image.size.width
+        let beside = chat.rect.maxX + 16
+        let x = page.isInfinite || beside + width <= page.width ? beside : max(0, min(chat.rect.minX, page.width-width))
+        let y = page.isInfinite || beside + width <= page.width ? chat.rect.minY : chat.rect.maxY + 16
+        let name = operationID.uuidString + ".png"
+        let element = PageElement(id: operationID, kind: .image, assetName: name, x: x, y: y, width: width, height: height, sourceMessageID: message.id)
+        try repository.writeAsset(data, noteID: chat.noteID, name: name)
+        guard setAIElement(noteID: chat.noteID, pageID: page.id, element: element, present: true, undoManager: undoManager) else {
+            if let url = assetURL(noteID: chat.noteID, name: name) { try? FileManager.default.removeItem(at: url) }
             throw SummaryError.message(errorMessage ?? AppMessage("받은 결과를 저장하지 못했습니다. 다시 누르면 저장만 재시도합니다."))
         }
-        inserted = true
-    }
-
-    func renderedElement(text: String, width: Double, noteID: UUID) async throws -> PageElement {
-        let rendered = try await MathAnswerView.document(text: text, width: width)
-        defer { try? FileManager.default.removeItem(at: rendered.url) }
-        try Task.checkCancellation()
-        guard note(noteID)?.deletedAt == nil, let repository else { throw CocoaError(.fileNoSuchFile) }
-        let name = UUID().uuidString + ".pdf"
-        let target = try repository.assetURL(noteID: noteID, name: name)
-        try FileManager.default.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try FileManager.default.copyItem(at: rendered.url, to: target)
-        return PageElement(kind: .text, text: text, assetName: name, width: width, height: rendered.height, fontSize: 18)
     }
 
     func createFolder(_ title: String) {
@@ -646,6 +632,13 @@ final class NoteStore: ObservableObject {
         for index in library.notebooks.indices {
             if let date = dates[library.notebooks[index].id], date > library.notebooks[index].updatedAt {
                 library.notebooks[index].updatedAt = date
+            }
+            let noteID = library.notebooks[index].id
+            for pageIndex in library.notebooks[index].pages.indices {
+                let page = library.notebooks[index].pages[pageIndex]
+                if page.isContinuousNote, let snapshot = batch[DrawingKey(noteID: noteID, pageID: page.id)], !snapshot.drawing.bounds.isNull {
+                    library.notebooks[index].pages[pageIndex].height = max(page.height, ceil((snapshot.drawing.bounds.maxY + 24) / 1024) * 1024)
+                }
             }
         }
     }

@@ -2,6 +2,9 @@ import XCTest
 import PencilKit
 import PDFKit
 import Security
+import Combine
+import SwiftUI
+import WebKit
 @testable import NoteMargin
 
 @MainActor final class StabilityTests: XCTestCase {
@@ -360,6 +363,160 @@ import Security
         session.stop()
     }
 
+    func testAnswerCaptureUsesLiveRenderedBounds() async throws {
+        let controller = UIHostingController(rootView: MathAnswerView(text: "## Selected answer\n\nA rendered equation: $a^2+b^2=c^2$.\n\n$$\\sum_{k=1}^{n} k=\\frac{n(n+1)}{2}$$\n\nKeep the surrounding UI out."))
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let previous = scene.keyWindow
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 500, height: 650)
+        window.rootViewController = controller; window.makeKeyAndVisible()
+        defer { window.isHidden = true; previous?.makeKey() }
+        func find(_ view: UIView) -> AnswerCaptureWebView? {
+            if let web = view as? AnswerCaptureWebView { return web }
+            return view.subviews.lazy.compactMap { find($0) }.first
+        }
+        var web: AnswerCaptureWebView?
+        for _ in 0..<300 {
+            controller.view.layoutIfNeeded()
+            web = find(controller.view)
+            if let web, !web.isLoading, web.bounds.height > 100,
+               (try? await web.evaluateJavaScript("document.querySelectorAll('.katex').length")) as? Int == 2 { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let view = try XCTUnwrap(web)
+        let formulaCount = try await view.evaluateJavaScript("document.querySelectorAll('.katex').length")
+        XCTAssertEqual(formulaCount as? Int, 2)
+        view.selecting = true
+        let region = try XCTUnwrap(view.subviews.compactMap { $0 as? RegionSelectionView }.first)
+        let image = try await view.captureSelection()
+        XCTAssertEqual(Double(image.cgImage!.width), region.selection.width * 3, accuracy: 3)
+        XCTAssertEqual(Double(image.cgImage!.height), region.selection.height * 3, accuracy: 3)
+        XCTAssertFalse(region.selection.isEmpty)
+        let attachment = XCTAttachment(image: image); attachment.name = "Live-answer-selected-snapshot"; attachment.lifetime = .keepAlways; add(attachment)
+        view.selecting = false
+        do { _ = try await view.captureSelection(); XCTFail("cancelled selection must not capture") } catch { }
+    }
+
+    func testContinuousScrollPreparationCost() async throws {
+        let store = try store(), id = try XCTUnwrap(store.createNote(title: "Scroll measurement", paper: .ruled, cover: .blue, folderID: nil))
+        let pageID = store.note(id)!.pages[0].id
+        let session = DrawingSession(preferences: UserDefaults(suiteName: UUID().uuidString)!)
+        session.load(noteID: id, pageID: pageID, store: store)
+        let host = CanvasHostView(session: session); session.host = host
+        host.frame = CGRect(x: 0, y: 0, width: 800, height: 1000)
+        func configure() {
+            let note = store.note(id)!
+            host.configure(note: note, page: note.pages[0], store: store, fingerDrawing: true, editingObjects: false, toolsVisible: true,
+                           onSelect: { _ in }, onMove: { _,_,_ in }, onTurnPage: { _ in false })
+            host.layoutIfNeeded()
+        }
+        configure(); session.canvas.zoomScale = 1
+        var saves = 0
+        let observation = store.$library.dropFirst().sink { _ in saves += 1 }
+        let start = CACurrentMediaTime()
+        for step in 1...80 {
+            session.canvas.setContentOffset(CGPoint(x: 0, y: step * 700), animated: false)
+            host.canvasDidScroll()
+            await Task.yield()
+            configure(); host.canvasDidScroll(); configure()
+        }
+        let elapsed = (CACurrentMediaTime() - start) * 1000
+        var usage = rusage(); getrusage(RUSAGE_SELF, &usage)
+        print("CONTINUOUS_SCROLL_PERFORMANCE saves=\(saves) elapsedMs=\(elapsed) peakBytes=\(usage.ru_maxrss) storedHeight=\(store.note(id)!.pages[0].height)")
+        XCTAssertEqual(store.note(id)?.pages[0].id, pageID)
+        XCTAssertTrue(session.drawing.strokes.isEmpty)
+        XCTAssertEqual(saves, 0, "Blank scroll space is not saved as note content")
+        XCTAssertEqual(store.note(id)?.pages[0].height, 1024)
+        let prepared = host.preparedHeight
+        for _ in 0..<20 { configure(); host.canvasDidScroll() }
+        XCTAssertEqual(host.preparedHeight, prepared)
+        observation.cancel(); session.stop()
+    }
+
+    func testCanvasTeardownDoesNotPublishAndContinuousInkReopens() throws {
+        let store = try store(), id = try XCTUnwrap(store.createNote(title: "Saved continuation", paper: .plain, cover: .blue, folderID: nil))
+        let session = DrawingSession(preferences: UserDefaults(suiteName: UUID().uuidString)!)
+        let pageID = store.note(id)!.pages[0].id
+        session.load(noteID: id, pageID: pageID, store: store)
+        let host = CanvasHostView(session: session); session.host = host
+        host.frame = CGRect(x: 0, y: 0, width: 800, height: 1000)
+        func configure(_ host: CanvasHostView) {
+            let note = store.note(id)!
+            host.configure(note: note, page: note.pages[0], store: store, fingerDrawing: true, editingObjects: false, toolsVisible: true,
+                           onSelect: { _ in }, onMove: { _,_,_ in }, onTurnPage: { _ in false })
+            host.layoutIfNeeded()
+        }
+        configure(host)
+        session.canvas.zoomScale = 1
+        session.canvas.setContentOffset(CGPoint(x: 0, y: 12000), animated: false); host.canvasDidScroll()
+        let ink = PKDrawing(strokes: [stroke([CGPoint(x: 100, y: 12600), CGPoint(x: 400, y: 12700)])])
+        XCTAssertTrue(session.commitDrawing(ink, action: "Ink"))
+        session.stop() // EditorView's onDisappear / explicit back action owns persistence.
+        let saved = store.note(id)!.pages[0], viewport = try XCTUnwrap(saved.viewport)
+        XCTAssertEqual(saved.height, 13312)
+        XCTAssertEqual(try store.drawing(noteID: id, pageID: pageID), ink)
+        var publications = 0
+        let document = store.objectWillChange.sink { publications += 1 }
+        let tools = session.objectWillChange.sink { publications += 1 }
+        // UIKit can change the viewport as the presentation is being destroyed.
+        session.canvas.contentOffset.y += 20
+        NotebookCanvas.dismantleUIView(host, coordinator: ())
+        XCTAssertEqual(publications, 0)
+        XCTAssertNil(session.host); XCTAssertNil(session.canvas.delegate)
+        XCTAssertEqual(store.note(id)?.pages[0].viewport, viewport)
+        document.cancel(); tools.cancel()
+        let reopened = DrawingSession(preferences: UserDefaults(suiteName: UUID().uuidString)!)
+        reopened.load(noteID: id, pageID: pageID, store: store)
+        let next = CanvasHostView(session: reopened); reopened.host = next; next.frame = host.frame
+        configure(next)
+        XCTAssertEqual(reopened.drawing, ink)
+        XCTAssertGreaterThanOrEqual(next.preparedHeight, saved.height)
+        XCTAssertEqual(next.visibleDocumentCenter.y, viewport.center.y, accuracy: 2)
+        reopened.stop()
+    }
+
+    func testErasersPreserveOtherInkKindsAndNativeAttributes() throws {
+        let kinds: [PKInk.InkType] = [.pen, .monoline, .pencil, .marker]
+        let strokes = kinds.enumerated().map { index, kind in
+            var value = stroke([CGPoint(x: 80, y: 250), CGPoint(x: 380, y: 250)], color: .systemBlue, date: Date(timeIntervalSince1970: Double(index)))
+            value.ink = PKInk(kind, color: index % 2 == 0 ? .systemBlue : .systemRed)
+            value.transform = CGAffineTransform(translationX: 10, y: 20)
+            value.mask = UIBezierPath(rect: CGRect(x: 80, y: 230, width: 280, height: 40))
+            return value
+        }
+        let drawing = PKDrawing(strokes: strokes)
+        for tool in [InkTool.pen, .pencil, .marker] {
+            let session = DrawingSession(preferences: UserDefaults(suiteName: UUID().uuidString)!)
+            session.selectTool(tool); session.selectTool(.rectangle); session.selectTool(.eraser)
+            XCTAssertEqual(session.eraserTarget, tool)
+            for partial in [false, true] {
+                let transaction = StrokeEraserTransaction(drawing: drawing, width: 20, target: session.eraserTarget, partial: partial)
+                transaction.extend(to: CGPoint(x: 210, y: 270))
+                let targets = Set(strokes.indices.filter { tool.matches(kinds[$0]) })
+                XCTAssertEqual(transaction.erasedIndices, targets)
+                let result = transaction.remainingDrawing
+                for index in strokes.indices where !targets.contains(index) {
+                    XCTAssertTrue(result.strokes.contains { InkStrokeAppearance.matches($0, strokes[index]) })
+                }
+                if partial {
+                    XCTAssertEqual(result.strokes.count, strokes.count)
+                    for index in targets {
+                        let changed = result.strokes[index]
+                        XCTAssertTrue((changed.path as PKStrokePathReference) === (strokes[index].path as PKStrokePathReference))
+                        XCTAssertEqual(changed.ink.inkType, strokes[index].ink.inkType)
+                        XCTAssertEqual(changed.ink.color, strokes[index].ink.color)
+                        XCTAssertEqual(changed.transform, strokes[index].transform)
+                        XCTAssertFalse(changed.mask!.contains(CGPoint(x: 200, y: 250)))
+                        XCTAssertTrue(changed.mask!.contains(CGPoint(x: 100, y: 250)))
+                    }
+                    let restored = try PKDrawing(data: result.dataRepresentation())
+                    XCTAssertEqual(restored.strokes.count, strokes.count)
+                } else { XCTAssertEqual(result.strokes.count, strokes.count - targets.count) }
+            }
+            session.finishErasing(); XCTAssertEqual(session.selectedTool, tool)
+        }
+    }
+
     func testContinuousExtensionPreservesDrawingAndViewport() async throws {
         let store = try store()
         let id = try XCTUnwrap(store.createNote(title: "Continuous", paper: .ruled, cover: .blue, folderID: nil))
@@ -379,12 +536,13 @@ import Security
         XCTAssertTrue(session.commitDrawing(ink, action: "test"))
         canvas.setContentOffset(CGPoint(x: canvas.contentOffset.x, y: 650), animated: false)
         host.canvasDidScroll()
-        for _ in 0..<20 where store.note(id)!.pages[0].height == 1024 { try await Task.sleep(for: .milliseconds(5)) }
+        await Task.yield()
         let offset = canvas.contentOffset
         configure(); host.saveViewport()
         XCTAssertTrue(canvas === session.canvas)
         XCTAssertEqual(canvas.contentOffset, offset)
-        XCTAssertGreaterThan(store.note(id)!.pages[0].height, 1024)
+        XCTAssertEqual(store.note(id)!.pages[0].height, 1024)
+        XCTAssertGreaterThan(host.preparedHeight, 1024)
         XCTAssertEqual(session.drawing, ink)
         session.undo(); XCTAssertTrue(session.drawing.strokes.isEmpty)
         session.redo(); XCTAssertEqual(session.drawing, ink)
@@ -410,7 +568,8 @@ import Security
                     let context = CGContext(data: bytes.baseAddress, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
                     context.translateBy(x: -50, y: -50); context.draw(image, in: rect)
                 }
-                XCTAssertLessThanOrEqual(pixel[3], 73, "overlap has one shared opacity cap")
+                XCTAssertLessThanOrEqual(pixel[3], 154, "overlap has one shared opacity cap")
+                XCTAssertGreaterThan(pixel[3], 70, "single highlights retain visible color")
                 let store = try store(), id = try XCTUnwrap(store.createNote(title: "Marker", paper: .plain, cover: .blue, folderID: nil))
                 let session = DrawingSession(); let pageID = store.note(id)!.pages[0].id
                 session.load(noteID: id, pageID: pageID, store: store)
@@ -448,7 +607,7 @@ import Security
             }, creationDate: Date(timeIntervalSince1970: Double(i))), randomSeed: UInt32(i))
         }
         XCTAssertTrue(session.commitDrawing(PKDrawing(strokes: strokes), action: "fixture"))
-        session.selectTool(.eraser); DrawingEngineMetrics.reset()
+        session.selectTool(.marker); session.selectTool(.eraser); DrawingEngineMetrics.reset()
         for contact in 0..<4 {
             session.selectTool(.eraser)
             host.beginStrokeErasing()
@@ -606,6 +765,16 @@ import Security
             erase.setErased([1,3], committed: true)
             let removed = image { _ in PageRenderer.drawInk(PKDrawing(strokes: [strokes[0],strokes[2],strokes[4]]), in: viewport, scale: 2) }
             XCTAssertLessThan(difference(removed, image { erase.layer.render(in: $0.cgContext) }), 0.5)
+            let partial = StrokeEraserTransaction(drawing: drawing, width: 16, target: .marker, partial: true)
+            erase.begin(transaction: partial, paper: paper, viewport: viewport, transform: .identity)
+            for point in [CGPoint(x: 170, y: 140), CGPoint(x: 170, y: 210)] {
+                partial.extend(to: point); erase.updatePartialMasks(partial)
+                let expected = image { _ in PageRenderer.drawInk(partial.remainingDrawing, in: viewport, scale: 2) }
+                let actual = image { erase.layer.render(in: $0.cgContext) }
+                let band = CGRect(x: 0, y: 240, width: 768, height: 200)
+                XCTAssertLessThan(difference(UIImage(cgImage: expected.cgImage!.cropping(to: band)!),
+                                             UIImage(cgImage: actual.cgImage!.cropping(to: band)!)), 0.5)
+            }
         }
         let cache = InkGeometryCache(drawing: drawing)
         let remaining = cache.removing([1,3])

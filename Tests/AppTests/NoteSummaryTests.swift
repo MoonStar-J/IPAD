@@ -43,51 +43,41 @@ import PDFKit
         }
         XCTFail("request not sent")
     }
-    func testAnswerInsertionUsesOriginalPageAndRetainsSummaryOnSaveFailure() async throws {
+    func testAnswerImageUsesOriginalQuestionAndRetriesOnlySave() throws {
         let id = try note(["source", "other page"]), source = store.note(id)!, page = source.pages[0]
         let repository = MarginChatRepository(root: root.appendingPathComponent("Chats"))
         var chat = MarginConversation(noteID: id, pageID: page.id, projectID: nil, projectTitle: "", rect: CGRect(x: 30, y: 30, width: 220, height: 100), imageData: Data(), extractedText: "PRIVATE SOURCE", sourceDescription: "source")
-        let answer = MarginMessage(role: .assistant, text: "Only this answer: \\(a^2+b^2=c^2\\), assuming a > 0.", status: .completed)
-        chat.messages = [MarginMessage(role: .user, text: "PRIVATE CONVERSATION"), answer]
-        try repository.save(chat)
-        let ai = MarginAIStore(repository: repository, connection: connection, http: http)
-        ai.load(noteID: id)
-        let undo = UndoManager(); undo.groupsByEvent = false
+        let answer = MarginMessage(role: .assistant, text: "A rendered answer", status: .completed)
+        chat.messages = [answer]; try repository.save(chat)
+        let ai = MarginAIStore(repository: repository, connection: connection, http: http); ai.load(noteID: id)
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 300, height: 80)).image { context in
+            UIColor.systemBlue.setFill(); context.fill(CGRect(x: 0, y: 0, width: 300, height: 80))
+        }
+        let operation = UUID(), undo = UndoManager(); undo.groupsByEvent = false
         undo.beginUndoGrouping()
-        try await store.insertAnswer(answer, conversationID: chat.id, summarized: false, ai: ai, undoManager: undo)
+        try store.insertAnswerImage(image, operationID: operation, message: answer, conversationID: chat.id, ai: ai, undoManager: undo)
         undo.endUndoGrouping()
-        var element = try XCTUnwrap(store.note(id)?.pages[0].elements.last)
-        XCTAssertTrue(element.isRenderedText); XCTAssertEqual(element.text, answer.text)
-        XCTAssertGreaterThanOrEqual(element.y, chat.rect.maxY)
+        let element = try XCTUnwrap(store.note(id)?.pages[0].elements.last)
+        XCTAssertEqual(element.kind, .image); XCTAssertTrue(element.text.isEmpty)
+        XCTAssertEqual(element.y, chat.rect.maxY + 16)
         XCTAssertEqual(store.note(id)?.pages[1], source.pages[1])
-        XCTAssertTrue(SummaryProtocol.bodies.isEmpty)
+        let asset = try XCTUnwrap(store.assetURL(noteID: id, name: element.assetName!))
+        XCTAssertEqual(try Data(contentsOf: asset), image.pngData())
         undo.undo(); XCTAssertEqual(store.note(id)?.pages[0].elements.count, 1)
         undo.redo(); XCTAssertEqual(store.note(id)?.pages[0].elements.count, 2)
-        try await store.insertAnswer(answer, conversationID: chat.id, summarized: false, ai: ai, undoManager: undo)
+        try store.insertAnswerImage(image, operationID: operation, message: answer, conversationID: chat.id, ai: ai, undoManager: nil)
         XCTAssertEqual(store.note(id)?.pages[0].elements.count, 2)
-        let libraryURL = root.appendingPathComponent("library.json")
-        let savedLibrary = try Data(contentsOf: libraryURL)
-        SummaryProtocol.onResponse = {
-            try? FileManager.default.removeItem(at: libraryURL)
-            try? FileManager.default.createDirectory(at: libraryURL, withIntermediateDirectories: false)
-        }
-        do { try await store.insertAnswer(answer, conversationID: chat.id, summarized: true, ai: ai, undoManager: undo); XCTFail("save must fail") }
-        catch { }
-        XCTAssertEqual(SummaryProtocol.bodies.count, 1)
-        let request = try JSONSerialization.jsonObject(with: SummaryProtocol.bodies[0]) as! [String: Any]
-        let input = request["input"] as! [[String: Any]]
-        let content = input[0]["content"] as! [[String: Any]]
-        XCTAssertEqual(input.count, 1); XCTAssertEqual(content.count, 1); XCTAssertEqual(content[0]["text"] as? String, answer.text)
-        try FileManager.default.removeItem(at: libraryURL); try savedLibrary.write(to: libraryURL)
-        SummaryProtocol.onResponse = nil
-        try await store.insertAnswer(answer, conversationID: chat.id, summarized: true, ai: ai, undoManager: nil)
-        XCTAssertEqual(SummaryProtocol.bodies.count, 1)
-        element = try XCTUnwrap(store.note(id)?.pages[0].elements.last)
-        XCTAssertTrue(element.isRenderedText); XCTAssertEqual(element.isAnswerSummary, true)
+        let libraryURL = root.appendingPathComponent("library.json"), saved = try Data(contentsOf: libraryURL)
+        try FileManager.default.removeItem(at: libraryURL)
+        try FileManager.default.createDirectory(at: libraryURL, withIntermediateDirectories: false)
+        let retry = UUID()
+        XCTAssertThrowsError(try store.insertAnswerImage(image, operationID: retry, message: answer, conversationID: chat.id, ai: ai, undoManager: nil))
+        try FileManager.default.removeItem(at: libraryURL); try saved.write(to: libraryURL)
+        try store.insertAnswerImage(image, operationID: retry, message: answer, conversationID: chat.id, ai: ai, undoManager: nil)
+        XCTAssertEqual(store.note(id)?.pages[0].elements.count, 3)
         store.updateNote(id) { $0.pages.removeFirst() }
-        do { try await store.insertAnswer(answer, conversationID: chat.id, summarized: true, ai: ai, undoManager: nil); XCTFail("deleted source must fail") }
-        catch { }
-        XCTAssertEqual(SummaryProtocol.bodies.count, 1)
+        XCTAssertThrowsError(try store.insertAnswerImage(image, operationID: UUID(), message: answer, conversationID: chat.id, ai: ai, undoManager: nil))
+        XCTAssertTrue(SummaryProtocol.bodies.isEmpty)
     }
 
     func testLanguageCatalogAndUserContentBoundaries() throws {

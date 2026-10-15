@@ -245,7 +245,6 @@
 "답변 원문 복사" = "Copy Original Answer";
 "수식 모아 복사" = "Copy All Equations";
 "이 부분 질문" = "Ask About This Part";
-"노트에 저장" = "Save to Note";
 "인용: " = "Quote: ";
 "저장 다시 시도" = "Retry Saving";
 "질문 다시 입력" = "Re-enter Question";
@@ -609,17 +608,9 @@
 
 "요약 상태와 출처" = "Summary status and sources";
 
-"답변 전체 옮기기" = "Insert full answer";
-
-"요약해서 노트에 넣기" = "Summarize and insert";
-
-"노트에 넣는 중…" = "Inserting into notebook…";
-
 "노트에 넣었습니다." = "Inserted into notebook.";
 
 "취소되었습니다." = "Cancelled.";
-
-"답변 요약을 완료하지 못했습니다." = "The answer summary could not be completed.";
 
 "질문 위치를 찾을 수 없습니다. 원래 페이지와 질문 영역을 확인해 주세요." = "The question location is no longer available. Check its original page and question area.";
 
@@ -628,3 +619,17 @@
 "%@ · %@" = "%@ · %@";
 
 "PDF 파일을 선택해 주세요." = "Select PDF files.";
+
+"답변 %@ 영역 선택" = "Select area in answer %@";
+
+"답변 영역 캡처" = "Capture answer area";
+
+"선택 영역 넣기" = "Insert selected area";
+
+"영역 선택하여 노트에 넣기" = "Select an area to insert";
+
+"답변 캡처 영역. 사각형을 이동하거나 모서리를 끌어 조절하세요." = "Answer capture area. Move the rectangle or drag its corners to resize.";
+
+"지우기 대상: %@" = "Erase: %@";
+
+"답변이 표시된 뒤 캡처할 영역을 다시 선택해 주세요." = "Once the answer is displayed, select the area to capture again.";

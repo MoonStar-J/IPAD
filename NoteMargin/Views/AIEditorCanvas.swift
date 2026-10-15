@@ -126,8 +126,8 @@ struct AIEditorCanvas: View {
             }
             .overlay(alignment: .topTrailing) {
                 if let id = activeChatID, !selecting, !editingObjects {
-                    ChatGPTMarginView(conversationID: id, project: note.projectID.flatMap { store.project($0) }, onClose: { activeChatID = nil }, onSave: { message, summarized in
-                        try await store.insertAnswer(message, conversationID: id, summarized: summarized, ai: ai, undoManager: session.undoManager)
+                    ChatGPTMarginView(conversationID: id, project: note.projectID.flatMap { store.project($0) }, onClose: { activeChatID = nil }, onSave: { message, image, operationID in
+                        try store.insertAnswerImage(image, operationID: operationID, message: message, conversationID: id, ai: ai, undoManager: session.undoManager)
                         session.refreshUndo()
                     }, onAttach: {
                         session.host?.cancelStrokeErasing()
@@ -230,6 +230,11 @@ struct AIEditorCanvas: View {
     private func capture() {
         guard let selection, store.flushDrawings(), session.loadError == nil else { return }
         do {
+            var page = page
+            if page.isContinuousNote && selection.maxY > page.height {
+                guard store.updatePage(noteID: note.id, pageID: page.id, { $0.height = max($0.height, ceil(selection.maxY / 1024) * 1024) }) else { return }
+                page.height = ceil(selection.maxY / 1024) * 1024
+            }
             let region = try RegionContextService.capture(note: note, page: page, drawing: session.drawing, store: store, rect: selection)
             if let target = captureTarget {
                 if ai.addCapture(region, to: target, note: note) { selecting = false; activeChatID = target; captureTarget = nil }

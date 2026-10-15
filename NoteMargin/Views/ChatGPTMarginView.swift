@@ -5,15 +5,16 @@ struct ChatGPTMarginView: View {
     let conversationID: UUID?
     let project: NoteProject?
     var onClose: (() -> Void)? = nil
-    var onSave: ((MarginMessage, Bool) async throws -> Void)? = nil
+    var onSave: ((MarginMessage, UIImage, UUID) throws -> Void)? = nil
     var onAttach: (() -> Void)? = nil
     var onSource: (() -> Void)? = nil
     @ObservedObject var ai = MarginAIStore.shared
     @ObservedObject var connection = ChatGPTPlanConnection.shared
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dismiss) private var dismiss
-    @State private var insertion: Task<Void, Never>?
-    @State private var insertionID: UUID?
+    @State private var captureMessage: UUID?
+    @State private var captureRequest: UUID?
+    @State private var pendingCapture: (message: MarginMessage, image: UIImage, id: UUID)?
     @State private var insertionNotice: AppMessage?
     @State private var settings = false
     @State private var preview = true
@@ -29,17 +30,24 @@ struct ChatGPTMarginView: View {
     private var chat: MarginConversation? { conversationID.flatMap { ai.conversation($0) } }
     private var readOnly: Bool { chat.map { $0.projectID != project?.id } ?? false }
     private var sending: Bool { conversationID.map { ai.sending.contains($0) } ?? false }
-    private func insert(_ message: MarginMessage, summarized: Bool) {
-        guard insertion == nil, let onSave else { return }
-        let operation = UUID(); insertionID = operation; insertionNotice = nil
-        insertion = Task { @MainActor in
-            defer { if insertionID == operation { insertion = nil; insertionID = nil } }
-            do {
-                try await onSave(message, summarized)
-                insertionNotice = AppMessage("노트에 넣었습니다.")
-            } catch is CancellationError { insertionNotice = AppMessage("취소되었습니다.") }
-            catch { insertionNotice = AppMessage(error) }
-        }
+    private func beginCapture(_ message: MarginMessage) {
+        captureMessage = message.id; captureRequest = nil; pendingCapture = nil; insertionNotice = nil
+    }
+    private func receivedCapture(_ request: UUID, result: Result<UIImage, Error>, message: MarginMessage) {
+        guard captureRequest == request, captureMessage == message.id else { return }
+        captureRequest = nil
+        do {
+            pendingCapture = (message, try result.get(), request)
+            saveCapture()
+        } catch { insertionNotice = AppMessage(error) }
+    }
+    private func saveCapture() {
+        guard let pendingCapture, let onSave else { return }
+        do {
+            try onSave(pendingCapture.message, pendingCapture.image, pendingCapture.id)
+            self.pendingCapture = nil; captureMessage = nil
+            insertionNotice = AppMessage("노트에 넣었습니다.")
+        } catch { insertionNotice = AppMessage(error) }
     }
 
     var body: some View {
@@ -49,6 +57,14 @@ struct ChatGPTMarginView: View {
                     HStack {
                         Label(localized("여백 대화", language: appLanguage), systemImage: "sparkles").font(.headline)
                         Spacer()
+                        if onSave != nil {
+                            Menu {
+                                ForEach(Array(chat.messages.filter { $0.role == .assistant && $0.status != .streaming && !$0.text.isEmpty }.enumerated()), id: \.element.id) { index, message in
+                                    Button(localized("답변 %@ 영역 선택", "\(index + 1)", language: appLanguage)) { beginCapture(message) }
+                                }
+                            } label: { Image(systemName: "viewfinder") }
+                                .accessibilityLabel(localized("답변 영역 캡처", language: appLanguage)).disabled(readOnly || captureRequest != nil)
+                        }
                         Button { settings = true } label: { Image(systemName: "person.crop.circle") }.accessibilityLabel(localized("ChatGPT 구독 연결", language: appLanguage))
                         Menu {
                             Button(localized("AI 질문 프리셋", language: appLanguage)) { presetSettings = true }
@@ -59,6 +75,18 @@ struct ChatGPTMarginView: View {
                         } label: { Image(systemName: "ellipsis.circle") }
                         Button { onClose?() } label: { Image(systemName: "xmark") }.accessibilityLabel(localized("여백 대화 닫기", language: appLanguage)).accessibilityIdentifier("ai-chat-close")
                     }.padding()
+                    if captureMessage != nil {
+                        HStack {
+                            Button(localized("취소", language: appLanguage)) { captureMessage = nil; captureRequest = nil; pendingCapture = nil }
+                            Spacer()
+                            if pendingCapture != nil { Button(localized("저장 다시 시도", language: appLanguage), action: saveCapture) }
+                            else {
+                                Button(localized("선택 영역 넣기", language: appLanguage)) { captureRequest = UUID() }
+                                    .disabled(captureRequest != nil).accessibilityIdentifier("answer-capture-insert")
+                            }
+                        }.padding(.horizontal).padding(.bottom, 8)
+                    }
+                    if let insertionNotice { Text(insertionNotice.text).font(.caption).padding(.horizontal).textSelection(.enabled) }
                     Divider()
                     ScrollView {
                         VStack(alignment: .leading, spacing: 16) {
@@ -81,7 +109,10 @@ struct ChatGPTMarginView: View {
                                         if let status = message.status { Text(status.title).font(.caption).foregroundStyle(.secondary) }
                                     }
                                     if message.role == .assistant {
-                                        MathAnswerView(text: message.text.isEmpty ? (message.status == .streaming ? localized("답변을 기다리는 중…", language: appLanguage) : localized("저장된 텍스트 답변이 없습니다.", language: appLanguage)) : message.text)
+                                        MathAnswerView(text: message.text.isEmpty ? (message.status == .streaming ? localized("답변을 기다리는 중…", language: appLanguage) : localized("저장된 텍스트 답변이 없습니다.", language: appLanguage)) : message.text,
+                                            selecting: captureMessage == message.id,
+                                            captureRequest: captureMessage == message.id ? captureRequest : nil,
+                                            onCapture: { request, result in receivedCapture(request, result: result, message: message) })
                                         HStack {
                                             Menu(localized("복사", language: appLanguage)) {
                                                 Button(localized("답변 원문 복사", language: appLanguage)) { UIPasteboard.general.string = message.text }
@@ -90,10 +121,9 @@ struct ChatGPTMarginView: View {
                                             }
                                             Button(localized("이 부분 질문", language: appLanguage)) { quoting = message }.disabled(sending || readOnly || message.text.isEmpty || message.status == .streaming)
                                             if onSave != nil {
-                                                Menu(localized("노트에 저장", language: appLanguage)) {
-                                                    Button(localized("답변 전체 옮기기", language: appLanguage)) { insert(message, summarized: false) }
-                                                    Button(localized("요약해서 노트에 넣기", language: appLanguage)) { insert(message, summarized: true) }
-                                                }.disabled(message.text.isEmpty || message.status == .streaming || insertion != nil || readOnly)
+                                                Button(localized("영역 선택하여 노트에 넣기", language: appLanguage)) { beginCapture(message) }
+                                                    .disabled(message.text.isEmpty || message.status == .streaming || captureRequest != nil || readOnly)
+                                                    .accessibilityIdentifier("answer-capture-select")
                                             }
                                         }.font(.caption)
                                     } else { Text(message.displayText(in: appLanguage)).textSelection(.enabled) }
@@ -109,11 +139,6 @@ struct ChatGPTMarginView: View {
                                 }.frame(maxWidth: .infinity, alignment: .leading).padding(12)
                                     .background(message.role == .user ? Color.accentColor.opacity(0.08) : Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
                             }
-                            if insertion != nil {
-                                ProgressView(localized("노트에 넣는 중…", language: appLanguage))
-                                Button(localized("취소", language: appLanguage)) { insertion?.cancel() }
-                            }
-                            if let insertionNotice { Text(insertionNotice.text).font(.caption).textSelection(.enabled) }
                             if let error = ai.failures[chat.id] {
                                 Text(error.text).font(.caption).foregroundStyle(.secondary)
                                 if ai.needsSaving(chat.id) { Button(localized("저장 다시 시도", language: appLanguage)) { ai.retrySave(chat.id) } }
@@ -125,7 +150,7 @@ struct ChatGPTMarginView: View {
                                 Button(localized("질문 다시 입력", language: appLanguage)) { ai.retryQuestion(chat.id) }.disabled(readOnly)
                             }
                         }.padding()
-                    }
+                    }.scrollDisabled(captureMessage != nil)
                     Divider()
                     VStack(alignment: .leading, spacing: 10) {
                         HStack {
@@ -190,7 +215,7 @@ struct ChatGPTMarginView: View {
         .onChange(of: presetData) { _, _ in if let conversationID { ai.refreshPreset(conversationID) } }
         .onChange(of: sending) { _, value in if !value, let conversationID { ai.refreshPreset(conversationID) } }
         .onAppear { if let conversationID { ai.refreshPreset(conversationID) } }
-        .onDisappear { insertion?.cancel(); if let conversationID { ai.flushDraft(conversationID) } }
+        .onDisappear { captureMessage = nil; captureRequest = nil; if let conversationID { ai.flushDraft(conversationID) } }
         .onChange(of: scenePhase) { _, phase in
             if phase == .background { connection.cancelSignIn(); ai.cancelPlanRequests() }
         }

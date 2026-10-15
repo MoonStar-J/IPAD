@@ -184,7 +184,7 @@ enum PageRenderer {
 
     /// Marker opacity applies to the combined marker layer, so overlap never
     /// hides source text. Other inks retain their native colors and opacity.
-    static let markerOpacity: CGFloat = 0.28
+    static let markerOpacity: CGFloat = 0.6
     static func drawInk(_ drawing: PKDrawing, in rect: CGRect, scale: CGFloat) {
         let visible = drawing.strokes.filter { $0.renderBounds.intersects(rect) }
         let markers = visible.filter { $0.ink.inkType == .marker }
